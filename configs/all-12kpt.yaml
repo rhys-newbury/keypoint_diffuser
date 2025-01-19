@@ -1,10 +1,9 @@
-name: airplane-8kpt
+name: all-24kpt
 
-category: 02691156
 split: train
  
 mesh_dir: data/shapenet/shape_data
 split_file: data/shapenet_split/all.csv
 log_dir: logs
-
-segmentations_dir: /home/taco/repos/keypoint_deformer/data/seg
+ 
+n_keypoints: 24

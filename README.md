@@ -55,4 +55,3 @@ Try the [interactive demo](https://tomasjakab.github.io/KeypointDeformer/demo.ht
 
 ## Acknowledgments
 Parts of the code are based on [Neural Cages](https://github.com/yifita/deep_cage).
-# keypoint_diffuser

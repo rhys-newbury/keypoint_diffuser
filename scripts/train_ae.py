@@ -1,3 +1,4 @@
+from einops import repeat
 import json
 import os
 import time
@@ -10,7 +11,7 @@ import torch.nn.parallel
 import torch.utils.data
 from keypointdeformer.datasets import get_dataset
 from keypointdeformer.models import get_model
-from keypointdeformer.options.base_options import BaseOptions
+from keypointdeformer.options.ae_options import AEOptions
 from keypointdeformer.utils import io
 from keypointdeformer.utils.cages import deform_with_MVC
 from keypointdeformer.utils.nn import load_network, save_network, weights_init
@@ -23,13 +24,18 @@ from scipy.spatial import ConvexHull
 from sklearn.neighbors import NearestNeighbors
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import trimesh
+from keypointdeformer.models.encoder_models.autoencoder import AutoEncoder 
+from torch.optim.lr_scheduler import LambdaLR
+from torch.nn.utils import clip_grad_norm_
+import pytorch3d.loss
+
 CHECKPOINTS_DIR = 'checkpoints'
 CHECKPOINT_EXT = '.pth'
 
 
-def write_losses(writer, losses, step):
-    for name, value in losses.items():
-        writer.add_scalar('loss/' + name, value, global_step=step)
+# def write_losses(writer, losses, step):
+#     for name, value in losses.items():
+#         writer.add_scalar('loss/' + name, value, global_step=step)
 
 
 def save_normalization(file_path, center, scale):
@@ -127,12 +133,13 @@ def save_outputs(outputs_save_dir, data, outputs, save_mesh=True):
 def get_data(dataset, data):
     data = dataset.uncollate(data)
 
-    source_shape, target_shape = data["source_shape"], data["target_shape"]
+    # source_shape, target_shape = data["source_shape"], data["target_shape"]
+    target_shape = data["target_shape"]
 
-    source_shape_t = source_shape.transpose(1, 2)
+    # source_shape_t = source_shape.transpose(1, 2)
     target_shape_t = target_shape.transpose(1, 2)
     
-    return source_shape_t, target_shape_t
+    return None, target_shape_t
 
 
 def visualize_point_cloud(points, labels, keypoints, orig_shape, meshV, faceV, visual=False, icp=True):
@@ -149,8 +156,7 @@ def visualize_point_cloud(points, labels, keypoints, orig_shape, meshV, faceV, v
     points_np = points.cpu().numpy()  # Shape: [N, 3]
     labels_np = labels.cpu().numpy().astype(np.int32)  # Shape: [N]
     orig_shape = orig_shape.cpu().numpy()
-    keypoints_np = keypoints.cpu().numpy().T  # Shape: [M, 3]
-    
+    keypoints_np = keypoints.cpu().numpy().T  # Shape: [M, 3]   
     
     
     # Normalize labels to be in range [0, 1] for color mapping
@@ -186,25 +192,10 @@ def visualize_point_cloud(points, labels, keypoints, orig_shape, meshV, faceV, v
             pcd, orig_pcd, threshold, initial_rotation_y,
             o3d.pipelines.registration.TransformationEstimationPointToPoint()
         )
-    
-    
-        # print("ICP Transformation Matrix:\n", reg_icp.transformation)
-        # print("Fitness:", reg_icp.fitness)
-        # print("Inlier RMSE:", reg_icp.inlier_rmse)
-        # print(np.asarray(pcd.points))
-    
+
         pcd.transform(reg_icp.transformation)
         
-    # print(np.asarray(pcd.points))
 
-
-
-
-    # keypoints_pcd = o3d.geometry.PointCloud()
-    # keypoints_pcd.points = o3d.utility.Vector3dVector(keypoints_np)
-    # keypoints_pcd.paint_uniform_color([0, 0, 1])  # Blue color for keypoints
-
-    # Make keypoints larger (by adding spheres around keypoints)
     if visual:
         keypoint_spheres = []
         for keypoint in keypoints_np:
@@ -218,154 +209,7 @@ def visualize_point_cloud(points, labels, keypoints, orig_shape, meshV, faceV, v
         # Visualize
         o3d.visualization.draw_geometries([pcd, orig_pcd] + keypoint_spheres, window_name="Point Cloud with Labels and Keypoints")
     
-    
-    
-    # new_points = np.asarray(pcd.points)
-    # hull = ConvexHull(new_points)
-    
-    # n_sample_points = 20000  # Number of points to sample inside the hull
-    # sampled_points = []
-
-    # for _ in range(n_sample_points):
-    #     # Randomly sample barycentric coordinates (in the range [0, 1])
-    #     weights = np.random.rand(len(hull.vertices))
-    #     weights /= weights.sum()
-
-    #     # Generate the point inside the convex hull
-    #     point = np.dot(weights, new_points[hull.vertices])
-    #     sampled_points.append(point)
-
-    # sampled_points = np.array(sampled_points)
-
-
-    # # Fit nearest neighbor model
-    # nn = NearestNeighbors(n_neighbors=1)
-    # nn.fit(new_points)
-
-    # # Find closest points for each sampled point
-    # distances, indices = nn.kneighbors(sampled_points)
-
-    # # Assign annotations based on the nearest neighbor
-    # sampled_annotations = labels_np[indices.flatten()]
-    
-    # # import pdb; pdb.set_trace()
-    
-    # new_points = np.vstack((new_points, sampled_points))
-
-    # labels_np = np.hstack((labels_np, sampled_annotations))
-
-
-
-    # max_label = labels_np.max() + 1  # Avoid division by 0
-    
-    # colors = plt.cm.get_cmap("tab10", max_label)(labels_np / max_label)[:, :3]  # RGB from colormap
-
-    # pcd = o3d.geometry.PointCloud()
-    # pcd.points = o3d.utility.Vector3dVector(new_points)
-    # pcd.colors = o3d.utility.Vector3dVector(colors)
-    
-    # # Set up the figure and 3D axis
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111, projection='3d')
-
-    # # Plot the original points
-    # ax.scatter(points_np[:, 0], points_np[:, 1], points_np[:, 2], c='b', label="Points")
-
-    # # Plot the convex hull faces
-    # for simplex in hull.simplices:
-    #     # Get the vertices that define each face of the convex hull
-    #     face = points_np[simplex]
-    #     # Plot the face (a polygon)
-    #     ax.add_collection3d(Poly3DCollection([face], color='cyan', linewidths=1, edgecolors='r', alpha=0.5))
-
-    # # Set labels and title
-    # ax.set_xlabel('X')
-    # ax.set_ylabel('Y')
-    # ax.set_zlabel('Z')
-    # ax.set_title('Convex Hull of the Point Cloud')
-
-
-    # x_lim = ax.get_xlim()
-    # y_lim = ax.get_ylim()
-    # z_lim = ax.get_zlim()
-
-    # # Calculate the maximum range of the axes
-    # max_range = np.max([x_lim[1] - x_lim[0], y_lim[1] - y_lim[0], z_lim[1] - z_lim[0]])
-
-    # # Set the limits for all axes to be the same (center the plot)
-    # mid_x = (x_lim[1] + x_lim[0]) / 2
-    # mid_y = (y_lim[1] + y_lim[0]) / 2
-    # mid_z = (z_lim[1] + z_lim[0]) / 2
-
-    # ax.set_xlim(mid_x - max_range / 2, mid_x + max_range / 2)
-    # ax.set_ylim(mid_y - max_range / 2, mid_y + max_range / 2)
-    # ax.set_zlim(mid_z - max_range / 2, mid_z + max_range / 2)
-
-    # # Show the plot
-    # plt.show()
-    
-    # pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-
-    # radii = [0.005, 0.01, 0.02, 0.04]
-    # rec_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(
-    #     pcd, o3d.utility.DoubleVector(radii))
-    
-    # vertices = meshV.cpu().numpy()  # Shape: [num_vertices, 3]
-    # faces = faceV.cpu().numpy()  # Shape: [num_faces, 3]
-    
-    # mesh_trimesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-    # print(mesh_trimesh.fill_holes())
-    # mesh_trimesh.fix_normals()
-    # mesh_trimesh.apply_scale(10)  # Or any appropriate scaling factor
-    
-    # # mesh_trimesh = trimesh.repair.auto_watertight(mesh_trimesh)
-    # trimesh.repair.fix_inversion(mesh_trimesh)  # Fix inverted normals
-    # trimesh.repair.fill_holes(mesh_trimesh)  # Attempt to fill holes
-    # trimesh.repair.fix_winding(mesh_trimesh)  # Fix winding order of faces
-
-    
-    # print(f"Is watertight: {mesh_trimesh.is_watertight}")
-    # print(f"Number of vertices: {len(mesh_trimesh.vertices)}")
-    # print(f"Number of faces: {len(mesh_trimesh.faces)}")
-    # print(f"Mesh volume: {mesh_trimesh.volume}")
-
-    # # mesh_trimesh.convex_hull.show()
-    
-    # # mesh_trimesh.remove_degenerate_faces()
-    # # mesh_trimesh.remove_duplicate_faces()
-    # # mesh_trimesh.remove_infinite_values()
-    # # mesh_trimesh.merge_vertices()
-
-    
-    # print(f"Mesh volume: {mesh_trimesh.volume}")
-
-    # # Optionally, visualize the mesh using Trimesh's built-in viewer
-    # mesh_trimesh.show()
-
-    # # You can also sample points inside the mesh using Trimesh as mentioned before
-    # num_samples = 1000  # Number of points to sample
-    # sampled_points = trimesh.sample.volume_mesh(mesh_trimesh, count=num_samples)
-
-    # print(sampled_points.shape)  # Should output (1000, 3)
-
-
-    # # Convert to Open3D TriangleMesh
-    # mesh_open3d = o3d.geometry.TriangleMesh()
-
-    # # Set vertices
-    # mesh_open3d.vertices = o3d.utility.Vector3dVector(vertices)
-
-    # # Set faces
-    # mesh_open3d.triangles = o3d.utility.Vector3iVector(faces)
-
-    
-    # o3d.visualization.draw_geometries([mesh_open3d, pcd])
-
-    # o3d.visualization.draw_geometries([pcd, orig_pcd], window_name="Point Cloud with Labels and Keypoints")
-
-    
     return np.asarray(pcd.points)
-
 
 
 def test(opt, save_subdir="test"):
@@ -380,109 +224,49 @@ def test(opt, save_subdir="test"):
         collate_fn=dataset.collate,
         num_workers=0, worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id))
 
-    # network
-    net = get_model(opt.model)(opt).cuda()
     ckpt = opt.ckpt
     if not ckpt.startswith(os.path.sep):
         ckpt = os.path.join(checkpoints_dir, ckpt + CHECKPOINT_EXT)
-    load_network(net, ckpt)
-    
-    net.eval()
 
-    test_output_dir = os.path.join(log_dir, save_subdir)
-    os.makedirs(test_output_dir, exist_ok=True)
+    ckpt = torch.load(ckpt) # torch.load('/run/user/1000/gvfs/smb-share:server=130.194.128.238,share=slow/logs_ae/AE_2024_12_19__01_54_29/ckpt_0.000248_233000.pt')
     
-
-    ckpt = torch.load('/run/user/1000/gvfs/smb-share:server=130.194.128.238,share=slow/logs_ae/AE_2024_12_19__01_54_29/ckpt_0.000248_233000.pt')
-    
-    ae_model = AutoEncoder(ckpt['args']).cuda()
-    ae_model.load_state_dict(ckpt['state_dict'])
+    ae_model = AutoEncoder(opt).cuda()
+    ae_model.load_state_dict(ckpt['states'])
     ae_model.eval()
 
     timer = Timer('step')
     with torch.no_grad():
         
         closest_labels_ = []
-        
-        brr = 0
-        
+               
         total_batches = len(dataloader)
 
         # Wrap the dataloader with tqdm
         for data in tqdm(dataloader, desc="Processing data", unit="batch", total=total_batches):
-            # timer.stop()
-            # timer.start()
-            brr += 1
-            
-            # if brr == 10: 
-            #     break
-            
-            # data
             data = dataset.uncollate(data)
-        
-            source_shape_t, target_shape_t = get_data(dataset, data)
-            outputs = net(source_shape_t, target_shape=target_shape_t)
+            target_shape_t = data["target_shape"].transpose(1,2).cuda()
+
+            code = ae_model.encode(target_shape_t)
+            recons_after = ae_model.decode(code, target_shape_t.size(2), flexibility=opt.flexibility).detach()
             
-            import pdb; pdb.set_trace()
-            code = ae_model.encode(target_shape_t.permute(0, 2, 1))
-            recons_after = ae_model.decode(code, target_shape_t.size(2), flexibility=ckpt['args'].flexibility).detach()
-
-
-            colors1 = np.zeros_like(recons_after[0, ...].cpu().numpy())  # Create a color array matching the number of points
-            colors1[:, :] = [1, 0, 0]  # Set all points to red
-
-            colors2 = np.zeros_like(recons_after[0, ...].cpu().numpy())  # Create a color array matching the number of points
-            colors2[:, :] = [1, 0, 0]  # Set all points to red
-
-            pcd1 = o3d.geometry.PointCloud()
-            pcd1.points = o3d.utility.Vector3dVector(target_shape_t[0, ...].cpu().numpy().T)
-            pcd1.colors = o3d.utility.Vector3dVector(colors1)
-
-
-            pcd2 = o3d.geometry.PointCloud()
-            pcd2.points = o3d.utility.Vector3dVector(recons_after[0, ...].cpu().numpy())
-            pcd1.colors = o3d.utility.Vector3dVector(colors2)
-
-            
-            o3d.visualization.draw_geometries([pcd1, pcd2])
-            # import pdb; pdb.set_trace()
-            
-
-            
-            for i in range(outputs["target_keypoints"].shape[0]):
+            for i in range(code.shape[0]):
                 
-                kp = outputs["target_keypoints"][i, ...]
+                kp = code[i, :-5].reshape(-1, 3)
                 
                 points = data["target_shape"][i, ...]
-                
-                # sampled_points
-                # import pdb; pdb.set_trace()
-                
+                               
                 seg_labels =  data["target_sampled_points"][i, :, -1].int()
-                seg_points =  data["target_sampled_points"][i, :, :3]
-                
-                # import pdb; pdb.set_trace()
-                
-                # print(seg)
+                seg_points =  data["target_sampled_points"][i, :, :3]                
                 seg_points = visualize_point_cloud(seg_points, seg_labels, kp, points, meshV=data["target_mesh"][i], faceV=data["target_face"][i], visual=False)
 
-               
-                distances = torch.cdist(kp.T.double(), torch.tensor(seg_points).cuda())
+                distances = torch.cdist(kp.double(), torch.tensor(seg_points).cuda())
                 threshold = 0.05
                 
                 within_threshold_mask = distances <= threshold  # True where distance <= 0.05
-
-                # if within_threshold_mask[0, :].sum() == 0:
-                #     import pdb; pdb.set_trace()
-                #     visualize_point_cloud(torch.tensor(seg_points), seg_labels, kp, points, meshV=data["target_mesh"][i], faceV=data["target_face"][i], visual=True, icp=False)
-
                     
                 keypoint_indices, seg_point_indices = torch.nonzero(within_threshold_mask, as_tuple=True)
                 valid_seg_labels = seg_labels[seg_point_indices]  # The labels for valid segmentation points
-
-                # unique_labels_per_keypoint = [torch.unique(valid_seg_labels[keypoint_indices == i]) for i in range(distances.size(0))]
-                # keypoint_indices, part_indices = torch.nonzero(within_threshold_mask, as_tuple=True)
-                
+               
                 max_label = 5  # Ensure it includes the highest label
 
                 # Create a Boolean matrix: (num_keypoints, max_label)
@@ -490,42 +274,55 @@ def test(opt, save_subdir="test"):
 
                 # Mark True for each label that is present for each keypoint
                 label_presence_matrix[keypoint_indices, valid_seg_labels.long()] = True
-                
-                # import pdb; pdb.set_trace()
-                
+                               
                 closest_labels_.append(label_presence_matrix)
-
-
-
-
-
-            save_outputs(os.path.join(log_dir, save_subdir), data, outputs)
 
         closest_labels_tensor = torch.stack(closest_labels_)  
         
-        # correlation0 = closest_labels_tensor[:, 0, :].sum(dim=0).max() / closest_labels_tensor.shape[0]
         average_correlation_per_keypoint = (closest_labels_tensor[:, :, :].sum(dim=0).max(dim=1)[0] / closest_labels_tensor.shape[0]).mean()
         import pdb; pdb.set_trace()
-
         
-        # mask = closest_labels_tensor != -1  
-
-        # modes = torch.empty(closest_labels_tensor.shape[1], dtype=torch.int64, device=closest_labels_tensor.device)
-
-        # for i in range(closest_labels_tensor.shape[1]):
-        #     valid_labels = closest_labels_tensor[:, i][mask[:, i]]  
-
-        #     unique_labels, counts = torch.unique(valid_labels, return_counts=True)
-        #     mode_label = unique_labels[counts.argmax()]  
-
-        #     modes[i] = mode_label
-
-        # import pdb; pdb.set_trace()
-
-        # matches = (closest_labels_tensor == modes.unsqueeze(0)).float()  
-
-        # average_correlation_per_keypoint = matches.mean(dim=0).mean()  
         print(average_correlation_per_keypoint)
+
+
+def get_linear_scheduler(optimizer, start_epoch, end_epoch, start_lr, end_lr):
+    def lr_func(epoch):
+        if epoch <= start_epoch:
+            return 1.0
+        elif epoch <= end_epoch:
+            total = end_epoch - start_epoch
+            delta = epoch - start_epoch
+            frac = delta / total
+            return (1-frac) * 1.0 + frac * (end_lr / start_lr)
+        else:
+            return end_lr / start_lr
+    return LambdaLR(optimizer, lr_lambda=lr_func)
+
+def sample_farthest_points(points, num_samples, return_index=False):
+    b, c, n = points.shape
+    sampled = torch.zeros((b, 3, num_samples), device=points.device, dtype=points.dtype)
+    indexes = torch.zeros((b, num_samples), device=points.device, dtype=torch.int64)
+    
+    index = torch.randint(n, [b], device=points.device)
+    
+    gather_index = repeat(index, 'b -> b c 1', c=c)
+    sampled[:, :, 0] = torch.gather(points, 2, gather_index)[:, :, 0]
+    indexes[:, 0] = index
+    dists = torch.norm(sampled[:, :, 0][:, :, None] - points, dim=1)
+
+    # iteratively sample farthest points
+    for i in range(1, num_samples):
+        _, index = torch.max(dists, dim=1)
+        gather_index = repeat(index, 'b -> b c 1', c=c)
+        sampled[:, :, i] = torch.gather(points, 2, gather_index)[:, :, 0]
+        indexes[:, i] = index
+        dists = torch.min(dists, torch.norm(sampled[:, :, i][:, :, None] - points, dim=1))
+
+    if return_index:
+        return sampled, indexes
+    else:
+        return sampled
+
 
 
 def train(opt):
@@ -538,8 +335,10 @@ def train(opt):
         num_workers=opt.n_workers, worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id))
 
     # network
-    net = get_model(opt.model)(opt).cuda()
-    net.apply(weights_init)
+    # net = get_model(opt.model)(opt).cuda()
+    # net.apply(weights_init)
+    net = AutoEncoder(opt).cuda()
+
     if opt.ckpt:
         ckpt = opt.ckpt
         if not ckpt.startswith(os.path.sep):
@@ -558,6 +357,20 @@ def train(opt):
     summary_dir = datetime.now().strftime('%y%m%d-%H%M%S')
     writer = SummaryWriter(logdir=os.path.join(checkpoints_dir, 'logs', summary_dir), flush_secs=5)
 
+
+    optimizer = torch.optim.Adam(net.parameters(), 
+        lr=opt.lr, 
+        weight_decay=opt.weight_decay
+    )
+    
+    scheduler = get_linear_scheduler(
+        optimizer,
+        start_epoch=opt.sched_start_epoch,
+        end_epoch=opt.sched_end_epoch,
+        start_lr=opt.lr,
+        end_lr=opt.end_lr
+    )
+
     if opt.iteration:
         t = opt.iteration
     
@@ -568,14 +381,33 @@ def train(opt):
             if t > opt.n_iterations:
                 break
 
-            source_shape_t, target_shape_t = get_data(dataset, data)
-            outputs = net(source_shape_t, target_shape=target_shape_t)
-            current_loss = net.compute_loss(t)
-            net.optimize(current_loss, t)
+            # _, target_shape_t = get_data(dataset, data)
+            target_shape_t = data["target_shape"].transpose(1,2).cuda()
+            optimizer.zero_grad()
+            net.train()
+        
+            loss, code = net.get_loss(target_shape_t)
+            # print(loss)
+            
+
+            code_ = code[:, :opt.latent_dim * 3].reshape(target_shape_t.shape[0], -1, 3)
+            
+            if t < 1000:
+                fps = sample_farthest_points(target_shape_t, opt.latent_dim).transpose(2,1)
+                loss, _ = pytorch3d.loss.chamfer_distance(fps, code_)
+            else:
+                max_schedule = 100000
+                chamfer_loss, _ = pytorch3d.loss.chamfer_distance(code_, target_shape_t.transpose(2, 1))
+                loss += max(0, max_schedule - t) / max_schedule * chamfer_loss
+
+            loss.backward()
+            orig_grad_norm = clip_grad_norm_(net.parameters(), opt.max_grad_norm)
+            optimizer.step()
+            scheduler.step()
 
             if t % opt.save_interval == 0:
                 outputs_save_dir = os.path.join(checkpoints_dir, 'outputs', '%07d' % t)
-                save_outputs(outputs_save_dir, data, outputs, save_mesh=False)
+                # save_outputs(outputs_save_dir, data, outputs, save_mesh=False)
                 save_network(net, checkpoints_dir, network_label="net", epoch_label=t)
 
             iter_time = time.time() - iter_time_start
@@ -583,14 +415,13 @@ def train(opt):
             if (t % opt.log_interval == 0):
                 log_str = ''
                 samples_sec = opt.batch_size / iter_time
-                losses_str = ", ".join(["{} {:.3g}".format(k, v.mean().item()) for k, v in current_loss.items()])
+                losses_str = str(loss)
                 log_str = "{:d}: iter {:.1f} sec, {:.1f} samples/sec {}".format(
                     t, iter_time, samples_sec, losses_str)
 
                 print(log_str)
                 log_file.write(log_str + "\n")
-
-                write_losses(writer, current_loss, t)
+                writer.add_scalar('train/loss', loss, t)
             t += 1
 
     log_file.close()
@@ -598,7 +429,7 @@ def train(opt):
 
 
 if __name__ == "__main__":
-    parser = BaseOptions()
+    parser = AEOptions()
     opt = parser.parse()
 
     seed = opt.seed

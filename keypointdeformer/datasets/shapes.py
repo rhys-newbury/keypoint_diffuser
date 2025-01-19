@@ -8,12 +8,14 @@ import warnings
 import numpy as np
 import pandas
 import torch
-from torch._six import container_abcs
+
+import collections.abc as container_abcs
+
 
 from ..utils.utils import resample_mesh, normalize_to_box
 from ..utils.io import read_keypoints, read_pcd, read_mesh, find_files
-
-
+import pytorch3d
+from pathlib import Path 
 class Shapes(torch.utils.data.Dataset):
     MESH_FILE_EXT = 'obj'
     POINT_CLOUD_FILE_EXT = 'pts'
@@ -184,7 +186,7 @@ class Shapes(torch.utils.data.Dataset):
             keypoints = self._load_keypointnet()
             names = [x for x in names if x in keypoints]
             dataset['keypoints'] = keypoints
-        
+        print(names)
         assert len(names) > 0
         
         if self.opt.keypointnet_compatible:
@@ -214,7 +216,7 @@ class Shapes(torch.utils.data.Dataset):
 
 
     def _get_mesh_path(self, name):
-        return os.path.join(self.opt.mesh_dir, self.opt.category, name, "model.obj")
+        return os.path.join(self.opt.mesh_dir, self.opt.category, name, "models", "model_normalized.obj")
 
 
     def _get_keypoints_path(self, name):
@@ -256,14 +258,67 @@ class Shapes(torch.utils.data.Dataset):
     def get_item(self, index):
         return self.get_item_by_name(self.dataset['name'][index])
 
+    def normalize_pytorch_mesh_with_center_scale(mesh: pytorch3d.structures.Meshes, centroid: torch.Tensor, scale: torch.Tensor):
+        """
+        Normalize a PyTorch3D Mesh object using a given centroid and scale.
+        The mesh will be translated to the origin based on the centroid,
+        and scaled based on the scale.
+
+        Args:
+        - mesh (Meshes): The input PyTorch3D Mesh object.
+        - centroid (torch.Tensor): The center of the mesh (shape: [1, 3]).
+        - scale (torch.Tensor): The scaling factor to normalize the mesh (shape: [1, 3]).
+
+        Returns:
+        - Meshes: The normalized Mesh object.
+        """
+        # Extract vertices from the mesh
+        vertices = mesh.verts_packed()
+
+        # Translate the vertices (move to origin based on the centroid)
+        vertices = vertices - centroid
+
+        # Scale the vertices (fit into a unit bounding box using the provided scale)
+        vertices = vertices / scale
+
+        # Create a new Mesh object with the normalized vertices
+        normalized_mesh = pytorch3d.structures.Meshes(verts=[vertices], faces=mesh.faces_packed())
+
+        return normalized_mesh
+
+
+    def random_downsample(self, point_cloud, target_num_points):
+        """
+        Randomly downsamples a point cloud to the target number of points.
+        
+        Args:
+            point_cloud (ndarray): The input point cloud of shape (N, 3).
+            target_num_points (int): The desired number of points.
+            
+        Returns:
+            downsampled_point_cloud (ndarray): The downsampled point cloud of shape (target_num_points, 3).
+        """
+        if point_cloud.shape[0] <= target_num_points:
+            return point_cloud  # Return original if already small enough
+        indices = np.random.choice(point_cloud.shape[0], target_num_points, replace=False)
+        return point_cloud[indices]
+
+
 
     def get_item_by_name(self, name, sample_mesh=False, load_mesh=False):
         if load_mesh or sample_mesh:
             mesh_path = self._get_mesh_path(name)
             V_mesh, F_mesh, mesh_obj = read_mesh(mesh_path, return_mesh=True)
         
+        
+        pc_path = Path(self._get_mesh_path(name)).parent / "point_resampled_labeled.npy"
+        
         if sample_mesh:
+            # import timeit
+            # t1 = timeit.default_timer()
             points = resample_mesh(mesh_obj, self.opt.num_point)
+            # t2 = timeit.default_timer()
+            # print(f"sampling took {t2-t1}s")
         else:
             # load points sampled from a mesh
             points = np.loadtxt(self._get_pointcloud_path(name), dtype=np.float32)
@@ -278,7 +333,13 @@ class Shapes(torch.utils.data.Dataset):
 
         result = {'shape': shape, 'normals': normals, 'label': label, 'cat': self.opt.category, 'file': name}
 
-        if load_mesh:
+        if pc_path.is_file():
+            pc = np.load(pc_path)
+            pc = torch.from_numpy(self.random_downsample(pc, 5000))
+            pc[:, :3] = (pc[:, :3] - center) / scale
+            result.update({'sampled_points': pc})
+
+        if load_mesh or True:
             V_mesh = V_mesh[:,:3]
             F_mesh = F_mesh[:,:3]
             V_mesh = (V_mesh - center) / scale
@@ -291,9 +352,11 @@ class Shapes(torch.utils.data.Dataset):
             result['keypoints_gt_center'] = keypoints_gt_center
             result['keypoints_gt_scale'] = keypoints_gt_scale
 
-        if self.opt.data_type == 'shapenetseg':
+        # if self.opt.data_type == 'shapenetseg':
+        if False:
             assert self.opt.segmentations_dir is not None
             seg_points = np.loadtxt(self._get_seg_points_path(name)).astype(np.float32)
+            # print(name)
             seg_labels = np.loadtxt(self._get_seg_labels_path(name)).astype(np.int32)
             seg_points = torch.from_numpy(seg_points)
             seg_labels = torch.from_numpy(seg_labels)
@@ -319,11 +382,11 @@ class Shapes(torch.utils.data.Dataset):
             name_2 = self.dataset['name'][index_2]
 
         sample_mesh = self.opt.sample_mesh or self.opt.points_dir is None
-        source_data = self.get_item_by_name(name, load_mesh=self.opt.load_mesh, sample_mesh=sample_mesh)
+        # source_data = self.get_item_by_name(name, load_mesh=self.opt.load_mesh, sample_mesh=sample_mesh)
         target_data = self.get_item_by_name(name_2, load_mesh=self.opt.load_mesh, sample_mesh=sample_mesh)
         
-        result = {'source_' + k: v for k, v in source_data.items()}
-        result.update({'target_' + k: v for k, v in target_data.items()})
+        # result = {'source_' + k: v for k, v in source_data.items()}
+        result = {'target_' + k: v for k, v in target_data.items()}
 
         return result
 
@@ -335,7 +398,7 @@ class Shapes(torch.utils.data.Dataset):
                 return self.get_sample(index)
             except Exception as e:
                 warnings.warn(f"Error loading sample {index}: " + ''.join(traceback.format_exception(etype=type(e), value=e, tb=e.__traceback__)))
-                import ipdb; ipdb.set_trace()
+                # import pdb; pdb.set_trace()
                 index += 1
 
 
