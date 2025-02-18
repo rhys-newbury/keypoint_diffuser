@@ -546,7 +546,7 @@ def train(opt):
             net.train()
 
             time.time()
-            loss, code = net.get_loss(target_shape_t)
+            loss, code = net.get_loss(target_shape_t, opt.use_perceptual_loss)
             code_ = code[:, : opt.latent_dim * 3].reshape(
                 target_shape_t.shape[0], -1, 3
             )

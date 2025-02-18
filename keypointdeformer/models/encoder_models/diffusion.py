@@ -258,7 +258,7 @@ class DiffusionPoint(Module):
     def freeze_network(self):
         self.frozen_net = copy.deepcopy(self.net)
 
-    def get_loss(self, x_0, context, t=None):
+    def get_loss(self, x_0, context, use_perceptual_loss=False, t=None):
         """
         Args:
             x_0:  Input point cloud, (B, N, d).
@@ -279,7 +279,11 @@ class DiffusionPoint(Module):
         loss = F.mse_loss(
             e_theta.view(-1, point_dim), e_rand.view(-1, point_dim), reduction="mean"
         )
-        return loss + 0.001 * self.get_perceptual_loss(x_0, context, t=t)
+        return loss + (
+            0.001 * self.get_perceptual_loss(x_0, context, t=t)
+            if use_perceptual_loss
+            else 0
+        )
 
     def forward_diffuse(self, x_0, epsilon, t):
         """

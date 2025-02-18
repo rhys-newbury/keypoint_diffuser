@@ -7,7 +7,7 @@ extend-select = ["C4", "SIM", "TCH"]
 show-fixes = true
 # Same as Black.
 line-length = 100
-# Assume Python 3.10.
+# Assume Python 3.8.
 target-version = "py310"
 
 ignore = [
@@ -18,7 +18,7 @@ ignore = [
     "FBT001", "FBT002", "FBT003",
     "N802", "N806", "N812", "NPY002",
     "PD002",
-    "PGH003", "PGH004",
+    "PGH003", "PGH004", "N815"
     "S101", "PLR2004", "T100", "N803"
 ]
 

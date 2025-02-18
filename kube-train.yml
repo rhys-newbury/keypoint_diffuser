@@ -1,7 +1,7 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: 2agents
+  name: 2agents2
 spec:
   maxRetry: 1
   minAvailable: 1
@@ -31,8 +31,8 @@ spec:
                   "-c=configs/airplane-8kpt.yaml",
                   "--batch_size=16"
                 ]
-              workingDir: /app 
-              
+              workingDir: /app
+
               env:
                 - name: WANDB_API_KEY
                   valueFrom:

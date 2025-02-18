@@ -55,33 +55,32 @@ class Shapes(torch.utils.data.Dataset):
 
     @staticmethod
     def modify_commandline_options(parser):
-        parser.add_argument("--category", required=True, type=str, help="")
-        parser.add_argument("--segmentations_dir", type=str, default=None, help="")
-        parser.add_argument("--seg_split_dir", type=str, default=None, help="")
-        parser.add_argument("--keypointnet_dir", type=str, default=None, help="")
-        parser.add_argument("--keypointnet_compatible", type=str, default=None, help="")
-        parser.add_argument(
-            "--keypointnet_common_keypoints", action="store_true", help=""
-        )
-        parser.add_argument(
-            "--keypointnet_min_n_common_keypoints", type=int, default=6, help=""
-        )
-        parser.add_argument(
-            "--keypointnet_min_samples", type=float, default=0.8, help=""
-        )
-        parser.add_argument("--keypoints_gt_source", type=str, default=None, help="")
-        parser.add_argument("--data_type", type=str, default="shapenet", help="")
-        parser.add_argument("--split_file", type=str, default=None, help="")
-        parser.add_argument("--split", type=str, default=None, help="")
-        parser.add_argument("--fixed_source_index", type=int, default=None, help="")
-        parser.add_argument("--fixed_target_index", type=int, default=None, help="")
-        parser.add_argument("--normalize", type=str, default="unit_box", help="")
-        parser.add_argument("--multiply", type=int, default=1, help="")
-        parser.add_argument("--load_cages_test_pairs", action="store_true", help="")
-        parser.add_argument("--load_test_pairs", action="store_true", help="")
-        parser.add_argument("--load_mesh", action="store_true", help="")
-        parser.add_argument("--sample_mesh", action="store_true", help="")
-        parser.add_argument("--test_pairs_file", type=str, default=None, help="")
+        # parser.add_argument("--segmentations_dir", type=str, default=None, help="")
+        # parser.add_argument("--seg_split_dir", type=str, default=None, help="")
+        # parser.add_argument("--keypointnet_dir", type=str, default=None, help="")
+        # parser.add_argument("--keypointnet_compatible", type=str, default=None, help="")
+        # parser.add_argument(
+        #     "--keypointnet_common_keypoints", action="store_true", help=""
+        # )
+        # parser.add_argument(
+        #     "--keypointnet_min_n_common_keypoints", type=int, default=6, help=""
+        # )
+        # parser.add_argument(
+        #     "--keypointnet_min_samples", type=float, default=0.8, help=""
+        # )
+        # parser.add_argument("--keypoints_gt_source", type=str, default=None, help="")
+        # parser.add_argument("--data_type", type=str, default="shapenet", help="")
+        # parser.add_argument("--split_file", type=str, default=None, help="")
+        # parser.add_argument("--split", type=str, default=None, help="")
+        # parser.add_argument("--fixed_source_index", type=int, default=None, help="")
+        # parser.add_argument("--fixed_target_index", type=int, default=None, help="")
+        # parser.add_argument("--normalize", type=str, default="unit_box", help="")
+        # parser.add_argument("--multiply", type=int, default=1, help="")
+        # parser.add_argument("--load_cages_test_pairs", action="store_true", help="")
+        # parser.add_argument("--load_test_pairs", action="store_true", help="")
+        # parser.add_argument("--load_mesh", action="store_true", help="")
+        # parser.add_argument("--sample_mesh", action="store_true", help="")
+        # parser.add_argument("--test_pairs_file", type=str, default=None, help="")
         return parser
 
     def normalize(self, x):

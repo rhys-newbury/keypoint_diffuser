@@ -1,9 +1,73 @@
-import configargparse
+from dataclasses import dataclass
 
+import configargparse
+from typing import Optional
 from .. import datasets, models
 
 
 THOUSAND = 1000
+
+
+@dataclass
+class AEConfig:
+    name: str
+    category: str
+    dataset: str = "shapes"
+    num_point: int = 2048
+    points_dir: str = None
+    dim: int = 3
+    log_dir: str = "./log"
+    subdir: str = "test"
+    batch_size: int = 96
+    print_options: bool = False
+    phase: str = "train"
+    iteration: int = None
+    n_iterations: int = 20000
+    save_interval: int = 100
+    log_interval: int = 10
+    latent_dim: int = 24
+    extra_latent: int = 5
+    num_steps: int = 200
+    beta_1: float = 1e-4
+    beta_T: float = 0.05
+    sched_mode: str = "linear"
+    flexibility: float = 0.0
+    residual: bool = True
+    resume: str = None
+    lr: float = 1e-3
+    weight_decay: float = 0
+    max_grad_norm: float = 10
+    end_lr: float = 1e-4
+    sched_start_epoch: int = 150 * THOUSAND
+    sched_end_epoch: int = 300 * THOUSAND
+    normalization: str = "none"
+    seed: int = 0
+    n_workers: int = 0
+    ckpt: str = None
+    mesh_dir: str = None
+    keypoints_dir: str = None
+    use_perceptual_loss: bool = False
+
+    segmentations_dir: str = None
+    seg_split_dir: str = None
+    keypointnet_dir: str = None
+    keypointnet_compatible: str = None
+    keypointnet_common_keypoints: bool = False
+    keypointnet_min_n_common_keypoints: int = 6
+    keypointnet_min_samples: float = 0.8
+    keypoints_gt_source: str = None
+    data_type: str = "shapenet"
+    split_file: str = None
+    split: str = None
+    fixed_source_index: int = None
+    fixed_target_index: int = None
+    normalize: str = "unit_box"
+    multiply: int = 1
+    load_cages_test_pairs: bool = False
+    load_test_pairs: bool = False
+    load_mesh: bool = False
+    sample_mesh: bool = False
+    test_pairs_file: str = None
 
 
 class AEOptions:
@@ -23,72 +87,16 @@ class AEOptions:
             "--test_config",
             required=False,
             is_config_file=True,
-            help="config file path",
+            help="test config file path",
         )
-        # basic parameters
-        parser.add_argument("--name", required=True, type=str, help="experiment name")
-        parser.add_argument(
-            "--dataset", type=str, default="shapes", help="dataset name"
-        )
-        parser.add_argument(
-            "--num_point", type=int, help="number of input points", default=2048
-        )
-        parser.add_argument(
-            "--points_dir", type=str, help="points data root", default=None
-        )
-        parser.add_argument("--dim", type=int, help="2D or 3D", default=3)
-        parser.add_argument(
-            "--log_dir", type=str, help="log directory", default="./log"
-        )
-        parser.add_argument(
-            "--subdir", type=str, help="save to directory name", default="test"
-        )
-        parser.add_argument("--batch_size", type=int, help="batch size", default=96)
-        parser.add_argument("--print_options", action="store_true", help="")
-        parser.add_argument(
-            "--phase", type=str, choices=["test", "train"], default="train"
-        )
-        parser.add_argument("--iteration", type=int, default=None, help="")
-        parser.add_argument("--n_iterations", type=int, default=20000, help="")
-        parser.add_argument("--save_interval", type=int, default=100, help="")
-        parser.add_argument("--log_interval", type=int, default=10, help="")
-
-        parser.add_argument("--latent_dim", type=int, default=24)
-        parser.add_argument("--extra_latent", type=int, default=5)
-        parser.add_argument("--num_steps", type=int, default=200)
-        parser.add_argument("--beta_1", type=float, default=1e-4)
-        parser.add_argument("--beta_T", type=float, default=0.05)
-        parser.add_argument("--sched_mode", type=str, default="linear")
-        parser.add_argument("--flexibility", type=float, default=0.0)
-        parser.add_argument(
-            "--residual", type=eval, default=True, choices=[True, False]
-        )
-        parser.add_argument("--resume", type=str, default=None)
-
-        parser.add_argument("--lr", type=float, default=1e-3)
-        parser.add_argument("--weight_decay", type=float, default=0)
-        parser.add_argument("--max_grad_norm", type=float, default=10)
-        parser.add_argument("--end_lr", type=float, default=1e-4)
-        parser.add_argument("--sched_start_epoch", type=int, default=150 * THOUSAND)
-        parser.add_argument("--sched_end_epoch", type=int, default=300 * THOUSAND)
-        parser.add_argument(
-            "--normalization",
-            type=str,
-            choices=["batch", "instance", "none"],
-            default="none",
-        )
-        parser.add_argument("--seed", type=int, default=0, help="")
-        parser.add_argument("--n_workers", type=int, default=0, help="")
-        parser.add_argument("--ckpt", type=str, help="test model")
-
-        parser.add_argument("--mesh_dir", type=str, help="")
-        parser.add_argument("--keypoints_dir", type=str, help="")
-
+        for field_name, field_def in AEConfig.__dataclass_fields__.items():
+            parser.add_argument(
+                f"--{field_name}", type=field_def.type, default=field_def.default
+            )
         self.initialized = True
         return parser
 
     def gather_options(self, args=None, skip_model=False, unknown_ok=False):
-        # initialize parser with basic options
         if not self.initialized:
             parser = configargparse.ArgumentParser(
                 formatter_class=configargparse.ArgumentDefaultsHelpFormatter
@@ -97,55 +105,27 @@ class AEOptions:
         else:
             raise RuntimeError()
 
-        # get the basic options
         opt, _ = parser.parse_known_args(args)
 
         if not skip_model:
-            # modify model-related parser options
             model_name = "autoencoder"
             model_option_setter = models.get_option_setter(model_name)
             parser = model_option_setter(parser)
-            opt, _ = parser.parse_known_args(args)  # parse again with the new defaults
+            opt, _ = parser.parse_known_args(args)
 
-        # modify dataset-related parser options
         dataset_name = opt.dataset
         dataset_option_setter = datasets.get_option_setter(dataset_name)
         parser = dataset_option_setter(parser)
-        opt, _ = parser.parse_known_args(args)  # parse again with the new defaults
-
-        if unknown_ok:
-            opt, unknown = parser.parse_known_args(args)
-        else:
-            opt = parser.parse_args(args)
-            unknown = []
+        opt, unknown = (
+            parser.parse_known_args(args)
+            if unknown_ok
+            else (parser.parse_args(args), [])
+        )
 
         self.parser = parser
-
         return opt, unknown
 
-    def print_options(self, opt):
-        message = ""
-        message += "----------------- Options ---------------\n"
-        for k, v in sorted(vars(opt).items()):
-            comment = ""
-            default = self.parser.get_default(k)
-            if v != default:
-                comment = "\t[default: %s]" % str(default)
-            message += f"{str(k):>25}: {str(v):<30}{comment}\n"
-        message += "----------------- End -------------------"
-        print(message)
-
-    def print_unknown(self, unknown):
-        message = ""
-        message += "----------------- Unknown options ---------------\n"
-        for item in unknown:
-            if item.startswith("-"):
-                message += "%s, " % item
-        message += "\n"
-        message += "----------------- End -------------------"
-        print(message)
-
-    def parse(self, args=None, skip_model=False, unknown_ok=False):
+    def parse(self, args=None, skip_model=False, unknown_ok=False) -> AEConfig:
         opt, unknown = self.gather_options(
             args, skip_model=skip_model, unknown_ok=unknown_ok
         )
@@ -158,9 +138,27 @@ class AEOptions:
 
         if opt.phase == "test":
             assert opt.ckpt is not None
-        opt.batch_size if opt.phase == "train" else 1
+
         if opt.normalization == "none":
             opt.normalization = None
-        self.opt = opt
 
-        return self.opt
+
+        opt_dict = vars(opt)
+        opt_dict.pop("config", None)  # Remove config file path
+        opt_dict.pop("test_config", None)  # Remove test config file path
+
+        return AEConfig(**opt_dict)
+
+    def print_options(self, opt):
+        message = "----------------- Options ---------------\n"
+        for k, v in sorted(vars(opt).items()):
+            default = self.parser.get_default(k)
+            comment = f"\t[default: {default}]" if v != default else ""
+            message += f"{k:>25}: {v:<30}{comment}\n"
+        message += "----------------- End -------------------"
+        print(message)
+
+    def print_unknown(self, unknown):
+        print("----------------- Unknown options ---------------")
+        print(", ".join([item for item in unknown if item.startswith("-")]))
+        print("----------------- End -------------------")

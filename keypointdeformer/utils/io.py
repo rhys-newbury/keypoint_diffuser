@@ -5,7 +5,7 @@ from glob import glob
 import numpy as np
 import pytorch3d.io
 import torch
-
+from typing import Optional
 
 def read_keypoints(file_path):
     with open(file_path) as f:
@@ -56,7 +56,7 @@ def read_mesh(path, normal=False, return_mesh=False, load_textures=False):
         return vertices, faces
 
 
-def _save_mesh(f, verts, faces, decimal_places: int | None = None) -> None:
+def _save_mesh(f, verts, faces, decimal_places: Optional[int] = None) -> None:
     """
     Faster version of https://pytorch3d.readthedocs.io/en/stable/_modules/pytorch3d/io/obj_io.html
 
@@ -97,7 +97,7 @@ def _save_mesh(f, verts, faces, decimal_places: int | None = None) -> None:
     f.write(lines)
 
 
-def save_mesh(f, verts, faces, decimal_places: int | None = None):
+def save_mesh(f, verts, faces, decimal_places: Optional[int] = None):
     with open(f, "w") as f:
         _save_mesh(f, verts, faces, decimal_places)
 

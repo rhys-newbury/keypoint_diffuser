@@ -1,14 +1,17 @@
-import open3d as o3d
 import numpy as np
+import open3d as o3d
 
-def load_and_view_point_clouds(original_path="original_point_cloud.npy", 
-                               deformed_path="deformed_point_cloud.npy",
-                               kp_orig_path="kp_orig.npy",
-                               kp_transformed_path="kp_transformed.npy",
-                               kp_deformed_path="kp_deformed.npy"):
+
+def load_and_view_point_clouds(
+    original_path="original_point_cloud.npy",
+    deformed_path="deformed_point_cloud.npy",
+    kp_orig_path="kp_orig.npy",
+    kp_transformed_path="kp_transformed.npy",
+    kp_deformed_path="kp_deformed.npy",
+):
     """
     Loads NumPy saved point clouds and keypoints, and visualizes them using Open3D.
-    
+
     Args:
         original_path: Path to the original point cloud `.npy` file.
         deformed_path: Path to the deformed point cloud `.npy` file.
@@ -42,7 +45,9 @@ def load_and_view_point_clouds(original_path="original_point_cloud.npy",
 
     kp_transformed_pcd = o3d.geometry.PointCloud()
     kp_transformed_pcd.points = o3d.utility.Vector3dVector(kp_transformed_np)
-    kp_transformed_pcd.paint_uniform_color([1, 0, 0])  # Yellow for transformed keypoints
+    kp_transformed_pcd.paint_uniform_color(
+        [1, 0, 0]
+    )  # Yellow for transformed keypoints
 
     kp_deformed_pcd = o3d.geometry.PointCloud()
     kp_deformed_pcd.points = o3d.utility.Vector3dVector(kp_deformed_np)
@@ -56,6 +61,7 @@ def load_and_view_point_clouds(original_path="original_point_cloud.npy",
     o3d.visualization.draw_geometries([pcd_deformed, kp_deformed_pcd])
 
     o3d.visualization.draw_geometries([pcd_deformed, kp_transformed_pcd])
+
 
 if __name__ == "__main__":
     load_and_view_point_clouds()
