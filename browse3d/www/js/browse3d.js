@@ -16,7 +16,7 @@ function main() {
     const config = {
         animate: false,
         cycleKeypoints: false,
-        
+
         // airplane
         cameraPosition: [0.5, 2.5, 1.25],
         cameraPosition: [1.7, 3, 2.25],
@@ -43,9 +43,9 @@ function main() {
         const near = 0.01;
         const far = 100;
         const camera = new THREE.PerspectiveCamera(fov, aspect, near, far);
-        
+
         let cameraLookAt = [0, 0, 0];
-        
+
         let cameraPosition = config.cameraPosition;
         let scale = config.scale;
 
@@ -65,8 +65,8 @@ function main() {
             let vector = new THREE.Vector3( 0, 0, - 1 );
             vector.applyQuaternion( camera.quaternion );
             console.log(
-                'postion: ' + camera.position['x'] + ', ' + camera.position['y'] + ', ' + camera.position['z'] + 
-                ' rotation: ' + camera.rotation['x'] + ', ' + camera.rotation['y'] + ', ' + camera.rotation['z'] + 
+                'postion: ' + camera.position['x'] + ', ' + camera.position['y'] + ', ' + camera.position['z'] +
+                ' rotation: ' + camera.rotation['x'] + ', ' + camera.rotation['y'] + ', ' + camera.rotation['z'] +
                 ' cameraLookAt: ' + vector.toArray());
         });
 
@@ -133,7 +133,7 @@ function main() {
         sceneElements.push({elem, fn});
         return [scene, group, fn];
     }
-    
+
     function addPoint(scene, position, name=null) {
         if (name == null) {
             name = pointsCounter.toString().padStart(3, '0');
@@ -155,10 +155,10 @@ function main() {
         scene.add( m );
 
         pointsCounter++ ;
-        
+
         return m;
     }
-    
+
     function fetchKeypoints(url, scene, fn) {
         fetch(url).then(function(response) {
             return response.text()
@@ -166,7 +166,7 @@ function main() {
             var points = loadKeypoints(text, scene);
             if (config.rotate) {
                 fn.customFn = (time, group) => {
-                    // cycle thourgh points
+                    // cycle through points
                     if (config.cycleKeypoints) {
                         const interval = 2;
                         const period = points.length * interval;
@@ -190,7 +190,7 @@ function main() {
         var points = [];
         for (const line of lines) {
             var split = line.split(' ');
-            if (split.length != 4) 
+            if (split.length != 4)
                 continue;
             var name = split[0];
             var position = new THREE.Vector3(split[1], split[2], split[3]);
@@ -209,7 +209,7 @@ function main() {
         });
     }
 
-    
+
     function createBasicPointsObject(position, color, alpha, circle=false) {
         var geometry = new THREE.BufferGeometry();
 
@@ -218,7 +218,7 @@ function main() {
         if ( alpha.length > 0 ) geometry.setAttribute( 'alpha', new THREE.Float32BufferAttribute( alpha, 1 ) );
 
         geometry.computeBoundingSphere();
-        
+
         if (circle) {
             const sprite = new THREE.TextureLoader().load( 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/sprites/disc.png' );
             var material = new THREE.PointsMaterial( { size: 0.05, sizeAttenuation: true, map: sprite, alphaTest: 0.5, transparent: true } );
@@ -233,7 +233,7 @@ function main() {
 		}
 
         var mesh = new THREE.Points( geometry, material );
-        
+
         return mesh
     }
 
@@ -292,10 +292,10 @@ function main() {
                 alpha.push(parseFloat(split[6]));
             } else {
                 alpha.push(0.8);
-            }            
+            }
 
         }
-        
+
         if (basic) {
             return createBasicPointsObject(position, color, alpha);
         } else {
@@ -331,7 +331,7 @@ function main() {
         } else if (ext == 'glb') {
             GLTFLoader().load(url, onLoad);
         }
-        
+
         function onLoad(object) {
             // for
             if (object.hasOwnProperty('scene')) {
@@ -355,7 +355,7 @@ function main() {
 
             // merge
             var mesh = object.children[0] ;
-                
+
             scene.add(mesh);
         }
     }
@@ -363,9 +363,9 @@ function main() {
     function loadPLY(url, scene) {
         var loader = new PLYLoader();
         loader.load(url, onLoad);
-        
+
         function onLoad(geometry) {
-            
+
             // add wireframe
             var geo = new THREE.EdgesGeometry(geometry); // or WireframeGeometry
             var mat = new THREE.LineBasicMaterial({color: 0x000000, linewidth: 2});
@@ -426,7 +426,7 @@ function main() {
 
         const transform = `translateX(${window.scrollX}px)`;
         renderer.domElement.style.transform = transform;
-        
+
         if (config.animate) {
             const interval = 1/30;
             const length = sceneElements.length;
@@ -461,23 +461,23 @@ function main() {
                 // get the viewport relative position of this element
                 const rect = elem.getBoundingClientRect();
                 const {left, right, top, bottom, width, height} = rect;
-    
+
                 const isOffscreen =
                     bottom < 0 ||
                     top > renderer.domElement.clientHeight ||
                     right < 0 ||
                     left > renderer.domElement.clientWidth;
-    
+
                 if (!isOffscreen) {
                     const positiveYUpBottom = renderer.domElement.clientHeight - bottom;
                     renderer.setScissor(left, positiveYUpBottom, width, height);
                     renderer.setViewport(left, positiveYUpBottom, width, height);
-    
+
                     fn.animate(time, rect);
                 }
             }
         }
-        
+
 
         requestAnimationFrame(render);
     }
@@ -563,21 +563,21 @@ function RGBToHSL(r,g,b) {
         h = (r - g) / delta + 4;
 
     h = Math.round(h * 60);
-    
+
     // Make negative hues positive behind 360°
     if (h < 0)
         h += 360;
-    
+
     // Calculate lightness
     l = (cmax + cmin) / 2;
-  
+
     // Calculate saturation
     s = delta == 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
-      
+
     // Multiply l and s by 100
     s = +(s * 100).toFixed(1);
     l = +(l * 100).toFixed(1);
-  
+
     return [h, s, l];
 }
 
@@ -586,7 +586,7 @@ function HSLToRGB(h,s,l) {
     // Must be fractions of 1
     s /= 100;
     l /= 100;
-  
+
     let c = (1 - Math.abs(2 * l - 1)) * s,
         x = c * (1 - Math.abs((h / 60) % 2 - 1)),
         m = l - c/2,
@@ -610,7 +610,7 @@ function HSLToRGB(h,s,l) {
         r = Math.round((r + m) * 255);
         g = Math.round((g + m) * 255);
         b = Math.round((b + m) * 255);
-    
+
         return [r, g, b];
 }
 

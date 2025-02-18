@@ -1,11 +1,11 @@
-from .PointCloudTransformer.model import PCT
-import torch
 import torch.nn.functional as F
 from torch import nn
 
+from .PointCloudTransformer.model import PCT
+
+
 class PointTransformer(nn.Module):
     def __init__(self, zdim, input_dim=3, extra_latent=10):
-        
         super().__init__()
 
         self.encoder = PCT()
@@ -37,7 +37,7 @@ class PointTransformer(nn.Module):
     def forward(self, x):
         # x = x.transpose(1, 2)
         _, x, _ = self.encoder(x)
-            
+
         # x = F.relu(self.bn1(self.conv1(x)))
         # x = F.relu(self.bn2(self.conv2(x)))
         # x = F.relu(self.bn3(self.conv3(x)))
@@ -59,5 +59,3 @@ class PointTransformer(nn.Module):
 
         # Returns both mean and logvariance, just ignore the latter in deteministic cases.
         return m, v
-
-

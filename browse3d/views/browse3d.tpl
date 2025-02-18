@@ -91,7 +91,7 @@
             </td>
           % end
           </tr>
-          
+
           <tr>
           % for field in visuals:
             <td>
@@ -150,4 +150,3 @@
 
 
 </html>
-

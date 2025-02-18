@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  hcp_srv:
+      volumes:
+        - ./:/app
+        - /tmp/.X11-unix:/tmp/.X11-unix
+        - ~/.Xauthority:/root/.Xauthority
+        - ~/.bash_history:/home/taco/.bash_history
+        - ~/.gitconfig:/etc/gitconfig
+        - ~/.ssh:/home/taco/.ssh
+        - /mnt/wslg:/mnt/wslg
+
+      network_mode: "host"
+      build:
+        dockerfile: Dockerfile
+        context: .
+      image: ${REGISTRY_URL}/keypoint_deformer:latest
+
+      tty: true
+      stdin_open: true
+      privileged: true
+      restart: unless-stopped
+
+      deploy:
+        resources:
+          reservations:
+            devices:
+              - driver: nvidia
+                count: 1
+                capabilities: [gpu]
+      environment:
+        - DISPLAY=:0
+        - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}

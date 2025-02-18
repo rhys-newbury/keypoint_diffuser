@@ -1,63 +1,95 @@
+import collections.abc as container_abcs
 import itertools
 import json
 import os
-from collections import Counter
+import random
+import time
 import traceback
 import warnings
+from collections import Counter
+from pathlib import Path
 
 import numpy as np
-import pandas
+import pandas as pd
+import pytorch3d
 import torch
 
-import collections.abc as container_abcs
+from ..utils.io import find_files, read_keypoints, read_mesh, read_pcd
+from ..utils.utils import normalize_to_box, resample_mesh
 
 
-from ..utils.utils import resample_mesh, normalize_to_box
-from ..utils.io import read_keypoints, read_pcd, read_mesh, find_files
-import pytorch3d
-from pathlib import Path 
 class Shapes(torch.utils.data.Dataset):
-    MESH_FILE_EXT = 'obj'
-    POINT_CLOUD_FILE_EXT = 'pts'
+    MESH_FILE_EXT = "obj"
+    POINT_CLOUD_FILE_EXT = "pts"
     DO_NOT_BATCH = [
-        'source_face', 'source_mesh', 'target_face', 'target_mesh', 
-        'source_seg_points', 'target_seg_points', 'source_seg_labels', 'target_seg_labels', 'source_mesh_obj', 'target_mesh_obj']
-    CATEGORY2SYNSETOFFSET = {'airplane': '02691156', 'bag': '02773838', 'cap': '02954340', 'car': '02958343', 'chair': '03001627', 'earphone': '03261776', 'guitar': '03467517', 'knife': '03624134', 'lamp': '03636649', 'laptop': '03642806', 'motorbike': '03790512', 'mug': '03797390', 'pistol': '03948459', 'rocket': '04099429', 'skateboard': '04225987', 'table': '04379243'}
-    SYNSETOFFSET2CATEGORY = {v: k for k, v in CATEGORY2SYNSETOFFSET.items()}    
+        "source_face",
+        "source_mesh",
+        "target_face",
+        "target_mesh",
+        "source_seg_points",
+        "target_seg_points",
+        "source_seg_labels",
+        "target_seg_labels",
+        "source_mesh_obj",
+        "target_mesh_obj",
+    ]
+    CATEGORY2SYNSETOFFSET = {
+        "airplane": "02691156",
+        "bag": "02773838",
+        "cap": "02954340",
+        "car": "02958343",
+        "chair": "03001627",
+        "earphone": "03261776",
+        "guitar": "03467517",
+        "knife": "03624134",
+        "lamp": "03636649",
+        "laptop": "03642806",
+        "motorbike": "03790512",
+        "mug": "03797390",
+        "pistol": "03948459",
+        "rocket": "04099429",
+        "skateboard": "04225987",
+        "table": "04379243",
+    }
+    SYNSETOFFSET2CATEGORY = {v: k for k, v in CATEGORY2SYNSETOFFSET.items()}
 
     @staticmethod
     def modify_commandline_options(parser):
-        parser.add_argument('--category', required=True, type=str, help='')
-        parser.add_argument('--segmentations_dir', type=str, default=None, help='')
-        parser.add_argument('--seg_split_dir', type=str, default=None, help='')
-        parser.add_argument('--keypointnet_dir', type=str, default=None, help='')
-        parser.add_argument('--keypointnet_compatible', type=str, default=None, help='')
-        parser.add_argument('--keypointnet_common_keypoints', action='store_true', help='')
-        parser.add_argument("--keypointnet_min_n_common_keypoints", type=int, default=6, help="")
-        parser.add_argument("--keypointnet_min_samples", type=float, default=0.8, help="")
-        parser.add_argument('--keypoints_gt_source', type=str, default=None, help='')
-        parser.add_argument('--data_type', type=str, default='shapenet', help='')
-        parser.add_argument('--split_file', type=str, default=None, help='')
-        parser.add_argument('--split', type=str, default=None, help='')
+        parser.add_argument("--category", required=True, type=str, help="")
+        parser.add_argument("--segmentations_dir", type=str, default=None, help="")
+        parser.add_argument("--seg_split_dir", type=str, default=None, help="")
+        parser.add_argument("--keypointnet_dir", type=str, default=None, help="")
+        parser.add_argument("--keypointnet_compatible", type=str, default=None, help="")
+        parser.add_argument(
+            "--keypointnet_common_keypoints", action="store_true", help=""
+        )
+        parser.add_argument(
+            "--keypointnet_min_n_common_keypoints", type=int, default=6, help=""
+        )
+        parser.add_argument(
+            "--keypointnet_min_samples", type=float, default=0.8, help=""
+        )
+        parser.add_argument("--keypoints_gt_source", type=str, default=None, help="")
+        parser.add_argument("--data_type", type=str, default="shapenet", help="")
+        parser.add_argument("--split_file", type=str, default=None, help="")
+        parser.add_argument("--split", type=str, default=None, help="")
         parser.add_argument("--fixed_source_index", type=int, default=None, help="")
         parser.add_argument("--fixed_target_index", type=int, default=None, help="")
-        parser.add_argument('--normalize', type=str, default='unit_box', help='')
+        parser.add_argument("--normalize", type=str, default="unit_box", help="")
         parser.add_argument("--multiply", type=int, default=1, help="")
-        parser.add_argument('--load_cages_test_pairs', action='store_true', help='')
-        parser.add_argument('--load_test_pairs', action='store_true', help='')
-        parser.add_argument('--load_mesh', action='store_true', help='')
-        parser.add_argument('--sample_mesh', action='store_true', help='')
-        parser.add_argument('--test_pairs_file', type=str, default=None, help='')
+        parser.add_argument("--load_cages_test_pairs", action="store_true", help="")
+        parser.add_argument("--load_test_pairs", action="store_true", help="")
+        parser.add_argument("--load_mesh", action="store_true", help="")
+        parser.add_argument("--sample_mesh", action="store_true", help="")
+        parser.add_argument("--test_pairs_file", type=str, default=None, help="")
         return parser
 
-
     def normalize(self, x):
-        if self.opt.normalize == 'unit_box':
+        if self.opt.normalize == "unit_box":
             pc, center, scale = normalize_to_box(x)
         else:
             raise ValueError()
         return pc, center, scale
-
 
     def __init__(self, opt):
         self.opt = opt
@@ -68,68 +100,88 @@ class Shapes(torch.utils.data.Dataset):
 
         print("dataset size %d" % len(self))
 
-
     def _load_from_split_file(self, split):
-        df = pandas.read_csv(self.opt.split_file)
+        data_frame = pd.read_csv(self.opt.split_file)
         # find names from the category and split
-        df = df.loc[(df.synsetId == int(self.opt.category)) & (df.split == self.opt.split)]
-        names = df.modelId.values
+        data_frame = data_frame.loc[
+            (data_frame.synsetId == int(self.opt.category))
+            & (data_frame.split == self.opt.split)
+        ]
+        names = data_frame.modelId.to_numpy()
         return names
 
-
     def _load_from_files(self):
-        files = find_files(os.path.join(self.opt.points_dir, self.opt.category), self.POINT_CLOUD_FILE_EXT)
+        files = find_files(
+            os.path.join(self.opt.points_dir, self.opt.category),
+            self.POINT_CLOUD_FILE_EXT,
+        )
         # extract name from files
         names = [x.split(os.path.sep)[-2] for x in files]
         names = sorted(names)
         return names
 
-
     def _load_seg_split_file(self, seg_split_file):
         with open(seg_split_file) as f:
             files = json.load(f)
-            # ['04379243', '9db8f8c94dbbfe751d742b64ea8bc701'], ['02691156', '329a018e131ece70f23c3116d040903f'], ...
             names = [x.split(os.path.sep)[-2:] for x in files]
             # filter out other categories
-            names = [x[1] for x in names if x[0] == self.opt.category] 
+            names = [x[1] for x in names if x[0] == self.opt.category]
         return names
 
-    
     def _load_seg_split(self):
-        seg_split_file = os.path.join(self.opt.seg_split_dir, 'shuffled_%s_file_list.json' % self.opt.split)
+        seg_split_file = os.path.join(
+            self.opt.seg_split_dir, "shuffled_%s_file_list.json" % self.opt.split
+        )
         return self._load_seg_split_file(seg_split_file)
-
 
     def _load_keypointnet_split(self, split_name):
         # load split
-        with open(os.path.join(self.opt.keypointnet_dir, 'splits', split_name + '.txt')) as f:
+        with open(
+            os.path.join(self.opt.keypointnet_dir, "splits", split_name + ".txt")
+        ) as f:
             lines = f.read().splitlines()
         # line looks like this: 02691156-ecbb6df185a7b260760d31bf9510e4b7
-        split = set([x[len(self.opt.category) + 1:] for x in lines if x.startswith(self.opt.category)])
+        split = {
+            x[len(self.opt.category) + 1 :]
+            for x in lines
+            if x.startswith(self.opt.category)
+        }
         return split
-
 
     def _load_keypointnet(self):
         # load keypoints
-        file_path = os.path.join(self.opt.keypointnet_dir, 'annotations', self.SYNSETOFFSET2CATEGORY[self.opt.category] + '.json')
+        file_path = os.path.join(
+            self.opt.keypointnet_dir,
+            "annotations",
+            self.SYNSETOFFSET2CATEGORY[self.opt.category] + ".json",
+        )
         with open(file_path) as f:
             data = json.load(f)
         keypoints = {}
         for item in data:
-            name = item['model_id']
-            keypoints_sample = [x['xyz'] for x in item['keypoints']]
-            keypoint_ids_sample = [x['semantic_id'] for x in item['keypoints']]
+            name = item["model_id"]
+            keypoints_sample = [x["xyz"] for x in item["keypoints"]]
+            keypoint_ids_sample = [x["semantic_id"] for x in item["keypoints"]]
             keypoints_sample = np.array(keypoints_sample, dtype=np.float32)
             keypoints[name] = (keypoints_sample, keypoint_ids_sample)
-        
+
         if self.opt.keypointnet_common_keypoints:
             # get most common keypoint ids
             ids = [list(id) for _, id in keypoints.values()]
             max_keypoints = len(set(itertools.chain(*ids)))
             # start with the highest number of keypoints
             success = False
-            for n_common_keypoints in range(max_keypoints, self.opt.keypointnet_min_n_common_keypoints, -1):
-                most_common_ids = sorted([x[0] for x in Counter(itertools.chain(*ids)).most_common(n_common_keypoints)])
+            for n_common_keypoints in range(
+                max_keypoints, self.opt.keypointnet_min_n_common_keypoints, -1
+            ):
+                most_common_ids = sorted(
+                    [
+                        x[0]
+                        for x in Counter(itertools.chain(*ids)).most_common(
+                            n_common_keypoints
+                        )
+                    ]
+                )
                 # prune keypoints
                 pruned_keypoints = {}
                 for name, (sample_keypoints, id) in keypoints.items():
@@ -137,7 +189,10 @@ class Shapes(torch.utils.data.Dataset):
                         indices = [id.index(x) for x in most_common_ids]
                         new_keypoints = sample_keypoints[indices]
                         pruned_keypoints[name] = new_keypoints
-                if len(pruned_keypoints) / len(keypoints) > self.opt.keypointnet_min_samples:
+                if (
+                    len(pruned_keypoints) / len(keypoints)
+                    > self.opt.keypointnet_min_samples
+                ):
                     success = True
                     break
             if not success:
@@ -148,117 +203,125 @@ class Shapes(torch.utils.data.Dataset):
 
         return keypoints
 
-
     def _get_shapenet_id_to_model_id(self):
-        df = pandas.read_csv(self.opt.split_file)
-        return {k: v for k, v in zip(df.id, df.modelId)}
-
+        data_frame = pd.read_csv(self.opt.split_file)
+        return {k: v for k, v in zip(data_frame.id, data_frame.modelId)}
 
     def _load_test_pairs(self):
-        with open(self.opt.test_pairs_file, 'r') as f:
+        with open(self.opt.test_pairs_file) as f:
             lines = f.read().splitlines()
         names = []
         partners = []
         for line in lines:
-            name = line.split(' ')[0]
-            partner = line.split(' ')[1]
+            name = line.split(" ")[0]
+            partner = line.split(" ")[1]
             names += [name]
             partners += [partner]
         return names, partners
 
-
     def load_dataset(self):
         dataset = {}
-        if self.opt.data_type == 'shapenet':
+        if self.opt.data_type == "shapenet":
             names = self._load_from_split_file(self.opt.split)
-        elif self.opt.data_type == 'keypointnet':
+        elif self.opt.data_type == "keypointnet":
             keypoints = self._load_keypointnet()
             names = list(self._load_keypointnet_split(self.opt.split))
-            dataset['keypoints'] = keypoints
-        elif self.opt.data_type == 'shapenetseg':
+            dataset["keypoints"] = keypoints
+        elif self.opt.data_type == "shapenetseg":
             names = self._load_seg_split()
-        elif self.opt.data_type == 'files':
+        elif self.opt.data_type == "files":
             names = self._load_from_files()
         else:
             raise ValueError()
 
-        if self.opt.keypoints_gt_source == 'keypointnet':
+        if self.opt.keypoints_gt_source == "keypointnet":
             keypoints = self._load_keypointnet()
             names = [x for x in names if x in keypoints]
-            dataset['keypoints'] = keypoints
-        print(names)
+            dataset["keypoints"] = keypoints
         assert len(names) > 0
-        
-        if self.opt.keypointnet_compatible:
-            if self.opt.split == 'train':
-                # remove keypointnet val and test from training
-                val_split = self._load_keypointnet_split('val')
-                test_split = self._load_keypointnet_split('test')
-                names = set(names)
-                names -= val_split
-                names -= test_split
-        
-        names = sorted(list(names))
-        
+
+        if self.opt.keypointnet_compatible and self.opt.split == "train":
+            # remove keypointnet val and test from training
+            val_split = self._load_keypointnet_split("val")
+            test_split = self._load_keypointnet_split("test")
+            names = set(names)
+            names -= val_split
+            names -= test_split
+
+        names = sorted(names)
+
         if self.opt.load_test_pairs:
             names, partners = self._load_test_pairs()
-            dataset['partners'] = partners
+            dataset["partners"] = partners
         else:
-            names = sorted(list(names))
+            names = sorted(names)
 
-        dataset['name'] = names
+        dataset["name"] = names
 
         return dataset
 
-
     def _get_pointcloud_path(self, name):
-        return os.path.join(self.opt.points_dir, self.opt.category, name, "model.pts")
-
+        return os.path.join(
+            self.opt.points_dir,
+            self.opt.category,
+            name,
+            "models",
+            f"new_samples_{random.randint(0, 4)}.npy",
+        )
 
     def _get_mesh_path(self, name):
-        return os.path.join(self.opt.mesh_dir, self.opt.category, name, "models", "model_normalized.obj")
-
+        return os.path.join(
+            self.opt.mesh_dir, self.opt.category, name, "models", "model_normalized.obj"
+        )
 
     def _get_keypoints_path(self, name):
-        return os.path.join(self.opt.keypoints_dir, self.opt.category, name, "keypoints.txt")
-
+        return os.path.join(
+            self.opt.keypoints_dir, self.opt.category, name, "keypoints.txt"
+        )
 
     def _get_seg_points_path(self, name):
-        return os.path.join(self.opt.segmentations_dir, self.opt.category, 'points', name + '.pts')
-
+        return os.path.join(
+            self.opt.segmentations_dir, self.opt.category, "points", name + ".pts"
+        )
 
     def _get_seg_labels_path(self, name):
-        return os.path.join(self.opt.segmentations_dir, self.opt.category, 'points_label', name + '.seg')
+        return os.path.join(
+            self.opt.segmentations_dir, self.opt.category, "points_label", name + ".seg"
+        )
 
-    
     def _read_keypointnet_keypoints(self, name):
-        keypoints = torch.from_numpy(self.dataset['keypoints'][name]).float()
-        
+        keypoints = torch.from_numpy(self.dataset["keypoints"][name]).float()
+
         # fix axis
-        keypoints = keypoints[:, [2, 1, 0]] * torch.FloatTensor([[-1, 1, 1]]) 
+        keypoints = keypoints[:, [2, 1, 0]] * torch.FloatTensor([[-1, 1, 1]])
 
         # compensate for their normalization
         # load associated point cloud
-        pcd_path = os.path.join(self.opt.keypointnet_dir, 'pcds', self.opt.category, name + '.pcd')
+        pcd_path = os.path.join(
+            self.opt.keypointnet_dir, "pcds", self.opt.category, name + ".pcd"
+        )
         points = read_pcd(pcd_path)
         points = torch.from_numpy(points).float()
-        points = points[:, [2, 1, 0]] * torch.FloatTensor([[-1, 1, 1]]) 
+        points = points[:, [2, 1, 0]] * torch.FloatTensor([[-1, 1, 1]])
         _, center, scale = self.normalize(points)
         keypoints = (keypoints - center) / scale
 
         return keypoints, center[0], scale[0]
-    
 
     def _read_txt_keypoints(self, name):
         keypoints = read_keypoints(self._get_keypoints_path(name))
         keypoints = torch.from_numpy(keypoints).float()
         return keypoints
 
-
     def get_item(self, index):
-        return self.get_item_by_name(self.dataset['name'][index])
+        return self.get_item_by_name(self.dataset["name"][index])
 
-    def normalize_pytorch_mesh_with_center_scale(mesh: pytorch3d.structures.Meshes, centroid: torch.Tensor, scale: torch.Tensor):
+    def normalize_pytorch_mesh_with_center_scale(
+        self,
+        mesh: pytorch3d.structures.Meshes,
+        centroid: torch.Tensor,
+        scale: torch.Tensor,
+    ):
         """
         Normalize a PyTorch3D Mesh object using a given centroid and scale.
         The mesh will be translated to the origin based on the centroid,
@@ -282,89 +345,113 @@ class Shapes(torch.utils.data.Dataset):
         vertices = vertices / scale
 
         # Create a new Mesh object with the normalized vertices
-        normalized_mesh = pytorch3d.structures.Meshes(verts=[vertices], faces=mesh.faces_packed())
+        normalized_mesh = pytorch3d.structures.Meshes(
+            verts=[vertices], faces=mesh.faces_packed()
+        )
 
         return normalized_mesh
-
 
     def random_downsample(self, point_cloud, target_num_points):
         """
         Randomly downsamples a point cloud to the target number of points.
-        
+
         Args:
             point_cloud (ndarray): The input point cloud of shape (N, 3).
             target_num_points (int): The desired number of points.
-            
+
         Returns:
-            downsampled_point_cloud (ndarray): The downsampled point cloud of shape (target_num_points, 3).
+            downsampled_point_cloud: The downsampled point cloud of shape (target_num_points, 3).
         """
         if point_cloud.shape[0] <= target_num_points:
             return point_cloud  # Return original if already small enough
-        indices = np.random.choice(point_cloud.shape[0], target_num_points, replace=False)
+        indices = np.random.choice(
+            point_cloud.shape[0], target_num_points, replace=False
+        )
         return point_cloud[indices]
 
-
-
     def get_item_by_name(self, name, sample_mesh=False, load_mesh=False):
-        if load_mesh or sample_mesh:
+        time.time()
+
+        if load_mesh or False:
+            time.time()
             mesh_path = self._get_mesh_path(name)
             V_mesh, F_mesh, mesh_obj = read_mesh(mesh_path, return_mesh=True)
-        
-        
-        pc_path = Path(self._get_mesh_path(name)).parent / "point_resampled_labeled.npy"
-        
-        if sample_mesh:
-            # import timeit
-            # t1 = timeit.default_timer()
-            points = resample_mesh(mesh_obj, self.opt.num_point)
-            # t2 = timeit.default_timer()
-            # print(f"sampling took {t2-t1}s")
-        else:
-            # load points sampled from a mesh
-            points = np.loadtxt(self._get_pointcloud_path(name), dtype=np.float32)
-            points = torch.from_numpy(points).float()
+            # print(f"Mesh loading time: {time.time() - t1:.4f} sec")
 
+        pc_path = Path(self._get_mesh_path(name)).parent / "point_resampled_labeled.npy"
+
+        if False:
+            time.time()
+            points = resample_mesh(mesh_obj, self.opt.num_point)
+            # print(f"Mesh resampling time: {time.time() - t2:.4f} sec")
+        else:
+            time.time()
+            points = np.load(self._get_pointcloud_path(name))
+            points = torch.from_numpy(points).float()
+            # print(f"Point cloud loading time: {time.time() - t3:.4f} sec")
+
+        time.time()
         points[:, :3], center, scale = self.normalize(points[:, :3])
         points = points.clone()
+        # print(f"Normalization time: {time.time() - t4:.4f} sec")
 
+        time.time()
         normals = points[:, 3:6].clone()
         label = points[:, -1].clone()
         shape = points[:, :3].clone()
+        # print(f"Cloning data time: {time.time() - t5:.4f} sec")
 
-        result = {'shape': shape, 'normals': normals, 'label': label, 'cat': self.opt.category, 'file': name}
+        result = {
+            "shape": shape,
+            "normals": normals,
+            "label": label,
+            "cat": self.opt.category,
+            "file": name,
+        }
 
         if pc_path.is_file():
+            time.time()
             pc = np.load(pc_path)
             pc = torch.from_numpy(self.random_downsample(pc, 5000))
             pc[:, :3] = (pc[:, :3] - center) / scale
-            result.update({'sampled_points': pc})
+            result.update({"sampled_points": pc})
+            # print(f"Sampled points loading & processing time: {time.time() - t6:.4f} sec")
 
-        if load_mesh or True:
-            V_mesh = V_mesh[:,:3]
-            F_mesh = F_mesh[:,:3]
+        if load_mesh or False:
+            time.time()
+            V_mesh = V_mesh[:, :3]
+            F_mesh = F_mesh[:, :3]
             V_mesh = (V_mesh - center) / scale
-            result.update({'mesh': V_mesh, 'face': F_mesh, 'mesh_obj': mesh_obj})
+            result.update({"mesh": V_mesh, "face": F_mesh, "mesh_obj": mesh_obj})
+            # print(f"Mesh processing & scaling time: {time.time() - t7:.4f} sec")
 
-        # load labels    
-        if self.opt.keypoints_gt_source == 'keypointnet':
-            keypoints_gt, keypoints_gt_center, keypoints_gt_scale = self._read_keypointnet_keypoints(name)
-            result['keypoints_gt'] = keypoints_gt
-            result['keypoints_gt_center'] = keypoints_gt_center
-            result['keypoints_gt_scale'] = keypoints_gt_scale
+        if self.opt.keypoints_gt_source == "keypointnet":
+            time.time()
+            (
+                keypoints_gt,
+                keypoints_gt_center,
+                keypoints_gt_scale,
+            ) = self._read_keypointnet_keypoints(name)
+            result["keypoints_gt"] = keypoints_gt
+            result["keypoints_gt_center"] = keypoints_gt_center
+            result["keypoints_gt_scale"] = keypoints_gt_scale
+            # print(f"Keypoint ground truth loading time: {time.time() - t8:.4f} sec")
 
-        # if self.opt.data_type == 'shapenetseg':
-        if False:
+        if False:  # if self.opt.data_type == 'shapenetseg':  # Disabled condition
+            time.time()
             assert self.opt.segmentations_dir is not None
             seg_points = np.loadtxt(self._get_seg_points_path(name)).astype(np.float32)
-            # print(name)
             seg_labels = np.loadtxt(self._get_seg_labels_path(name)).astype(np.int32)
             seg_points = torch.from_numpy(seg_points)
             seg_labels = torch.from_numpy(seg_labels)
             seg_points = (seg_points - center) / scale
-            result.update({'seg_labels': seg_labels, 'seg_points': seg_points})
+            result.update({"seg_labels": seg_labels, "seg_points": seg_points})
+            # print(f"Segmentation data loading time: {time.time() - t9:.4f} sec")
+
+        time.time()
+        # print(f"Total data loading time: {t_end - t_start:.4f} sec")
 
         return result
-    
 
     def get_sample(self, index):
         index_2 = np.random.randint(self.get_real_length())
@@ -374,22 +461,22 @@ class Shapes(torch.utils.data.Dataset):
 
         if self.opt.fixed_target_index is not None:
             index_2 = self.opt.fixed_target_index
-        
-        name = self.dataset['name'][index]
+
+        self.dataset["name"][index]
         if self.opt.load_cages_test_pairs or self.opt.load_test_pairs:
-            name_2 = self.dataset['partners'][index]
+            name_2 = self.dataset["partners"][index]
         else:
-            name_2 = self.dataset['name'][index_2]
+            name_2 = self.dataset["name"][index_2]
 
         sample_mesh = self.opt.sample_mesh or self.opt.points_dir is None
-        # source_data = self.get_item_by_name(name, load_mesh=self.opt.load_mesh, sample_mesh=sample_mesh)
-        target_data = self.get_item_by_name(name_2, load_mesh=self.opt.load_mesh, sample_mesh=sample_mesh)
-        
+        target_data = self.get_item_by_name(
+            name_2, load_mesh=self.opt.load_mesh, sample_mesh=sample_mesh
+        )
+
         # result = {'source_' + k: v for k, v in source_data.items()}
-        result = {'target_' + k: v for k, v in target_data.items()}
+        result = {"target_" + k: v for k, v in target_data.items()}
 
         return result
-
 
     def __getitem__(self, index):
         for _ in range(10):
@@ -397,10 +484,16 @@ class Shapes(torch.utils.data.Dataset):
             try:
                 return self.get_sample(index)
             except Exception as e:
-                warnings.warn(f"Error loading sample {index}: " + ''.join(traceback.format_exception(etype=type(e), value=e, tb=e.__traceback__)))
+                warnings.warn(
+                    f"Error loading sample {index}: "
+                    + "".join(
+                        traceback.format_exception(
+                            etype=type(e), value=e, tb=e.__traceback__
+                        )
+                    )
+                )
                 # import pdb; pdb.set_trace()
                 index += 1
-
 
     @classmethod
     def collate(cls, batch):
@@ -411,30 +504,27 @@ class Shapes(torch.utils.data.Dataset):
                 batched[key] = [e[key] for e in batch]
             else:
                 try:
-                    batched[key] = torch.utils.data.dataloader.default_collate([e[key] for e in batch])
+                    batched[key] = torch.utils.data.dataloader.default_collate(
+                        [e[key] for e in batch]
+                    )
                 except Exception as e:
                     print(e)
-                    print(key)
-                    import ipdb; ipdb.set_trace()
-                    print()
-
+                    continue
         return batched
-
 
     @staticmethod
     def uncollate(batched):
         for k, v in batched.items():
             if isinstance(v, torch.Tensor):
                 batched[k] = v.cuda()
-            elif isinstance(v, container_abcs.Sequence):
-                if isinstance(v[0], torch.Tensor):
-                    batched[k] = [e.cuda() for e in v]
+            elif isinstance(v, container_abcs.Sequence) and isinstance(
+                v[0], torch.Tensor
+            ):
+                batched[k] = [e.cuda() for e in v]
         return batched
 
-
     def get_real_length(self):
-        return len(self.dataset['name'])
-
+        return len(self.dataset["name"])
 
     def __len__(self):
         if self.opt.fixed_target_index is not None:

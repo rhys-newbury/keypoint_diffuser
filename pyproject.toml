@@ -1,0 +1,100 @@
+# Package ######################################################################
+
+# Linters and Test tools #######################################################
+[tool.ruff]
+# https://beta.ruff.rs/docs/settings/
+extend-select = ["C4", "SIM", "TCH"]
+show-fixes = true
+# Same as Black.
+line-length = 100
+# Assume Python 3.10.
+target-version = "py310"
+
+ignore = [
+    "A001", "A002", "A003",
+    "ARG001", "ARG002",
+    "B905",
+    "ERA001", "E402",
+    "FBT001", "FBT002", "FBT003",
+    "N802", "N806", "N812", "NPY002",
+    "PD002",
+    "PGH003", "PGH004",
+    "S101", "PLR2004", "T100", "N803"
+]
+
+select = [
+    "A",
+    "ARG",
+    "B",
+    "C4",
+    "C90",
+    "E",
+    "ERA",
+    "F",
+    "FBT",
+    "ICN",
+    "I",
+    "ISC",
+    "N",
+    "NPY",
+    "PD",
+    "PGH",
+    "PIE",
+    "PLE",
+    "PLR",
+    "Q",
+    "RUF",
+    "S",
+    "SIM",
+    "T",
+    "UP",
+    "W",
+]
+
+[tool.ruff.mccabe]
+# Unlike Flake8, default to a complexity level of 10.
+max-complexity = 30
+
+[tool.ruff.isort]
+lines-after-imports = 2
+extra-standard-library = ["typing_extensions"]
+
+[tool.ruff.pylint]
+max-statements = 100
+max-branches=20
+max-args=15
+
+
+[tool.black]
+line-length = 88
+
+[tool.pyright]
+include = ["posggym/**"]
+exclude = ["**/node_modules", "**/__pycache__"]
+strict = []
+
+typeCheckingMode = "basic"
+pythonVersion = "3.10"
+pythonPlatform = "All"
+enableTypeIgnoreComments = true
+
+# This is required as the CI pre-commit does not download the module (i.e. numpy, pygame, box2d)
+#   Therefore, we have to ignore missing imports
+reportMissingImports = "none"
+# Some modules are missing type stubs, which is an issue when running pyright locally
+reportMissingTypeStubs = false
+# For warning and error, will raise an error when
+reportInvalidTypeVarUse = "none"
+
+reportGeneralTypeIssues = "none" # -> commented out raises 489 errors
+# reportUntypedFunctionDecorator = "none"  # -> pytest.mark.parameterize issues
+
+reportPrivateUsage = "warning"
+reportUnboundVariable = "warning"
+reportOptionalOperand = "warning"
+
+[tool.pytest.ini_options]
+filterwarnings = [
+	# Tensorboard warnings
+	"ignore::DeprecationWarning:tensorboard",
+]

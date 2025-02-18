@@ -5,3 +5,5 @@ depth_images/*
 rgb_images/*
 __logs
 data/
+**.npy
+**.pt
