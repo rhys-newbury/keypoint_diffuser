@@ -1,7 +1,45 @@
 import torch.nn.functional as F
+import torch_scatter
 from torch import nn
 
 from .PointCloudTransformer.model import PCT
+from .PointTransformer.model import PointTransformerV3
+
+
+class PointTransformerv2(nn.Module):
+    def __init__(self, zdim, input_dim=3, extra_latent=10):
+        super().__init__()
+
+        self.encoder = PointTransformerV3(in_channels=3, enable_flash=False)
+        self.linear = nn.Linear(64, zdim * input_dim + extra_latent)
+
+    def forward(self, data_dict):
+        # batch_size, _, num_points = point_cloud_batch.shape
+
+        # # Rearrange to [B, N, 3] and then flatten to [B*N, 3]
+        # coords = point_cloud_batch.permute(0, 2, 1).reshape(-1, 3)
+
+        # # Use the coordinates as features (copy to be explicit)
+        # feats = coords.clone()
+
+        # # Create the offset tensor. For each instance, we know the start index:
+        # # 0, num_points, 2*num_points, ..., B*num_points
+        # offset = torch.arange(0, (batch_size + 1) * num_points, step=num_points, dtype=torch.int32)
+
+        # data_dict = {
+        #     "coord": coords,
+        #     "feat": feats,
+        #     "offset": offset,
+        # }
+        point = self.encoder(data_dict)
+        point.feat = torch_scatter.segment_csr(
+            src=point.feat,
+            indptr=nn.functional.pad(point.offset, (1, 0)),
+            reduce="mean",
+        )
+        # import pdb; pdb.set_trace()
+
+        return self.linear(point.feat)
 
 
 class PointTransformer(nn.Module):

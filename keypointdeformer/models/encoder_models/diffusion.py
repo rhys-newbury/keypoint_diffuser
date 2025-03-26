@@ -1,5 +1,3 @@
-import copy
-
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -256,7 +254,8 @@ class DiffusionPoint(Module):
         self.var_sched = var_sched
 
     def freeze_network(self):
-        self.frozen_net = copy.deepcopy(self.net)
+        pass
+        # self.frozen_net = copy.deepcopy(self.net)
 
     def get_loss(self, x_0, context, use_perceptual_loss=False, t=None):
         """

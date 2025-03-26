@@ -1,0 +1,17 @@
+name: airplane-8kpt
+
+category: 03636649
+split: train
+
+mesh_dir: /mnt/slow/shape-data
+points_dir: /mnt/slow/shape-data
+split_file: /mnt/storage/shapenet_split/all.csv
+log_dir: /mnt/storage/keypoints/logs
+
+
+# mesh_dir: /app/data/shapenet/shape_data
+# points_dir: /app/data/shapenet/shape_data
+# split_file: data/shapenet_split/all.csv
+# log_dir: /app/data/keypoints/logs
+
+segmentations_dir: /home/taco/repos/keypoint_deformer/data/seg

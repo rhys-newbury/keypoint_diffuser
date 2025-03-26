@@ -1,14 +1,14 @@
 from torch.nn import Module
 
 from .diffusion import DiffusionPoint, PointwiseNet, VarianceSchedule
-from .encoders import PointTransformer
+from .encoders import PointTransformerv2
 
 
 class AutoEncoder(Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.encoder = PointTransformer(
+        self.encoder = PointTransformerv2(
             zdim=args.latent_dim, extra_latent=args.extra_latent
         )
         self.diffusion = DiffusionPoint(
@@ -31,7 +31,7 @@ class AutoEncoder(Module):
         Args:
             x:  Point clouds to be encoded, (B, N, d).
         """
-        code, _ = self.encoder(x)
+        code = self.encoder(x)
         return code
 
     def decode(self, code, num_points, flexibility=0.0, ret_traj=False):
@@ -41,5 +41,9 @@ class AutoEncoder(Module):
 
     def get_loss(self, x, use_perceptual_loss=False):
         code = self.encode(x)
-        loss = self.diffusion.get_loss(x, code, use_perceptual_loss=use_perceptual_loss)
+        t = x["target_shape"].view(-1, 5000, 3).cuda()
+
+        loss = self.diffusion.get_loss(
+            t.transpose(1, 2), code, use_perceptual_loss=use_perceptual_loss
+        )
         return loss, code

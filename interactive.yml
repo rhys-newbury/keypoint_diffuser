@@ -1,0 +1,88 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  name: interactive-example
+spec:
+  minAvailable: 1
+  schedulerName: volcano
+  queue: interactive
+  policies:
+    - event: PodEvicted
+      action: RestartJob
+  tasks:
+    - replicas: 64
+      name: persistent-debugger
+      policies:
+        - event: TaskCompleted
+          action: CompleteJob
+      template:
+        spec:
+          securityContext:
+            runAsUser: 1000
+          containers:
+            - name: pytorch-session
+              image: mu00120825.eng.monash.edu.au:5021/keypoint_deformer:latest
+              command: ["python", "-u", "resample.py"]
+              # args: ["while true; do sleep 30; done;"]
+              # command: ["/bin/bash", "-c", "--"]
+              # args: ["while true; do sleep 30; done;"]
+              workingDir: /mnt/slow/shape-data
+              volumeMounts:
+                - mountPath: /dev/shm
+                  name: dshm
+                - mountPath: /mnt/slow
+                  name: smb-slow
+                - mountPath: /mnt/fast
+                  name: smb-fast
+                - mountPath: /mnt/datasets/slow
+                  name: datasets-slow
+                  readOnly: true
+                - mountPath: /mnt/datasets/fast
+                  name: datasets-fast
+                  readOnly: true
+                - mountPath: /mnt/pretrained
+                  name: pretrained
+                  readOnly: true
+              # resources:
+              #   limits:
+              #     nvidia.com/gpu: 1
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: dkr-creds
+          volumes:
+            - name: dshm
+              emptyDir:
+                medium: Memory
+            - name: datasets-slow
+              nfs:
+                server: 130.194.128.94
+                path: /mnt/thicc/training-data
+                readOnly: true
+            - name: datasets-fast
+              nfs:
+                server: 130.194.128.94
+                path: /mnt/fast/training-data
+                readOnly: true
+            - name: pretrained
+              nfs:
+                server: 130.194.128.94
+                path: /mnt/thicc/pretrained-models
+                readOnly: true
+            - name: smb-slow
+              flexVolume:
+                driver: fstab/cifs
+                fsType: cifs
+                secretRef:
+                  name: smb-creds
+                options:
+                  networkPath: //130.194.128.94/slow
+                  mountOptions: dir_mode=0777,file_mode=0777,noperm
+            - name: smb-fast
+              flexVolume:
+                driver: fstab/cifs
+                fsType: cifs
+                secretRef:
+                  name: smb-creds
+                options:
+                  networkPath: //130.194.128.94/fast
+                  mountOptions: dir_mode=0777,file_mode=0777,noperm

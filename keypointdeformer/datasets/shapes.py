@@ -90,12 +90,13 @@ class Shapes(torch.utils.data.Dataset):
             raise ValueError()
         return pc, center, scale
 
-    def __init__(self, opt):
+    def __init__(self, opt, transform=None):
         self.opt = opt
 
         self.mesh_dir = opt.mesh_dir
 
         self.dataset = self.load_dataset()
+        self.transform = transform  # Store transform function
 
         print("dataset size %d" % len(self))
 
@@ -220,6 +221,7 @@ class Shapes(torch.utils.data.Dataset):
 
     def load_dataset(self):
         dataset = {}
+        # import pdb; pdb.set_trace()
         if self.opt.data_type == "shapenet":
             names = self._load_from_split_file(self.opt.split)
         elif self.opt.data_type == "keypointnet":
@@ -371,7 +373,7 @@ class Shapes(torch.utils.data.Dataset):
     def get_item_by_name(self, name, sample_mesh=False, load_mesh=False):
         time.time()
 
-        if load_mesh or False:
+        if False:
             time.time()
             mesh_path = self._get_mesh_path(name)
             V_mesh, F_mesh, mesh_obj = read_mesh(mesh_path, return_mesh=True)
@@ -385,6 +387,7 @@ class Shapes(torch.utils.data.Dataset):
             # print(f"Mesh resampling time: {time.time() - t2:.4f} sec")
         else:
             time.time()
+            # print(self._get_pointcloud_path(name))
             points = np.load(self._get_pointcloud_path(name))
             points = torch.from_numpy(points).float()
             # print(f"Point cloud loading time: {time.time() - t3:.4f} sec")
@@ -407,16 +410,22 @@ class Shapes(torch.utils.data.Dataset):
             "cat": self.opt.category,
             "file": name,
         }
-
+        # import pdb; pdb.set_trace()
         if pc_path.is_file():
+            # removed:
+            # 022433,02691156,03595860,692797a818b4630f1aa3e317da5a1267,test
+
             time.time()
             pc = np.load(pc_path)
             pc = torch.from_numpy(self.random_downsample(pc, 5000))
             pc[:, :3] = (pc[:, :3] - center) / scale
             result.update({"sampled_points": pc})
+        else:
+            pass
+            # import pdb; pdb.set_trace()
             # print(f"Sampled points loading & processing time: {time.time() - t6:.4f} sec")
 
-        if load_mesh or False:
+        if False:
             time.time()
             V_mesh = V_mesh[:, :3]
             F_mesh = F_mesh[:, :3]
@@ -461,7 +470,7 @@ class Shapes(torch.utils.data.Dataset):
         if self.opt.fixed_target_index is not None:
             index_2 = self.opt.fixed_target_index
 
-        self.dataset["name"][index]
+        name = self.dataset["name"][index]
         if self.opt.load_cages_test_pairs or self.opt.load_test_pairs:
             name_2 = self.dataset["partners"][index]
         else:
@@ -472,8 +481,12 @@ class Shapes(torch.utils.data.Dataset):
             name_2, load_mesh=self.opt.load_mesh, sample_mesh=sample_mesh
         )
 
-        # result = {'source_' + k: v for k, v in source_data.items()}
-        result = {"target_" + k: v for k, v in target_data.items()}
+        source_data = self.get_item_by_name(
+            name, load_mesh=self.opt.load_mesh, sample_mesh=sample_mesh
+        )
+
+        result = {"source_" + k: v for k, v in source_data.items()}
+        result.update({"target_" + k: v for k, v in target_data.items()})
 
         return result
 
@@ -481,8 +494,9 @@ class Shapes(torch.utils.data.Dataset):
         for _ in range(10):
             index = index % self.get_real_length()
             try:
-                return self.get_sample(index)
+                sample = self.get_sample(index)
             except Exception as e:
+                print(e)
                 warnings.warn(
                     f"Error loading sample {index}: "
                     + "".join(
@@ -493,6 +507,24 @@ class Shapes(torch.utils.data.Dataset):
                 )
                 # import pdb; pdb.set_trace()
                 index += 1
+
+            if self.transform:
+                # import pdb; pdb.set_trace()
+                transformed, deformed = self.transform(
+                    {"coord": sample["target_shape"].cpu().numpy()}
+                )  # Apply transform
+                sample = {
+                    **sample,
+                    **{
+                        f"orig_{key}": value.cuda()
+                        for key, value in transformed.items()
+                    },
+                    **{
+                        f"deformed_{key}": value.cuda()
+                        for key, value in deformed.items()
+                    },
+                }
+            return sample
 
     @classmethod
     def collate(cls, batch):
@@ -506,8 +538,7 @@ class Shapes(torch.utils.data.Dataset):
                     batched[key] = torch.utils.data.dataloader.default_collate(
                         [e[key] for e in batch]
                     )
-                except Exception as e:
-                    print(e)
+                except Exception:
                     continue
         return batched
 

@@ -24,6 +24,9 @@ class BaseOptions:
         )
         # basic parameters
         parser.add_argument("--name", required=True, type=str, help="experiment name")
+        parser.add_argument("--category", required=True, type=str, help="obj category")
+        parser.add_argument("--split", required=True, type=str, help="train or test")
+
         parser.add_argument(
             "--dataset", type=str, default="shapes", help="dataset name"
         )
@@ -43,12 +46,48 @@ class BaseOptions:
         parser.add_argument("--batch_size", type=int, help="batch size", default=16)
         parser.add_argument("--n_keypoints", type=int, default=8, help="")
         parser.add_argument("--cage_size", type=float, default=1.4, help="")
+
+        parser.add_argument("--load_mesh", type=bool, default=False, help="")
+
+        parser.add_argument(
+            "--normalize", type=str, default="unit_box", help="test model"
+        )
+
+        parser.add_argument("--segmentations_dir", type=str, help="test model")
+        parser.add_argument(
+            "--data_type", type=str, default="shapenet", help="test model"
+        )
+        parser.add_argument(
+            "--split_file", type=str, default="shapenet", help="test model"
+        )
+        parser.add_argument(
+            "--keypoints_gt_source", type=str, default=None, help="test model"
+        )
+        parser.add_argument(
+            "--keypointnet_compatible", type=str, default=None, help="test model"
+        )
+        parser.add_argument(
+            "--fixed_target_index", type=int, default=None, help="test model"
+        )
+        parser.add_argument(
+            "--fixed_source_index", type=int, default=None, help="test model"
+        )
+
+        parser.add_argument("--multiply", type=int, default=1, help="test model")
+
         parser.add_argument("--print_options", action="store_true", help="")
+        parser.add_argument("--load_cages_test_pairs", action="store_true", help="")
+        parser.add_argument("--sample_mesh", action="store_true", help="")
+
+        parser.add_argument("--load_test_pairs", action="store_true", help="")
         # training setup
         parser.add_argument("--lr", type=float, help="learning rate", default=0.001)
         parser.add_argument(
             "--phase", type=str, choices=["test", "train"], default="train"
         )
+
+        parser.add_argument("--latent_dim", type=int, default=8, help="test model")
+
         parser.add_argument("--ckpt", type=str, help="test model")
         parser.add_argument("--seed", type=int, default=0, help="")
         parser.add_argument("--n_workers", type=int, default=8, help="")

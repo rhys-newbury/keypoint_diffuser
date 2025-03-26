@@ -1,7 +1,7 @@
 from torch.nn import Module
 
 from .encoder_models.diffusion import DiffusionPoint, PointwiseNet, VarianceSchedule
-from .encoder_models.encoders import PointTransformer
+from .encoder_models.encoders import PointTransformerv2
 
 
 class AutoEncoder(Module):
@@ -12,7 +12,7 @@ class AutoEncoder(Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.encoder = PointTransformer(
+        self.encoder = PointTransformerv2(
             zdim=args.latent_dim, extra_latent=args.extra_latent
         )
         self.diffusion = DiffusionPoint(

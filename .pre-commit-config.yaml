@@ -24,7 +24,6 @@ repos:
       - id: codespell
         args:
           - --skip=*.ipynb
-          - -L=empy,inout
   - repo: https://github.com/python/black
     rev: 23.1.0
     hooks:
@@ -36,16 +35,3 @@ repos:
       - id: ruff
         args:
           - --fix
-          - --line-length=100
-  - repo: local
-    hooks:
-      - id: pyright
-        name: pyright
-        entry: pyright
-        language: node
-        pass_filenames: false
-        types: [python]
-        additional_dependencies: ["pyright@1.1.332"]
-        args:
-          - --project=pyproject.toml
-        language_version: 16.20.2  # Change this to the required Node.js version

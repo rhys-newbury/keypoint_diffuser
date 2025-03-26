@@ -10,6 +10,7 @@ services:
         - ~/.gitconfig:/etc/gitconfig
         - ~/.ssh:/home/taco/.ssh
         - /mnt/wslg:/mnt/wslg
+        - /home/taco/shape_data:/app/data/shapenet/shape_data
 
       network_mode: "host"
       build:

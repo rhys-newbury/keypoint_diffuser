@@ -1,5 +1,11 @@
 import json
 import os
+import sys
+from pathlib import Path
+
+
+kp_path = Path(__file__).resolve().absolute().parent.parent
+sys.path.append(str(kp_path))
 import time
 from datetime import datetime
 
@@ -11,11 +17,10 @@ import torch
 import torch.nn.parallel
 import torch.utils.data
 from tensorboardX import SummaryWriter
-from tqdm import tqdm
 
+import wandb
 from keypointdeformer.datasets import get_dataset
 from keypointdeformer.models import get_model
-from keypointdeformer.models.encoder_models.autoencoder import AutoEncoder
 from keypointdeformer.options.base_options import BaseOptions
 from keypointdeformer.utils import io
 from keypointdeformer.utils.cages import deform_with_MVC
@@ -25,6 +30,8 @@ from keypointdeformer.utils.utils import Timer
 
 CHECKPOINTS_DIR = "checkpoints"
 CHECKPOINT_EXT = ".pth"
+
+RUN = None
 
 
 def write_losses(writer, losses, step):
@@ -183,10 +190,8 @@ def save_output(save_dir_root, data, outputs, save_mesh=True, save_auxilary=True
             )
 
 
-def split_batch(data, b, singleton_keys=None):
-    return {
-        k: v[b] if k not in (singleton_keys or []) else v[0] for k, v in data.items()
-    }
+def split_batch(data, b, singleton_keys=[]):
+    return {k: v[b] if k not in singleton_keys else v[0] for k, v in data.items()}
 
 
 def save_outputs(outputs_save_dir, data, outputs, save_mesh=True):
@@ -199,19 +204,8 @@ def save_outputs(outputs_save_dir, data, outputs, save_mesh=True):
         )
 
 
-def get_data(dataset, data):
-    data = dataset.uncollate(data)
-
-    source_shape, target_shape = data["source_shape"], data["target_shape"]
-
-    source_shape_t = source_shape.transpose(1, 2)
-    target_shape_t = target_shape.transpose(1, 2)
-
-    return source_shape_t, target_shape_t
-
-
 def visualize_point_cloud(
-    points, labels, keypoints, orig_shape, meshV, faceV, visual=False, icp=True
+    points, labels, keypoints, orig_shape, visual=False, icp=True
 ):
     """
     Visualize a 3D point cloud with color based on labels.
@@ -266,20 +260,8 @@ def visualize_point_cloud(
             o3d.pipelines.registration.TransformationEstimationPointToPoint(),
         )
 
-        # print("ICP Transformation Matrix:\n", reg_icp.transformation)
-        # print("Fitness:", reg_icp.fitness)
-        # print("Inlier RMSE:", reg_icp.inlier_rmse)
-        # print(np.asarray(pcd.points))
-
         pcd.transform(reg_icp.transformation)
 
-    # print(np.asarray(pcd.points))
-
-    # keypoints_pcd = o3d.geometry.PointCloud()
-    # keypoints_pcd.points = o3d.utility.Vector3dVector(keypoints_np)
-    # keypoints_pcd.paint_uniform_color([0, 0, 1])  # Blue color for keypoints
-
-    # Make keypoints larger (by adding spheres around keypoints)
     if visual:
         keypoint_spheres = []
         for keypoint in keypoints_np:
@@ -299,6 +281,17 @@ def visualize_point_cloud(
         )
 
     return np.asarray(pcd.points)
+
+
+def get_data(dataset, data):
+    data = dataset.uncollate(data)
+    # print(data); import pdb; pdb.set_trace()
+    source_shape, target_shape = data["source_shape"], data["target_shape"]
+
+    source_shape_t = source_shape.transpose(1, 2)
+    target_shape_t = target_shape.transpose(1, 2)
+
+    return source_shape_t, target_shape_t
 
 
 def test(opt, save_subdir="test"):
@@ -330,83 +323,38 @@ def test(opt, save_subdir="test"):
     test_output_dir = os.path.join(log_dir, save_subdir)
     os.makedirs(test_output_dir, exist_ok=True)
 
-    ckpt = torch.load("/app/ckpt_0.000248_233000.pt")
+    timer = Timer("step")
+    closest_labels_ = []
 
-    ae_model = AutoEncoder(ckpt["args"]).cuda()
-    ae_model.load_state_dict(ckpt["state_dict"])
-    ae_model.eval()
-
-    Timer("step")
     with torch.no_grad():
-        closest_labels_ = []
+        for data in dataloader:
+            timer.stop()
+            timer.start()
 
-        brr = 0
-
-        total_batches = len(dataloader)
-
-        # Wrap the dataloader with tqdm
-        for data in tqdm(
-            dataloader, desc="Processing data", unit="batch", total=total_batches
-        ):
-            brr += 1
+            # data
             data = dataset.uncollate(data)
 
             source_shape_t, target_shape_t = get_data(dataset, data)
             outputs = net(source_shape_t, target_shape=target_shape_t)
+            code = outputs["target_keypoints"]
+            target_sampled_points = data["target_sampled_points"]
 
-            code = ae_model.encode(target_shape_t.permute(0, 2, 1))
-            recons_after = ae_model.decode(
-                code, target_shape_t.size(2), flexibility=ckpt["args"].flexibility
-            ).detach()
+            for i in range(code.shape[0]):
+                kp = code[i, ...].T
+                points = target_shape_t[i, ...].T
 
-            colors1 = np.zeros_like(
-                recons_after[0, ...].cpu().numpy()
-            )  # Create a color array matching the number of points
-            colors1[:, :] = [1, 0, 0]  # Set all points to red
+                seg_labels = target_sampled_points[i, :, -1].int().cuda()
+                seg_points = target_sampled_points[i, :, :3]
 
-            colors2 = np.zeros_like(
-                recons_after[0, ...].cpu().numpy()
-            )  # Create a color array matching the number of points
-            colors2[:, :] = [1, 0, 0]  # Set all points to red
-
-            pcd1 = o3d.geometry.PointCloud()
-            pcd1.points = o3d.utility.Vector3dVector(
-                target_shape_t[0, ...].cpu().numpy().T
-            )
-            pcd1.colors = o3d.utility.Vector3dVector(colors1)
-
-            pcd2 = o3d.geometry.PointCloud()
-            pcd2.points = o3d.utility.Vector3dVector(recons_after[0, ...].cpu().numpy())
-            pcd1.colors = o3d.utility.Vector3dVector(colors2)
-
-            o3d.visualization.draw_geometries([pcd1, pcd2])
-            # import pdb; pdb.set_trace()
-
-            for i in range(outputs["target_keypoints"].shape[0]):
-                kp = outputs["target_keypoints"][i, ...]
-
-                points = data["target_shape"][i, ...]
-
-                # sampled_points
-                # import pdb; pdb.set_trace()
-
-                seg_labels = data["target_sampled_points"][i, :, -1].int()
-                seg_points = data["target_sampled_points"][i, :, :3]
-
-                # import pdb; pdb.set_trace()
-
-                # print(seg)
                 seg_points = visualize_point_cloud(
                     seg_points,
                     seg_labels,
                     kp,
                     points,
-                    meshV=data["target_mesh"][i],
-                    faceV=data["target_face"][i],
                     visual=False,
                 )
 
-                distances = torch.cdist(kp.T.double(), torch.tensor(seg_points).cuda())
+                distances = torch.cdist(kp.double(), torch.tensor(seg_points).cuda())
                 threshold = 0.05
 
                 within_threshold_mask = (
@@ -416,6 +364,7 @@ def test(opt, save_subdir="test"):
                 keypoint_indices, seg_point_indices = torch.nonzero(
                     within_threshold_mask, as_tuple=True
                 )
+                # import pdb; pdb.set_trace()
                 valid_seg_labels = seg_labels[
                     seg_point_indices
                 ]  # The labels for valid segmentation points
@@ -432,24 +381,28 @@ def test(opt, save_subdir="test"):
                 # Mark True for each label that is present for each keypoint
                 label_presence_matrix[keypoint_indices, valid_seg_labels.long()] = True
 
-                # import pdb; pdb.set_trace()
-
                 closest_labels_.append(label_presence_matrix)
 
-            save_outputs(os.path.join(log_dir, save_subdir), data, outputs)
-
+        # import pdb; pdb.set_trace()
         closest_labels_tensor = torch.stack(closest_labels_)
 
         average_correlation_per_keypoint = (
             closest_labels_tensor[:, :, :].sum(dim=0).max(dim=1)[0]
             / closest_labels_tensor.shape[0]
         ).mean()
-
         print(average_correlation_per_keypoint)
+        wandb.log(
+            {"average_correlation_per_keypoint": average_correlation_per_keypoint}
+        )
+
+        print(outputs)
+        # import pdb; pdb.set_trace()
+
+        save_outputs(os.path.join(log_dir, save_subdir), data, outputs)
 
 
 def train(opt):
-    log_dir = os.path.join(opt.log_dir, opt.name)
+    log_dir = os.path.join(opt.log_dir, RUN.name)
     checkpoints_dir = os.path.join(log_dir, CHECKPOINTS_DIR)
 
     dataset = get_dataset(opt.dataset)(opt)
@@ -464,6 +417,7 @@ def train(opt):
     )
 
     # network
+    # import pdb; pdb.set_trace()
     net = get_model(opt.model)(opt).cuda()
     net.apply(weights_init)
     if opt.ckpt:
@@ -478,9 +432,9 @@ def train(opt):
 
     # train
     os.makedirs(checkpoints_dir, exist_ok=True)
-    log_path = os.path.join(checkpoints_dir, "training_log.txt")
-    with open(log_path, "a") as log_file:
-        log_file.write(str(net) + "\n")
+
+    log_file = open(os.path.join(checkpoints_dir, "training_log.txt"), "a")
+    log_file.write(str(net) + "\n")
     summary_dir = datetime.now().strftime("%y%m%d-%H%M%S")
     writer = SummaryWriter(
         logdir=os.path.join(checkpoints_dir, "logs", summary_dir), flush_secs=5
@@ -499,6 +453,7 @@ def train(opt):
             source_shape_t, target_shape_t = get_data(dataset, data)
             outputs = net(source_shape_t, target_shape=target_shape_t)
             current_loss = net.compute_loss(t)
+            wandb.log(current_loss, step=t)
             net.optimize(current_loss, t)
 
             if t % opt.save_interval == 0:
@@ -519,12 +474,12 @@ def train(opt):
                 )
 
                 print(log_str)
-                with open(log_path, "a") as log_file:
-                    log_file.write(log_str + "\n")
+                log_file.write(log_str + "\n")
 
                 write_losses(writer, current_loss, t)
             t += 1
 
+    log_file.close()
     save_network(net, checkpoints_dir, network_label="net", epoch_label="final")
 
 
@@ -536,9 +491,16 @@ if __name__ == "__main__":
     torch.manual_seed(seed)
     np.random.seed(seed)
 
+    # global RUN
+
     if opt.phase == "test":
+        RUN = wandb.init(project="diffuse_keypoints_test")
+        wandb.log(
+            {"ckpt": opt.ckpt, "n_keypoints": opt.n_keypoints, "type": "baseline"}
+        )
         test(opt, save_subdir=opt.subdir)
     elif opt.phase == "train":
+        RUN = wandb.init(project="diffuse_keypoints")
         train(opt)
     else:
         raise ValueError()

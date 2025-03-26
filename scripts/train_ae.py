@@ -6,9 +6,11 @@ from pathlib import Path
 kp_path = Path(__file__).resolve().absolute().parent.parent
 sys.path.append(str(kp_path))
 
+import copy
 import json
 import time
 from datetime import datetime
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -34,9 +36,11 @@ from keypointdeformer.utils.nn import load_network, save_network
 from keypointdeformer.utils.utils import Timer
 
 
-wandb.init(project="diffuse_keypoints")
+RUN = None
 
-from deform import apply_general_deformation
+from torchvision import transforms
+from transforms import ApplyToBoth, Collect, Deform, GridSample, ToTensor
+from utils import collate_fn
 
 
 CHECKPOINTS_DIR = "checkpoints"
@@ -331,18 +335,41 @@ def visualize_point_clouds(
 
 
 def test(opt, save_subdir="test"):
+    t = transforms.Compose(
+        [
+            Deform(),  # Forks into two versions: original and deformed
+            ApplyToBoth(
+                transforms.Compose(
+                    [
+                        GridSample(
+                            keys=("coord",),
+                            hash_type="fnv",
+                            mode="train",
+                            return_grid_coord=True,
+                        ),
+                        ToTensor(),
+                        Collect(
+                            keys=("coord", "grid_coord", "transformation", "shape"),
+                            feat_keys=("coord",),
+                        ),
+                    ]
+                )
+            ),
+        ]
+    )
+
     log_dir = os.path.join(opt.log_dir, opt.name)
     checkpoints_dir = os.path.join(log_dir, CHECKPOINTS_DIR)
-
+    # /app/data/keypoints/logs/autumn-waterfall-200/checkpoints/net_final.pth
     opt.phase = "test"
-    dataset = get_dataset(opt.dataset)(opt)
+    dataset = get_dataset(opt.dataset)(opt, transform=t)
 
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=opt.batch_size,
         shuffle=False,
         drop_last=False,
-        collate_fn=dataset.collate,
+        collate_fn=collate_fn,
         num_workers=0,
         worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
     )
@@ -367,23 +394,39 @@ def test(opt, save_subdir="test"):
         for data in tqdm(
             dataloader, desc="Processing data", unit="batch", total=total_batches
         ):
-            data = dataset.uncollate(data)
-            target_shape_t = data["target_shape"].transpose(1, 2).cuda()
+            # import pdb; pdb.set_trace()
+            # data_ = dataset.uncollate(data)
+            # target_shape_t = data_["target_shape"].transpose(1, 2).cuda()
+            target_shape_t = (
+                data["target_shape"]
+                .view(data["orig_offset"].shape[0], -1, 3)
+                .transpose(1, 2)
+                .cuda()
+            )
 
-            code = ae_model.encode(target_shape_t)
+            code = ae_model.encode(get_network_data(data))
             code[:, :-5].reshape(code.shape[0], -1, 3)
 
             ae_model.decode(
                 code, target_shape_t.size(2), flexibility=opt.flexibility
             ).detach()
 
+            target_sampled_points = data["target_sampled_points"].view(
+                data["orig_offset"].shape[0], -1, 4
+            )
+
             for i in range(code.shape[0]):
                 kp = code[i, :-5].reshape(-1, 3)
 
-                points = data["target_shape"][i, ...]
+                # import pdb; pdb.set_trace()
 
-                seg_labels = data["target_sampled_points"][i, :, -1].int()
-                seg_points = data["target_sampled_points"][i, :, :3]
+                points = target_shape_t[i, ...].T
+
+                seg_labels = target_sampled_points[i, :, -1].int().cuda()
+                seg_points = target_sampled_points[i, :, :3]
+
+                # import pdb; pdb.set_trace()
+
                 seg_points = visualize_point_cloud(
                     seg_points,
                     seg_labels,
@@ -402,6 +445,7 @@ def test(opt, save_subdir="test"):
                 keypoint_indices, seg_point_indices = torch.nonzero(
                     within_threshold_mask, as_tuple=True
                 )
+                # import pdb; pdb.set_trace()
                 valid_seg_labels = seg_labels[
                     seg_point_indices
                 ]  # The labels for valid segmentation points
@@ -420,12 +464,19 @@ def test(opt, save_subdir="test"):
 
                 closest_labels_.append(label_presence_matrix)
 
+        # import pdb; pdb.set_trace()
         closest_labels_tensor = torch.stack(closest_labels_)
 
         average_correlation_per_keypoint = (
             closest_labels_tensor[:, :, :].sum(dim=0).max(dim=1)[0]
             / closest_labels_tensor.shape[0]
         ).mean()
+        # print()
+        wandb.log(
+            {"average_correlation_per_keypoint": average_correlation_per_keypoint}
+        )
+
+        # import pdb; pdb.set_trace()
         print(average_correlation_per_keypoint)
 
 
@@ -472,17 +523,71 @@ def sample_farthest_points(points, num_samples, return_index=False):
         return sampled
 
 
+def get_network_data(data: dict[str, Any], key="orig"):
+    opp = "deformed" if key == "orig" else "orig"
+
+    d = {}
+    for k, v in data.items():
+        if k.startswith(opp):
+            continue
+        elif k.startswith(key):
+            d[k[len(key) + 1 :]] = v
+        else:
+            d[k] = v
+    return d
+
+
 def train(opt):
-    log_dir = os.path.join(opt.log_dir, opt.name)
+    log_dir = os.path.join(opt.log_dir, RUN.name)
     checkpoints_dir = os.path.join(log_dir, CHECKPOINTS_DIR)
 
-    dataset = get_dataset(opt.dataset)(opt)
+    t = transforms.Compose(
+        [
+            Deform(),  # Forks into two versions: original and deformed
+            ApplyToBoth(
+                transforms.Compose(
+                    [
+                        GridSample(
+                            keys=("coord",),
+                            hash_type="fnv",
+                            mode="train",
+                            return_grid_coord=True,
+                        ),
+                        ToTensor(),
+                        Collect(
+                            keys=("coord", "grid_coord", "transformation", "shape"),
+                            feat_keys=("coord",),
+                        ),
+                    ]
+                )
+            ),
+        ]
+    )
+
+    dataset = get_dataset(opt.dataset)(opt, transform=t)
+
+    # import pdb; pdb.set_trace()
+
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=opt.batch_size,
         shuffle=True,
         drop_last=True,
-        collate_fn=dataset.collate,
+        collate_fn=collate_fn,
+        num_workers=opt.n_workers,
+        worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
+    )
+
+    opt_test = copy.deepcopy(opt)
+    opt_test.phase = "test"
+    test_dataset = get_dataset(opt_test.dataset)(opt_test, transform=t)
+
+    test_dataloader = torch.utils.data.DataLoader(
+        test_dataset,
+        batch_size=8,
+        shuffle=True,
+        drop_last=True,
+        collate_fn=collate_fn,
         num_workers=opt.n_workers,
         worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
     )
@@ -539,16 +644,26 @@ def train(opt):
                 # print(f"Freeze network time: {time.time() - start:.4f} sec")
 
             time.time()
-            target_shape_t = data["target_shape"].transpose(1, 2).cuda()
+            # import pdb; pdb.set_trace()
+            target_shape_t = (
+                data["target_shape"]
+                .view(data["orig_offset"].shape[0], -1, 3)
+                .transpose(1, 2)
+                .cuda()
+            )
             # print(f"Data transfer to CUDA time: {time.time() - start:.4f} sec")
 
             optimizer.zero_grad()
             net.train()
 
             time.time()
-            loss, code = net.get_loss(target_shape_t, opt.use_perceptual_loss)
+
+            # import pdb; pdb.set_trace()
+
+            loss, code = net.get_loss(get_network_data(data), opt.use_perceptual_loss)
+            # import pdb; pdb.set_trace()
             code_ = code[:, : opt.latent_dim * 3].reshape(
-                target_shape_t.shape[0], -1, 3
+                data["orig_offset"].shape[0], -1, 3
             )
             # print(f"Forward pass time: {time.time() - start:.4f} sec")
 
@@ -579,16 +694,23 @@ def train(opt):
                 )
                 # print(f"Chamfer distance time: {time.time() - start:.4f} sec")
 
-                time.time()
-                deformed_shape, deformed_matrix = apply_general_deformation(
-                    target_shape_t.permute(0, 2, 1)
+                # time.time()
+                # deformed_shape, deformed_matrix = apply_general_deformation(
+                #     target_shape_t.permute(0, 2, 1)
+                # )
+                # deformed_shape = deformed_shape.permute(0, 2, 1)
+                data["deformed_shape"].view(data["orig_offset"].shape[0], -1, 3)
+
+                deformed_matrix = data["deformed_transformation"].view(
+                    data["orig_offset"].shape[0], -1, 3
                 )
-                deformed_shape = deformed_shape.permute(0, 2, 1)
+                # np.save("deformed_shape.npy", deformed_shape)
+                # import pdb; pdb.set_trace()
+
                 # print(f"Deformation time: {time.time() - start:.4f} sec")
 
-                time.time()
                 kp_orig = code[:, :-5].reshape(code.shape[0], -1, 3)
-                deformed_code = net.encode(deformed_shape)
+                deformed_code = net.encode(get_network_data(data, "deformed"))
                 kp_deformed = deformed_code[:, :-5].reshape(code.shape[0], -1, 3)
                 kp_transformed = torch.bmm(kp_orig, deformed_matrix.transpose(1, 2))
                 mse_loss = torch.mean((kp_transformed - kp_deformed) ** 2)
@@ -631,6 +753,20 @@ def train(opt):
 
             t += 1
 
+        torch.cuda.empty_cache()
+        test_loss = 0
+        net.eval()
+        with torch.no_grad():
+            for _, data in enumerate(test_dataloader):
+                # target_shape_t = data["target_shape"].transpose(1, 2).cuda()
+                # print(target_shape_t.shape)
+
+                loss, code = net.get_loss(
+                    get_network_data(data), opt.use_perceptual_loss
+                )
+                test_loss += loss
+        wandb.log({"mse_test_loss": test_loss}, step=t)
+
     save_network(net, checkpoints_dir, network_label="net", epoch_label="final")
 
 
@@ -643,8 +779,12 @@ if __name__ == "__main__":
     np.random.seed(seed)
 
     if opt.phase == "test":
+        RUN = wandb.init(project="diffuse_keypoints_test")
+        wandb.log({"ckpt": opt.ckpt, "n_keypoints": opt.latent_dim, "type": "ours"})
+
         test(opt, save_subdir=opt.subdir)
     elif opt.phase == "train":
+        RUN = wandb.init(project="diffuse_keypoints")
         train(opt)
     else:
         raise ValueError()

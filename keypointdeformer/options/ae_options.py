@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 import configargparse
-from typing import Optional
+
 from .. import datasets, models
 
 
@@ -18,7 +18,7 @@ class AEConfig:
     dim: int = 3
     log_dir: str = "./log"
     subdir: str = "test"
-    batch_size: int = 96
+    batch_size: int = 48
     print_options: bool = False
     phase: str = "train"
     iteration: int = None
@@ -141,7 +141,6 @@ class AEOptions:
 
         if opt.normalization == "none":
             opt.normalization = None
-
 
         opt_dict = vars(opt)
         opt_dict.pop("config", None)  # Remove config file path
