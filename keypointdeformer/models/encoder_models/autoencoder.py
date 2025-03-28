@@ -2,7 +2,8 @@ from torch.nn import Module
 
 from .diffusion import DiffusionPoint, PointwiseNet, VarianceSchedule
 from .encoders import PointTransformerv2
-
+from .vp_model import VPPrecond
+from keypointdeformer.utils.loss import EDMLoss
 
 class AutoEncoder(Module):
     def __init__(self, args):
@@ -11,7 +12,7 @@ class AutoEncoder(Module):
         self.encoder = PointTransformerv2(
             zdim=args.latent_dim, extra_latent=args.extra_latent
         )
-        self.diffusion = DiffusionPoint(
+        self.diffusion_ = DiffusionPoint(
             # +10
             net=PointwiseNet(
                 point_dim=3,
@@ -25,6 +26,8 @@ class AutoEncoder(Module):
                 mode=args.sched_mode,
             ),
         )
+        self.diffusion = VPPrecond(self.diffusion_)
+        self.loss = EDMLoss()
 
     def encode(self, x):
         """
@@ -42,8 +45,9 @@ class AutoEncoder(Module):
     def get_loss(self, x, use_perceptual_loss=False):
         code = self.encode(x)
         t = x["target_shape"].view(-1, 5000, 3).cuda()
+        loss = self.loss(net=self.diffusion, data=t, code=code).sum()
 
-        loss = self.diffusion.get_loss(
-            t.transpose(1, 2), code, use_perceptual_loss=use_perceptual_loss
-        )
+        # loss = self.diffusion.get_loss(
+        #     t.transpose(1, 2), code, use_perceptual_loss=use_perceptual_loss
+        # )
         return loss, code

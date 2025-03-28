@@ -3,7 +3,6 @@ from torch.nn import Module
 from .encoder_models.diffusion import DiffusionPoint, PointwiseNet, VarianceSchedule
 from .encoder_models.encoders import PointTransformerv2
 
-
 class AutoEncoder(Module):
     @staticmethod
     def modify_commandline_options(parser):

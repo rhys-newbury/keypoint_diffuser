@@ -34,7 +34,7 @@ from keypointdeformer.utils import io
 from keypointdeformer.utils.cages import deform_with_MVC
 from keypointdeformer.utils.nn import load_network, save_network
 from keypointdeformer.utils.utils import Timer
-
+from keypointdeformer.utils.eval_metrics import *
 
 RUN = None
 
@@ -218,6 +218,25 @@ def save_outputs(outputs_save_dir, data, outputs, save_mesh=True):
             save_mesh=save_mesh,
         )
 
+def normalize_point_clouds(pcs, mode):
+    if mode is None:
+        print('Will not normalize point clouds.')
+        return pcs
+    print(f'Normalization mode: {mode}')
+    for i in tqdm(range(pcs.size(0)), desc='Normalize'):
+        pc = pcs[i]
+        if mode == 'shape_unit':
+            shift = pc.mean(dim=0).reshape(1, 3)
+            scale = pc.flatten().std().reshape(1, 1)
+        elif mode == 'shape_bbox':
+            pc_max, _ = pc.max(dim=0, keepdim=True) # (1, 3)
+            pc_min, _ = pc.min(dim=0, keepdim=True) # (1, 3)
+            shift = ((pc_min + pc_max) / 2).view(1, 3)
+            scale = (pc_max - pc_min).max().reshape(1, 1) / 2
+        pc = (pc - shift) / scale
+        pcs[i] = pc
+    return pcs
+
 
 def get_data(dataset, data):
     data = dataset.uncollate(data)
@@ -383,7 +402,8 @@ def test(opt, save_subdir="test"):
     ae_model = AutoEncoder(opt).cuda()
     ae_model.load_state_dict(ckpt["states"])
     ae_model.eval()
-
+    all_ref = []
+    all_recons = []
     Timer("step")
     with torch.no_grad():
         closest_labels_ = []
@@ -407,13 +427,18 @@ def test(opt, save_subdir="test"):
             code = ae_model.encode(get_network_data(data))
             code[:, :-5].reshape(code.shape[0], -1, 3)
 
-            ae_model.decode(
+            recons = ae_model.decode(
                 code, target_shape_t.size(2), flexibility=opt.flexibility
             ).detach()
+
+            all_ref.append(target_shape_t.detach().cpu())
+            all_recons.append(recons.detach().cpu())
+
 
             target_sampled_points = data["target_sampled_points"].view(
                 data["orig_offset"].shape[0], -1, 4
             )
+
 
             for i in range(code.shape[0]):
                 kp = code[i, :-5].reshape(-1, 3)
@@ -463,6 +488,7 @@ def test(opt, save_subdir="test"):
                 label_presence_matrix[keypoint_indices, valid_seg_labels.long()] = True
 
                 closest_labels_.append(label_presence_matrix)
+            # break
 
         # import pdb; pdb.set_trace()
         closest_labels_tensor = torch.stack(closest_labels_)
@@ -478,7 +504,16 @@ def test(opt, save_subdir="test"):
 
         # import pdb; pdb.set_trace()
         print(average_correlation_per_keypoint)
+        import pdb; pdb.set_trace()
 
+        all_ref = torch.cat(all_ref, dim=0).permute(0,2,1)
+        all_ref = normalize_point_clouds(all_ref, "shape_bbox")
+        all_recons = torch.cat(all_recons, dim=0)
+        all_recons = normalize_point_clouds(all_recons, "shape_bbox")
+        results = compute_all_metrics(all_recons.to("cuda"), all_ref.to("cuda"), opt.batch_size)
+
+        # metrics = EMD_CD(all_recons.to("cuda"), all_ref.to("cuda"), batch_size=opt.batch_size)
+        import pdb; pdb.set_trace()
 
 def get_linear_scheduler(optimizer, start_epoch, end_epoch, start_lr, end_lr):
     def lr_func(epoch):
@@ -640,7 +675,7 @@ def train(opt):
 
             if t % 200 == 0:
                 time.time()
-                net.diffusion.freeze_network()
+                # net.diffusion.freeze_network()
                 # print(f"Freeze network time: {time.time() - start:.4f} sec")
 
             time.time()
@@ -665,13 +700,15 @@ def train(opt):
             code_ = code[:, : opt.latent_dim * 3].reshape(
                 data["orig_offset"].shape[0], -1, 3
             )
+            print(loss)
+            # import pdb; pdb.set_trace()
             # print(f"Forward pass time: {time.time() - start:.4f} sec")
 
             time.time()
             wandb.log({"diffusion_loss": loss}, step=t)
             # print(f"Wandb logging time: {time.time() - start:.4f} sec")
 
-            if t < 1000:
+            if t < 1000 and False:
                 time.time()
                 fps = sample_farthest_points(target_shape_t, opt.latent_dim).transpose(
                     2, 1
@@ -784,7 +821,7 @@ if __name__ == "__main__":
 
         test(opt, save_subdir=opt.subdir)
     elif opt.phase == "train":
-        RUN = wandb.init(project="diffuse_keypoints")
+        RUN = wandb.init(project="diffuse_keypoints_lamp")
         train(opt)
     else:
         raise ValueError()
