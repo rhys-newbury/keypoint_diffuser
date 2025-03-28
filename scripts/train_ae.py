@@ -32,7 +32,7 @@ from keypointdeformer.models.encoder_models.autoencoder import AutoEncoder
 from keypointdeformer.options.ae_options import AEOptions
 from keypointdeformer.utils import io
 from keypointdeformer.utils.cages import deform_with_MVC
-from keypointdeformer.utils.eval_metrics import compute_all_metrics
+from keypointdeformer.utils.eval_metrics import EMD_CD
 from keypointdeformer.utils.nn import load_network, save_network
 from keypointdeformer.utils.utils import Timer
 
@@ -389,7 +389,7 @@ def test(opt, save_subdir="test"):
         dataset,
         batch_size=opt.batch_size,
         shuffle=False,
-        drop_last=False,
+        drop_last=True,
         collate_fn=collate_fn,
         num_workers=0,
         worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
@@ -429,9 +429,11 @@ def test(opt, save_subdir="test"):
             code = ae_model.encode(get_network_data(data))
             code[:, :-5].reshape(code.shape[0], -1, 3)
 
-            recons = ae_model.decode(
-                code, target_shape_t.size(2), flexibility=opt.flexibility
-            ).detach()
+            # recons = ae_model.decode(
+            #     code, target_shape_t.size(2), flexibility=opt.flexibility
+            # ).detach()
+
+            recons = ae_model.decode_edm(code).detach()
 
             all_ref.append(target_shape_t.detach().cpu())
             all_recons.append(recons.detach().cpu())
@@ -509,7 +511,8 @@ def test(opt, save_subdir="test"):
         all_ref = normalize_point_clouds(all_ref, "shape_bbox")
         all_recons = torch.cat(all_recons, dim=0)
         all_recons = normalize_point_clouds(all_recons, "shape_bbox")
-        compute_all_metrics(all_recons.to("cuda"), all_ref.to("cuda"), opt.batch_size)
+        import pdb; pdb.set_trace()
+        EMD_CD(all_recons.to("cuda"), all_ref.to("cuda"), opt.batch_size)
 
 
 def get_linear_scheduler(optimizer, start_epoch, end_epoch, start_lr, end_lr):
@@ -705,7 +708,7 @@ def train(opt):
             wandb.log({"diffusion_loss": loss}, step=t)
             # print(f"Wandb logging time: {time.time() - start:.4f} sec")
 
-            if False:
+            if t < 1000:
                 time.time()
                 fps = sample_farthest_points(target_shape_t, opt.latent_dim).transpose(
                     2, 1
@@ -787,19 +790,19 @@ def train(opt):
 
             t += 1
 
-        torch.cuda.empty_cache()
-        test_loss = 0
-        net.eval()
-        with torch.no_grad():
-            for _, data in enumerate(test_dataloader):
-                # target_shape_t = data["target_shape"].transpose(1, 2).cuda()
-                # print(target_shape_t.shape)
+        # torch.cuda.empty_cache()
+        # test_loss = 0
+        # net.eval()
+        # with torch.no_grad():
+        #     for _, data in enumerate(test_dataloader):
+        #         # target_shape_t = data["target_shape"].transpose(1, 2).cuda()
+        #         # print(target_shape_t.shape)
 
-                loss, code = net.get_loss(
-                    get_network_data(data), opt.use_perceptual_loss
-                )
-                test_loss += loss
-        wandb.log({"mse_test_loss": test_loss}, step=t)
+        #         loss, code = net.get_loss(
+        #             get_network_data(data), opt.use_perceptual_loss
+        #         )
+        #         test_loss += loss
+        # wandb.log({"mse_test_loss": test_loss}, step=t)
 
     save_network(net, checkpoints_dir, network_label="net", epoch_label="final")
 
