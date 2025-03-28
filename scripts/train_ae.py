@@ -511,7 +511,9 @@ def test(opt, save_subdir="test"):
         all_ref = normalize_point_clouds(all_ref, "shape_bbox")
         all_recons = torch.cat(all_recons, dim=0)
         all_recons = normalize_point_clouds(all_recons, "shape_bbox")
-        import pdb; pdb.set_trace()
+        import pdb
+
+        pdb.set_trace()
         EMD_CD(all_recons.to("cuda"), all_ref.to("cuda"), opt.batch_size)
 
 
@@ -617,7 +619,7 @@ def train(opt):
     opt_test.phase = "test"
     test_dataset = get_dataset(opt_test.dataset)(opt_test, transform=t)
 
-    test_dataloader = torch.utils.data.DataLoader(
+    torch.utils.data.DataLoader(
         test_dataset,
         batch_size=8,
         shuffle=True,
