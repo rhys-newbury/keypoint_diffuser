@@ -1,16 +1,19 @@
-
 # import numpy as np
 import torch
+
+
 # from torch_utils import persistence
 # from torch.nn.functional import silu
 
+
 class VPPrecond(torch.nn.Module):
-    def __init__(self,
-        model,                 
-        beta_d          = 19.9,         # Extent of the noise level schedule.
-        beta_min        = 0.1,          # Initial slope of the noise level schedule.
-        M               = 1000,         # Original number of timesteps in the DDPM formulation.
-        epsilon_t       = 1e-5,         # Minimum t-value used during training.
+    def __init__(
+        self,
+        model,
+        beta_d=19.9,  # Extent of the noise level schedule.
+        beta_min=0.1,  # Initial slope of the noise level schedule.
+        M=1000,  # Original number of timesteps in the DDPM formulation.
+        epsilon_t=1e-5,  # Minimum t-value used during training.
     ):
         super().__init__()
 
@@ -29,7 +32,7 @@ class VPPrecond(torch.nn.Module):
 
         c_skip = 1
         c_out = -sigma
-        c_in = 1 / (sigma ** 2 + 1).sqrt()
+        c_in = 1 / (sigma**2 + 1).sqrt()
         c_noise = (self.M - 1) * self.sigma_inv(sigma)
 
         F_x = self.model((c_in * x).to(dtype), c_noise.flatten(), **model_kwargs)
@@ -39,11 +42,14 @@ class VPPrecond(torch.nn.Module):
 
     def sigma(self, t):
         t = torch.as_tensor(t)
-        return ((0.5 * self.beta_d * (t ** 2) + self.beta_min * t).exp() - 1).sqrt()
+        return ((0.5 * self.beta_d * (t**2) + self.beta_min * t).exp() - 1).sqrt()
 
     def sigma_inv(self, sigma):
         sigma = torch.as_tensor(sigma)
-        return ((self.beta_min ** 2 + 2 * self.beta_d * (1 + sigma ** 2).log()).sqrt() - self.beta_min) / self.beta_d
+        return (
+            (self.beta_min**2 + 2 * self.beta_d * (1 + sigma**2).log()).sqrt()
+            - self.beta_min
+        ) / self.beta_d
 
     def round_sigma(self, sigma):
         return torch.as_tensor(sigma)

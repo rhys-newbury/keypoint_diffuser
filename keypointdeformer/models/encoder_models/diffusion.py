@@ -283,7 +283,7 @@ class DiffusionPoint(Module):
             if use_perceptual_loss
             else 0
         )
-    
+
     def forward(self, x, sigma, context):
         return self.net(x, sigma, context=context)
 

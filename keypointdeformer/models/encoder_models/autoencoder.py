@@ -1,9 +1,11 @@
 from torch.nn import Module
 
+from keypointdeformer.utils.loss import EDMLoss
+
 from .diffusion import DiffusionPoint, PointwiseNet, VarianceSchedule
 from .encoders import PointTransformerv2
 from .vp_model import VPPrecond
-from keypointdeformer.utils.loss import EDMLoss
+
 
 class AutoEncoder(Module):
     def __init__(self, args):

@@ -1,7 +1,7 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: zesty-microwave-291
+  name: lamp
 spec:
   maxRetry: 1
   minAvailable: 1
@@ -27,8 +27,8 @@ spec:
                 [
                   "python",
                   "-u",
-                  "scripts/main.py",
-                  "--n_keypoints=32",
+                  "scripts/train_ae.py",
+                  "--latent_dim=32",
                   "--n_iterations=20000",
                   "-c=configs/lamp.yaml",
                 ]
