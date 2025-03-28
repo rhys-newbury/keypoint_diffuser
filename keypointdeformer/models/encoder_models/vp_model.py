@@ -25,12 +25,56 @@ class VPPrecond(torch.nn.Module):
         self.sigma_max = float(self.sigma(1))
         self.model = model
 
+    def forward(self, x, sigma, **model_kwargs):
+        x = x.to(torch.float32)
+        sigma = sigma.to(torch.float32).reshape(-1, 1, 1)
+        dtype = torch.float32
+
+        c_skip = 1
+        c_out = -sigma
+        c_in = 1 / (sigma**2 + 1).sqrt()
+        c_noise = (self.M - 1) * self.sigma_inv(sigma)
+
+        F_x = self.model((c_in * x).to(dtype), c_noise.flatten(), **model_kwargs)
+        assert F_x.dtype == dtype
+        D_x = c_skip * x + c_out * F_x.to(torch.float32)
+        return D_x
+
+    def sigma(self, t):
+        t = torch.as_tensor(t)
+        return ((0.5 * self.beta_d * (t**2) + self.beta_min * t).exp() - 1).sqrt()
+
+    def sigma_inv(self, sigma):
+        sigma = torch.as_tensor(sigma)
+        return (
+            (self.beta_min**2 + 2 * self.beta_d * (1 + sigma**2).log()).sqrt()
+            - self.beta_min
+        ) / self.beta_d
+
+    def round_sigma(self, sigma):
+        return torch.as_tensor(sigma)
+
+
+class EDMPrecond(torch.nn.Module):
+    def __init__(
+        self,
+        model,
+        sigma_min=0,  # Minimum supported noise level.
+        sigma_max=float("inf"),  # Maximum supported noise level.
+        sigma_data=0.25,  # Expected standard deviation of the training data.
+    ):
+        super().__init__()
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
+        self.sigma_data = sigma_data
+        self.model = model
+
     def edm_sampler(
         self,
         code,
         class_labels=None,
         randn_like=torch.randn_like,
-        num_steps=18,
+        num_steps=200,
         sigma_min=0.002,
         sigma_max=80,
         rho=7,
@@ -98,28 +142,18 @@ class VPPrecond(torch.nn.Module):
     def forward(self, x, sigma, **model_kwargs):
         x = x.to(torch.float32)
         sigma = sigma.to(torch.float32).reshape(-1, 1, 1)
+        # class_labels = None if self.label_dim == 0 else torch.zeros([1, self.label_dim], device=x.device) if class_labels is None else class_labels.to(torch.float32).reshape(-1, self.label_dim)
         dtype = torch.float32
 
-        c_skip = 1
-        c_out = -sigma
-        c_in = 1 / (sigma**2 + 1).sqrt()
-        c_noise = (self.M - 1) * self.sigma_inv(sigma)
+        c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
+        c_out = sigma * self.sigma_data / (sigma**2 + self.sigma_data**2).sqrt()
+        c_in = 1 / (self.sigma_data**2 + sigma**2).sqrt()
+        c_noise = sigma.log() / 4
 
         F_x = self.model((c_in * x).to(dtype), c_noise.flatten(), **model_kwargs)
         assert F_x.dtype == dtype
         D_x = c_skip * x + c_out * F_x.to(torch.float32)
         return D_x
-
-    def sigma(self, t):
-        t = torch.as_tensor(t)
-        return ((0.5 * self.beta_d * (t**2) + self.beta_min * t).exp() - 1).sqrt()
-
-    def sigma_inv(self, sigma):
-        sigma = torch.as_tensor(sigma)
-        return (
-            (self.beta_min**2 + 2 * self.beta_d * (1 + sigma**2).log()).sqrt()
-            - self.beta_min
-        ) / self.beta_d
 
     def round_sigma(self, sigma):
         return torch.as_tensor(sigma)

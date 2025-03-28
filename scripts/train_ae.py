@@ -514,7 +514,9 @@ def test(opt, save_subdir="test"):
         import pdb
 
         pdb.set_trace()
-        EMD_CD(all_recons.to("cuda"), all_ref.to("cuda"), opt.batch_size)
+        EMD_CD(
+            all_recons.to("cuda").double(), all_ref.to("cuda").double(), opt.batch_size
+        )
 
 
 def get_linear_scheduler(optimizer, start_epoch, end_epoch, start_lr, end_lr):

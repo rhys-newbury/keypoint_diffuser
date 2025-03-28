@@ -189,6 +189,8 @@ class PointwiseNet(Module):
         super().__init__()
         self.act = F.leaky_relu
         self.residual = residual
+        init_zero = {"init_mode": "kaiming_uniform", "init_weight": 0, "init_bias": 0}
+
         self.layers = ModuleList(
             [
                 ConcatSquashLinear(3, 128, context_dim + 3),
@@ -196,7 +198,7 @@ class PointwiseNet(Module):
                 ConcatSquashLinear(256, 512, context_dim + 3),
                 ConcatSquashLinear(512, 256, context_dim + 3),
                 ConcatSquashLinear(256, 128, context_dim + 3),
-                ConcatSquashLinear(128, 3, context_dim + 3),
+                ConcatSquashLinear(128, 3, context_dim + 3, **init_zero),
             ]
         )
 
@@ -239,7 +241,6 @@ class PointwiseNet(Module):
             out = layer(ctx=ctx_emb, x=out)
             if i < len(self.layers) - 1:
                 out = self.act(out)
-
         if self.residual:
             return x + out
         else:

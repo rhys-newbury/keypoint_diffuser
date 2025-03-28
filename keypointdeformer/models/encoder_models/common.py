@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from torch.nn import Linear, Module
+from torch.nn import Module
 from torch.optim.lr_scheduler import LambdaLR
 
 
@@ -35,12 +35,54 @@ def truncated_normal_(tensor, mean=0, std=1, trunc_std=2):
     return tensor
 
 
-class ConcatSquashLinear(Module):
-    def __init__(self, dim_in, dim_out, dim_ctx):
+def weight_init(shape, mode, fan_in, fan_out):
+    if mode == "xavier_uniform":
+        return np.sqrt(6 / (fan_in + fan_out)) * (torch.rand(*shape) * 2 - 1)
+    if mode == "xavier_normal":
+        return np.sqrt(2 / (fan_in + fan_out)) * torch.randn(*shape)
+    if mode == "kaiming_uniform":
+        return np.sqrt(3 / fan_in) * (torch.rand(*shape) * 2 - 1)
+    if mode == "kaiming_normal":
+        return np.sqrt(1 / fan_in) * torch.randn(*shape)
+    raise ValueError(f'Invalid init mode "{mode}"')
+
+
+class Linear(torch.nn.Module):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        bias=True,
+        init_mode="kaiming_normal",
+        init_weight=1,
+        init_bias=0,
+    ):
         super().__init__()
-        self._layer = Linear(dim_in, dim_out)
-        self._hyper_bias = Linear(dim_ctx, dim_out, bias=False)
-        self._hyper_gate = Linear(dim_ctx, dim_out)
+        self.in_features = in_features
+        self.out_features = out_features
+        init_kwargs = {"mode": init_mode, "fan_in": in_features, "fan_out": out_features}
+        self.weight = torch.nn.Parameter(
+            weight_init([out_features, in_features], **init_kwargs) * init_weight
+        )
+        self.bias = (
+            torch.nn.Parameter(weight_init([out_features], **init_kwargs) * init_bias)
+            if bias
+            else None
+        )
+
+    def forward(self, x):
+        x = x @ self.weight.to(x.dtype).t()
+        if self.bias is not None:
+            x = x.add_(self.bias.to(x.dtype))
+        return x
+
+
+class ConcatSquashLinear(Module):
+    def __init__(self, dim_in, dim_out, dim_ctx, **kwargs):
+        super().__init__()
+        self._layer = Linear(dim_in, dim_out, **kwargs)
+        self._hyper_bias = Linear(dim_ctx, dim_out, bias=False, **kwargs)
+        self._hyper_gate = Linear(dim_ctx, dim_out, **kwargs)
 
     def forward(self, ctx, x):
         gate = torch.sigmoid(self._hyper_gate(ctx))

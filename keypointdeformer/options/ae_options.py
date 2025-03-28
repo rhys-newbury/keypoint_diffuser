@@ -32,7 +32,7 @@ class AEConfig:
     beta_T: float = 0.05
     sched_mode: str = "linear"
     flexibility: float = 0.0
-    residual: bool = True
+    residual: bool = False
     resume: str = None
     lr: float = 1e-3
     weight_decay: float = 0
