@@ -25,7 +25,7 @@ class AEConfig:
     n_iterations: int = 200000
     save_interval: int = 100
     log_interval: int = 10
-    latent_dim: int = 24
+    latent_dim: int = 8
     extra_latent: int = 5
     num_steps: int = 200
     beta_1: float = 1e-4

@@ -54,7 +54,7 @@ class AutoEncoder(Module):
         code = self.encode(x)
         t = x["target_shape"].view(-1, 5000, 3).cuda()
         # import pdb; pdb.set_trace()
-        loss = self.loss(net=self.diffusion, data=t, code=code).mean()
+        loss = self.loss(net=self.diffusion, data=t, code=code.detach()).mean()
 
         # loss = self.diffusion.get_loss(
         #     t.transpose(1, 2), code, use_perceptual_loss=use_perceptual_loss

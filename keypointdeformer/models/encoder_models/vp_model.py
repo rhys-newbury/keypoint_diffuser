@@ -74,7 +74,7 @@ class EDMPrecond(torch.nn.Module):
         code,
         class_labels=None,
         randn_like=torch.randn_like,
-        num_steps=200,
+        num_steps=400,
         sigma_min=0.002,
         sigma_max=80,
         rho=7,

@@ -449,10 +449,10 @@ def test(opt, save_subdir="test"):
             #     code, target_shape_t.size(2), flexibility=opt.flexibility
             # ).detach()
 
-            recons = ae_model.decode_edm(code).detach()
+            # recons = ae_model.decode_edm(code).detach()
 
-            all_ref.append(target_shape_t.detach().cpu())
-            all_recons.append(recons.detach().cpu())
+            # all_ref.append(target_shape_t.detach().cpu())
+            # all_recons.append(recons.detach().cpu())
 
             target_sampled_points = data["target_sampled_points"].view(
                 data["orig_offset"].shape[0], -1, 4
@@ -480,6 +480,9 @@ def test(opt, save_subdir="test"):
 
                 distances = torch.cdist(kp.double(), torch.tensor(seg_points).cuda())
                 threshold = 0.05
+                import pdb
+
+                pdb.set_trace()
 
                 within_threshold_mask = (
                     distances <= threshold
@@ -520,7 +523,9 @@ def test(opt, save_subdir="test"):
             {"average_correlation_per_keypoint": average_correlation_per_keypoint}
         )
 
-        # import pdb; pdb.set_trace()
+        import pdb
+
+        pdb.set_trace()
         print(average_correlation_per_keypoint)
 
         all_ref = torch.cat(all_ref, dim=0).permute(0, 2, 1)
@@ -719,6 +724,11 @@ def train(opt, rank, world_size):
 
     epoch = 0
 
+    lambda_0 = 1
+    lambda_1 = 1
+    lambda_2 = 1
+    lambda_3 = 1
+
     while t <= opt.n_iterations:
         print(t)
         epoch += 1
@@ -741,7 +751,7 @@ def train(opt, rank, world_size):
                 net.module if torch.cuda.device_count() > 1 and world_size > 1 else net
             )
 
-            loss, code = module.get_loss(
+            diffusion_loss, code = module.get_loss(
                 get_network_data(data), opt.use_perceptual_loss
             )
             code_ = code[:, : opt.latent_dim * 3].reshape(
@@ -749,43 +759,44 @@ def train(opt, rank, world_size):
             )
 
             if rank == 0:
-                wandb.log({"diffusion_loss": loss}, step=t)
+                wandb.log({"diffusion_loss": diffusion_loss}, step=t)
 
-            if t < 1000:
-                fps = sample_farthest_points(target_shape_t, opt.latent_dim).transpose(
-                    2, 1
-                )
+            # if t < 1000:
+            fps = sample_farthest_points(target_shape_t, opt.latent_dim).transpose(2, 1)
 
-                loss, _ = pytorch3d.loss.chamfer_distance(fps, code_)
+            fps_loss, _ = pytorch3d.loss.chamfer_distance(fps, code_)
 
-                if rank == 0:
-                    wandb.log({"fps_loss": loss}, step=t)
+            if rank == 0:
+                wandb.log({"fps_loss": fps_loss}, step=t)
 
-            else:
-                max_schedule = 100000
-                chamfer_loss, _ = pytorch3d.loss.chamfer_distance(
-                    code_, target_shape_t.transpose(2, 1)
-                )
-                data["deformed_shape"].view(data["orig_offset"].shape[0], -1, 3)
+            # else:
+            max_schedule = 100000
+            chamfer_loss, _ = pytorch3d.loss.chamfer_distance(
+                code_, target_shape_t.transpose(2, 1)
+            )
+            data["deformed_shape"].view(data["orig_offset"].shape[0], -1, 3)
 
-                deformed_matrix = data["deformed_transformation"].view(
-                    data["orig_offset"].shape[0], -1, 3
-                )
+            deformed_matrix = data["deformed_transformation"].view(
+                data["orig_offset"].shape[0], -1, 3
+            )
 
-                kp_orig = code[:, :-5].reshape(code.shape[0], -1, 3)
-                deformed_code = net(get_network_data(data, "deformed"))
-                kp_deformed = deformed_code[:, :-5].reshape(code.shape[0], -1, 3)
-                kp_transformed = torch.bmm(kp_orig, deformed_matrix.transpose(1, 2))
-                mse_loss = torch.mean((kp_transformed - kp_deformed) ** 2)
+            kp_orig = code[:, :-5].reshape(code.shape[0], -1, 3)
+            deformed_code = net(get_network_data(data, "deformed"))
+            kp_deformed = deformed_code[:, :-5].reshape(code.shape[0], -1, 3)
+            kp_transformed = torch.bmm(kp_orig, deformed_matrix.transpose(1, 2))
+            mse_loss = torch.mean((kp_transformed - kp_deformed) ** 2)
 
-                loss += mse_loss
+            loss_ = (
+                lambda_0 * fps_loss
+                + lambda_1 * diffusion_loss
+                + lambda_2 * chamfer_loss
+                + lambda_3 * mse_loss
+            )
 
-                if rank == 0:
-                    wandb.log(
-                        {"chamfer_loss": chamfer_loss, "mse_loss": mse_loss}, step=t
-                    )
+            if rank == 0:
+                wandb.log({"chamfer_loss": chamfer_loss, "mse_loss": mse_loss}, step=t)
 
-                loss += max(0, max_schedule - t) / max_schedule * chamfer_loss
+            loss = max(0, max_schedule - t) / max_schedule * loss_
 
             loss = loss / accumulation_steps  # Normalize loss
             loss.backward()
@@ -808,7 +819,8 @@ def train(opt, rank, world_size):
 
             if t % opt.save_interval == 0 and rank == 0:
                 os.path.join(checkpoints_dir, "outputs", "%07d" % t)
-                save_network(ema, checkpoints_dir, network_label="net", epoch_label=t)
+                save_network(ema, checkpoints_dir, network_label="ema", epoch_label=t)
+                save_network(net, checkpoints_dir, network_label="net", epoch_label=t)
 
             iter_time = time.time() - iter_time_start
             iter_time_start = time.time()
