@@ -39,6 +39,9 @@ class AutoEncoder(Module):
         code = self.encoder(x)
         return code
 
+    def forward(self, x):
+        return self.encode(x)
+
     def decode(self, code, num_points, flexibility=0.0, ret_traj=False):
         return self.diffusion.sample(
             num_points, code, flexibility=flexibility, ret_traj=ret_traj

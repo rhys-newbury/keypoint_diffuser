@@ -22,7 +22,7 @@ class AEConfig:
     print_options: bool = False
     phase: str = "train"
     iteration: int = None
-    n_iterations: int = 20000
+    n_iterations: int = 200000
     save_interval: int = 100
     log_interval: int = 10
     latent_dim: int = 24

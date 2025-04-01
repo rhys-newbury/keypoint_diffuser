@@ -18,10 +18,13 @@ import open3d as o3d
 import pytorch3d.io
 import pytorch3d.loss
 import torch
+import torch.distributed as dist
 import torch.nn.parallel
 import torch.utils.data
+import torch.utils.data.distributed
 from einops import repeat
 from tensorboardX import SummaryWriter
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
@@ -37,6 +40,7 @@ from keypointdeformer.utils.nn import load_network, save_network
 from keypointdeformer.utils.utils import Timer
 
 
+torch.autograd.set_detect_anomaly(True)
 RUN = None
 
 from torchvision import transforms
@@ -62,6 +66,18 @@ def save_normalization(file_path, center, scale):
             },
             f,
         )
+
+
+# Initialize distributed environment
+def setup(rank, world_size):
+    # os.environ["MASTER_ADDR"] = "localhost"
+    # os.environ["MASTER_PORT"] = "12355"
+    if torch.cuda.device_count() > 1:
+        local_rank = int(os.environ["LOCAL_RANK"])
+        print("local_rank", local_rank, "rank: ", rank, "world_size: ", world_size)
+        torch.cuda.set_device(local_rank)
+
+        dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
 
 def save_data_keypoints(data, save_dir, name):
@@ -511,11 +527,12 @@ def test(opt, save_subdir="test"):
         all_ref = normalize_point_clouds(all_ref, "shape_bbox")
         all_recons = torch.cat(all_recons, dim=0)
         all_recons = normalize_point_clouds(all_recons, "shape_bbox")
-        import pdb
-
-        pdb.set_trace()
-        EMD_CD(
-            all_recons.to("cuda").double(), all_ref.to("cuda").double(), opt.batch_size
+        print(
+            EMD_CD(
+                all_recons.to("cuda").double(),
+                all_ref.to("cuda").double(),
+                opt.batch_size,
+            )
         )
 
 
@@ -576,9 +593,15 @@ def get_network_data(data: dict[str, Any], key="orig"):
     return d
 
 
-def train(opt):
-    log_dir = os.path.join(opt.log_dir, RUN.name)
-    checkpoints_dir = os.path.join(log_dir, CHECKPOINTS_DIR)
+def train(opt, rank, world_size):
+    if rank == 0:
+        log_dir = os.path.join(opt.log_dir, RUN.name)
+        checkpoints_dir = os.path.join(log_dir, CHECKPOINTS_DIR)
+
+    ema_halflife_kimg = (
+        500  # Half-life of the exponential moving average (EMA) of model weights.
+    )
+    ema_rampup_ratio = 0.05  # EMA ramp-up coefficient, None = no rampup.
 
     t = transforms.Compose(
         [
@@ -605,12 +628,20 @@ def train(opt):
 
     dataset = get_dataset(opt.dataset)(opt, transform=t)
 
-    # import pdb; pdb.set_trace()
+    if torch.cuda.device_count() > 1 and world_size > 1:
+        print("Using DistributedSampler for multiple GPUs.")
+        train_sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank)
+        shuffle = False
+    else:
+        print("Using regular DataLoader (no DistributedSampler).")
+        train_sampler = None
+        shuffle = True  # Only shuffle when not using DistributedSampler
 
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=opt.batch_size,
-        shuffle=True,
+        sampler=train_sampler,
+        shuffle=shuffle,
         drop_last=True,
         collate_fn=collate_fn,
         num_workers=opt.n_workers,
@@ -633,6 +664,17 @@ def train(opt):
 
     net = AutoEncoder(opt).cuda()
 
+    if torch.cuda.device_count() > 1:
+        net = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net)
+        ema = copy.deepcopy(net).eval().requires_grad_(False)
+
+        print(f"Using DistributedDataParallel on {torch.cuda.device_count()}")
+        net = DDP(
+            net, device_ids=[rank], output_device=rank, find_unused_parameters=False
+        )
+    else:
+        ema = copy.deepcopy(net).eval().requires_grad_(False)
+
     if opt.ckpt:
         ckpt = opt.ckpt
         if not ckpt.startswith(os.path.sep):
@@ -644,14 +686,15 @@ def train(opt):
     t = 0
 
     # train
-    os.makedirs(checkpoints_dir, exist_ok=True)
-    log_path = os.path.join(checkpoints_dir, "training_log.txt")
-    with open(log_path, "a") as log_file:
-        log_file.write(str(net) + "\n")
-    summary_dir = datetime.now().strftime("%y%m%d-%H%M%S")
-    writer = SummaryWriter(
-        logdir=os.path.join(checkpoints_dir, "logs", summary_dir), flush_secs=5
-    )
+    if rank == 0:
+        os.makedirs(checkpoints_dir, exist_ok=True)
+        log_path = os.path.join(checkpoints_dir, "training_log.txt")
+        with open(log_path, "a") as log_file:
+            log_file.write(str(net) + "\n")
+        summary_dir = datetime.now().strftime("%y%m%d-%H%M%S")
+        writer = SummaryWriter(
+            logdir=os.path.join(checkpoints_dir, "logs", summary_dir), flush_secs=5
+        )
 
     optimizer = torch.optim.Adam(
         net.parameters(), lr=opt.lr, weight_decay=opt.weight_decay
@@ -665,123 +708,112 @@ def train(opt):
         end_lr=opt.end_lr,
     )
 
+    accumulation_steps = int(64 / opt.batch_size)
+
+    cur_nimg = 0
+
     if opt.iteration:
         t = opt.iteration
 
     iter_time_start = time.time()
 
+    epoch = 0
+
     while t <= opt.n_iterations:
+        print(t)
+        epoch += 1
         iter_time_start = time.time()  # Start iteration timer
+        if torch.cuda.device_count() > 1 and world_size > 1:
+            dataloader.sampler.set_epoch(epoch)
 
         for _, data in enumerate(dataloader):
             if t > opt.n_iterations:
                 break
 
-            if t % 200 == 0:
-                time.time()
-                # net.diffusion.freeze_network()
-                # print(f"Freeze network time: {time.time() - start:.4f} sec")
-
-            time.time()
-            # import pdb; pdb.set_trace()
             target_shape_t = (
                 data["target_shape"]
                 .view(data["orig_offset"].shape[0], -1, 3)
                 .transpose(1, 2)
                 .cuda()
             )
-            # print(f"Data transfer to CUDA time: {time.time() - start:.4f} sec")
 
-            optimizer.zero_grad()
-            net.train()
+            module = (
+                net.module if torch.cuda.device_count() > 1 and world_size > 1 else net
+            )
 
-            time.time()
-
-            # import pdb; pdb.set_trace()
-
-            loss, code = net.get_loss(get_network_data(data), opt.use_perceptual_loss)
-            # import pdb; pdb.set_trace()
+            loss, code = module.get_loss(
+                get_network_data(data), opt.use_perceptual_loss
+            )
             code_ = code[:, : opt.latent_dim * 3].reshape(
                 data["orig_offset"].shape[0], -1, 3
             )
-            print(loss)
-            # import pdb; pdb.set_trace()
-            # print(f"Forward pass time: {time.time() - start:.4f} sec")
 
-            time.time()
-            wandb.log({"diffusion_loss": loss}, step=t)
-            # print(f"Wandb logging time: {time.time() - start:.4f} sec")
+            if rank == 0:
+                wandb.log({"diffusion_loss": loss}, step=t)
 
             if t < 1000:
-                time.time()
                 fps = sample_farthest_points(target_shape_t, opt.latent_dim).transpose(
                     2, 1
                 )
-                # print(f"FPS sampling time: {time.time() - start:.4f} sec")
 
-                time.time()
                 loss, _ = pytorch3d.loss.chamfer_distance(fps, code_)
-                # print(f"Chamfer distance (FPS) time: {time.time() - start:.4f} sec")
 
-                time.time()
-                wandb.log({"fps_loss": loss}, step=t)
-                # print(f"Wandb FPS logging time: {time.time() - start:.4f} sec")
+                if rank == 0:
+                    wandb.log({"fps_loss": loss}, step=t)
 
             else:
-                time.time()
                 max_schedule = 100000
                 chamfer_loss, _ = pytorch3d.loss.chamfer_distance(
                     code_, target_shape_t.transpose(2, 1)
                 )
-                # print(f"Chamfer distance time: {time.time() - start:.4f} sec")
-
-                # time.time()
-                # deformed_shape, deformed_matrix = apply_general_deformation(
-                #     target_shape_t.permute(0, 2, 1)
-                # )
-                # deformed_shape = deformed_shape.permute(0, 2, 1)
                 data["deformed_shape"].view(data["orig_offset"].shape[0], -1, 3)
 
                 deformed_matrix = data["deformed_transformation"].view(
                     data["orig_offset"].shape[0], -1, 3
                 )
-                # np.save("deformed_shape.npy", deformed_shape)
-                # import pdb; pdb.set_trace()
-
-                # print(f"Deformation time: {time.time() - start:.4f} sec")
 
                 kp_orig = code[:, :-5].reshape(code.shape[0], -1, 3)
-                deformed_code = net.encode(get_network_data(data, "deformed"))
+                deformed_code = net(get_network_data(data, "deformed"))
                 kp_deformed = deformed_code[:, :-5].reshape(code.shape[0], -1, 3)
                 kp_transformed = torch.bmm(kp_orig, deformed_matrix.transpose(1, 2))
                 mse_loss = torch.mean((kp_transformed - kp_deformed) ** 2)
-                # print(f"Keypoint transformation time: {time.time() - start:.4f} sec")
 
                 loss += mse_loss
 
-                time.time()
-                wandb.log({"chamfer_loss": chamfer_loss, "mse_loss": mse_loss}, step=t)
-                # print(f"Wandb logging (chamfer & mse) time: {time.time() - start:.4f} sec")
+                if rank == 0:
+                    wandb.log(
+                        {"chamfer_loss": chamfer_loss, "mse_loss": mse_loss}, step=t
+                    )
 
                 loss += max(0, max_schedule - t) / max_schedule * chamfer_loss
 
-            time.time()
+            loss = loss / accumulation_steps  # Normalize loss
             loss.backward()
-            clip_grad_norm_(net.parameters(), opt.max_grad_norm)
-            optimizer.step()
-            scheduler.step()
-            # print(f"Backward + optimizer step time: {time.time() - start:.4f} sec")
 
-            if t % opt.save_interval == 0:
-                time.time()
+            if (t + 1) % accumulation_steps == 0:
+                print(f"Rank {rank}: Gradient step at iteration {t+1}")
+                clip_grad_norm_(net.parameters(), opt.max_grad_norm)
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
+
+            ema_halflife_nimg = ema_halflife_kimg * 1000
+            if ema_rampup_ratio is not None:
+                ema_halflife_nimg = min(ema_halflife_nimg, cur_nimg * ema_rampup_ratio)
+            ema_beta = 0.5 ** (opt.batch_size / max(ema_halflife_nimg, 1e-8))
+            for p_ema, p_net in zip(ema.parameters(), net.parameters()):
+                p_ema.copy_(p_net.detach().lerp(p_ema, ema_beta))
+
+            cur_nimg += opt.batch_size
+
+            if t % opt.save_interval == 0 and rank == 0:
                 os.path.join(checkpoints_dir, "outputs", "%07d" % t)
-                save_network(net, checkpoints_dir, network_label="net", epoch_label=t)
-                # print(f"Saving network time: {time.time() - start:.4f} sec")
+                save_network(ema, checkpoints_dir, network_label="net", epoch_label=t)
 
             iter_time = time.time() - iter_time_start
             iter_time_start = time.time()
 
-            if t % opt.log_interval == 0:
+            if t % opt.log_interval == 0 and rank == 0:
                 samples_sec = opt.batch_size / iter_time
                 losses_str = str(loss)
                 log_str = "{:d}: iter {:.1f} sec, {:.1f} samples/sec {}".format(
@@ -807,11 +839,21 @@ def train(opt):
         #         )
         #         test_loss += loss
         # wandb.log({"mse_test_loss": test_loss}, step=t)
-
-    save_network(net, checkpoints_dir, network_label="net", epoch_label="final")
+    if rank == 0:
+        save_network(net, checkpoints_dir, network_label="net", epoch_label="final")
 
 
 if __name__ == "__main__":
+    if torch.cuda.device_count() > 1:
+        rank = int(os.environ["RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
+        setup(rank, world_size)
+    else:
+        rank = 0
+        world_size = 1
+
+    print("SETUP IS COMPLETE!!!!!!!!!!!!!!!!")
+
     parser = AEOptions()
     opt = parser.parse()
 
@@ -825,7 +867,10 @@ if __name__ == "__main__":
 
         test(opt, save_subdir=opt.subdir)
     elif opt.phase == "train":
-        RUN = wandb.init(project="diffuse_keypoints_lamp")
-        train(opt)
+        print(f"Rank: {rank}, World size: {world_size}")
+
+        if rank == 0:
+            RUN = wandb.init(project="diffuse_keypoints_lamp")
+        train(opt, rank, world_size)
     else:
         raise ValueError()

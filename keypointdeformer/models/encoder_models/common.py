@@ -60,7 +60,11 @@ class Linear(torch.nn.Module):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        init_kwargs = {"mode": init_mode, "fan_in": in_features, "fan_out": out_features}
+        init_kwargs = {
+            "mode": init_mode,
+            "fan_in": in_features,
+            "fan_out": out_features,
+        }
         self.weight = torch.nn.Parameter(
             weight_init([out_features, in_features], **init_kwargs) * init_weight
         )

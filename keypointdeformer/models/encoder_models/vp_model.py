@@ -83,7 +83,8 @@ class EDMPrecond(torch.nn.Module):
         S_max=float("inf"),
         S_noise=1,
     ):
-        latents = torch.randn([16, 5000, 3], device=code.device)
+        batch_size = code.shape[0]
+        latents = torch.randn([batch_size, 5000, 3], device=code.device)
 
         # Adjust noise levels based on what's supported by the network.
         sigma_min = max(sigma_min, self.sigma_min)
@@ -123,17 +124,17 @@ class EDMPrecond(torch.nn.Module):
 
             # Euler step.
             # Not sure why i needed repeat here?
-            denoised = self(x_hat, t_hat.reshape(1).repeat(16), context=code).to(
-                torch.float64
-            )
+            denoised = self(
+                x_hat, t_hat.reshape(1).repeat(batch_size), context=code
+            ).to(torch.float64)
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
 
             # Apply 2nd order correction.
             if i < num_steps - 1:
-                denoised = self(x_next, t_next.reshape(1).repeat(16), context=code).to(
-                    torch.float64
-                )
+                denoised = self(
+                    x_next, t_next.reshape(1).repeat(batch_size), context=code
+                ).to(torch.float64)
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
