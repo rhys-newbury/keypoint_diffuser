@@ -405,7 +405,7 @@ def test(opt, save_subdir="test"):
         dataset,
         batch_size=opt.batch_size,
         shuffle=False,
-        drop_last=True,
+        drop_last=False,
         collate_fn=collate_fn,
         num_workers=0,
         worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
@@ -449,10 +449,10 @@ def test(opt, save_subdir="test"):
             #     code, target_shape_t.size(2), flexibility=opt.flexibility
             # ).detach()
 
-            # recons = ae_model.decode_edm(code).detach()
+            recons = ae_model.decode_edm(code).detach()
 
-            # all_ref.append(target_shape_t.detach().cpu())
-            # all_recons.append(recons.detach().cpu())
+            all_ref.append(target_shape_t.detach().cpu())
+            all_recons.append(recons.detach().cpu())
 
             target_sampled_points = data["target_sampled_points"].view(
                 data["orig_offset"].shape[0], -1, 4
@@ -480,9 +480,6 @@ def test(opt, save_subdir="test"):
 
                 distances = torch.cdist(kp.double(), torch.tensor(seg_points).cuda())
                 threshold = 0.05
-                import pdb
-
-                pdb.set_trace()
 
                 within_threshold_mask = (
                     distances <= threshold
@@ -523,9 +520,9 @@ def test(opt, save_subdir="test"):
             {"average_correlation_per_keypoint": average_correlation_per_keypoint}
         )
 
-        import pdb
+        # import pdb
 
-        pdb.set_trace()
+        # pdb.set_trace()
         print(average_correlation_per_keypoint)
 
         all_ref = torch.cat(all_ref, dim=0).permute(0, 2, 1)
@@ -751,9 +748,7 @@ def train(opt, rank, world_size):
                 net.module if torch.cuda.device_count() > 1 and world_size > 1 else net
             )
 
-            diffusion_loss, code = module.get_loss(
-                get_network_data(data), opt.use_perceptual_loss
-            )
+            diffusion_loss, code = module.get_loss(get_network_data(data))
             code_ = code[:, : opt.latent_dim * 3].reshape(
                 data["orig_offset"].shape[0], -1, 3
             )
@@ -847,7 +842,7 @@ def train(opt, rank, world_size):
         #         # print(target_shape_t.shape)
 
         #         loss, code = net.get_loss(
-        #             get_network_data(data), opt.use_perceptual_loss
+        #             get_network_data(data)
         #         )
         #         test_loss += loss
         # wandb.log({"mse_test_loss": test_loss}, step=t)

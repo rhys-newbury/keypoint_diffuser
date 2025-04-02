@@ -46,7 +46,6 @@ class AEConfig:
     ckpt: str = None
     mesh_dir: str = None
     keypoints_dir: str = None
-    use_perceptual_loss: bool = False
 
     segmentations_dir: str = None
     seg_split_dir: str = None

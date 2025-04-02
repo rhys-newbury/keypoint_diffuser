@@ -50,13 +50,9 @@ class AutoEncoder(Module):
     def decode_edm(self, code):
         return self.diffusion.edm_sampler(code)
 
-    def get_loss(self, x, use_perceptual_loss=False):
+    def get_loss(self, x):
         code = self.encode(x)
         t = x["target_shape"].view(-1, 5000, 3).cuda()
-        # import pdb; pdb.set_trace()
         loss = self.loss(net=self.diffusion, data=t, code=code.detach()).mean()
 
-        # loss = self.diffusion.get_loss(
-        #     t.transpose(1, 2), code, use_perceptual_loss=use_perceptual_loss
-        # )
         return loss, code

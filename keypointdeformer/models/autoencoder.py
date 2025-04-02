@@ -43,9 +43,9 @@ class AutoEncoder(Module):
             num_points, code, flexibility=flexibility, ret_traj=ret_traj
         )
 
-    def get_loss(self, x, use_perceptual_loss=False):
+    def get_loss(self, x):
         code, sa = self.encode(x)
-        loss = self.diffusion.get_loss(x, code, use_perceptual_loss=use_perceptual_loss)
+        loss = self.diffusion.get_loss(x, code)
         return loss, code, sa
 
     def forward(self, x):
