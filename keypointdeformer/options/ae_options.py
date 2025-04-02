@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import configargparse
 
-from .. import datasets, models
+from .. import datasets
 
 
 THOUSAND = 1000
@@ -106,11 +106,11 @@ class AEOptions:
 
         opt, _ = parser.parse_known_args(args)
 
-        if not skip_model:
-            model_name = "autoencoder"
-            model_option_setter = models.get_option_setter(model_name)
-            parser = model_option_setter(parser)
-            opt, _ = parser.parse_known_args(args)
+        # if not skip_model:
+        #     model_name = "autoencoder"
+        #     model_option_setter = models.get_option_setter(model_name)
+        #     parser = model_option_setter(parser)
+        #     opt, _ = parser.parse_known_args(args)
 
         dataset_name = opt.dataset
         dataset_option_setter = datasets.get_option_setter(dataset_name)

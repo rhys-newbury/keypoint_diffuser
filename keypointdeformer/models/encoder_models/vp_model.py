@@ -61,7 +61,7 @@ class EDMPrecond(torch.nn.Module):
         model,
         sigma_min=0,  # Minimum supported noise level.
         sigma_max=float("inf"),  # Maximum supported noise level.
-        sigma_data=0.25,  # Expected standard deviation of the training data.
+        sigma_data=0.5,  # Expected standard deviation of the training data.
     ):
         super().__init__()
         self.sigma_min = sigma_min

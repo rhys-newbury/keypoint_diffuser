@@ -124,6 +124,7 @@ class PointwiseNet(Module):
             out = layer(ctx=ctx_emb, x=out)
             if i < len(self.layers) - 1:
                 out = self.act(out)
+
         if self.residual:
             return x + out
         else:
