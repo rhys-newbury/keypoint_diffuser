@@ -1,8 +1,9 @@
 import numpy as np
 import torch
+from torch import nn
 from torch.nn import Module
 from torch.optim.lr_scheduler import LambdaLR
-
+import torch.nn.functional as F
 
 def reparameterize_gaussian(mean, logvar):
     std = torch.exp(0.5 * logvar)
@@ -79,6 +80,45 @@ class Linear(torch.nn.Module):
         if self.bias is not None:
             x = x.add_(self.bias.to(x.dtype))
         return x
+
+
+class FiLMResidualMLP(nn.Module):
+    def __init__(self, dim_in, dim_out, dim_ctx, hidden_dim=512):
+        super().__init__()
+
+        # Feature projection
+        self.linear1 = nn.Linear(dim_in, hidden_dim)
+        self.linear2 = nn.Linear(hidden_dim, dim_out)
+
+        # Context modulation
+        self.film = nn.Linear(dim_ctx, 2 * hidden_dim)
+
+        # Normalization
+        self.norm1 = nn.LayerNorm(hidden_dim)
+
+        # Shortcut if needed
+        self.shortcut = (
+            nn.Identity() if dim_in == dim_out else nn.Linear(dim_in, dim_out)
+        )
+
+    def forward(self, x, ctx):
+        """
+        x: (B, N, D)
+        ctx: (B, C) or (B, 1, C)
+        """
+        B, N, _ = x.shape
+
+        # Apply FiLM to hidden layer
+        gamma, beta = self.film(ctx).chunk(2, dim=-1)  # (B, H), (B, H)
+        gamma = gamma.unsqueeze(1)  # (B, 1, H)
+        beta = beta.unsqueeze(1)  # (B, 1, H)
+
+        out = self.linear1(x)  # (B, N, H)
+        out = self.norm1(out)
+        out = F.leaky_relu(gamma * out + beta)
+
+        out = self.linear2(out)  # (B, N, D_out)
+        return self.shortcut(x) + out
 
 
 class ConcatSquashLinear(Module):

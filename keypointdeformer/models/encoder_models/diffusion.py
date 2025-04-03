@@ -4,9 +4,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.nn import Module, ModuleList
+from torch.nn import Module
 
-from .common import ConcatSquashLinear
+from .common import FiLMResidualMLP
 
 
 def init_linear(layer, stddev):
@@ -62,7 +62,7 @@ class VarianceSchedule(Module):
 
 
 class CrossAttentionLayer(nn.Module):
-    def __init__(self, embed_dim, num_heads, dropout=0.1):
+    def __init__(self, embed_dim, num_heads, dropout=0.1, init_scale=0.25):
         super().__init__()
         self.attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         self.norm1 = nn.LayerNorm(embed_dim)
@@ -96,6 +96,7 @@ class CrossAttentionBlock(nn.Module):
         num_heads=4,
         n_layers=2,
         dropout=0.1,
+        init_scale=1.0,
     ):
         super().__init__()
         self.point_proj = nn.Linear(point_dim, embed_dim)
@@ -104,7 +105,7 @@ class CrossAttentionBlock(nn.Module):
 
         self.layers = nn.ModuleList(
             [
-                CrossAttentionLayer(embed_dim, num_heads, dropout)
+                CrossAttentionLayer(embed_dim, num_heads, dropout, init_scale)
                 for _ in range(n_layers)
             ]
         )
@@ -146,8 +147,7 @@ class PointwiseNet(Module):
         super().__init__()
         self.act = F.leaky_relu
         self.residual = residual
-        init_zero = {"init_mode": "kaiming_uniform", "init_weight": 0, "init_bias": 0}
-        init_scale = 1.0
+        init_scale = 0.25
 
         self.width = 512
         self.time_embed = MLP(
@@ -168,17 +168,17 @@ class PointwiseNet(Module):
             point_dim=3,
             context_dim=context_dim + self.width,
             embed_dim=128,
-            num_heads=4,
+            num_heads=8,
+            n_layers=12,
+            init_scale=init_scale,
         )
 
-        self.layers = ModuleList(
+        self.layers = nn.ModuleList(
             [
-                ConcatSquashLinear(3, 128, context_dim + self.width),
-                ConcatSquashLinear(128, 256, context_dim + self.width),
-                ConcatSquashLinear(256, 512, context_dim + self.width),
-                ConcatSquashLinear(512, 256, context_dim + self.width),
-                ConcatSquashLinear(256, 128, context_dim + self.width),
-                ConcatSquashLinear(128, 3, context_dim + self.width, **init_zero),
+                FiLMResidualMLP(3, 512, context_dim + self.width),
+                FiLMResidualMLP(512, 512, context_dim + self.width),
+                FiLMResidualMLP(512, 512, context_dim + self.width),
+                FiLMResidualMLP(512, 3, context_dim + self.width),
             ]
         )
 
@@ -228,7 +228,7 @@ class PointwiseNet(Module):
 
         # out = x
         for i, layer in enumerate(self.layers):
-            out = layer(ctx=ctx_emb, x=out)
+            out = layer(ctx=ctx_emb.squeeze(1), x=out)
             if i < len(self.layers) - 1:
                 out = self.act(out)
 

@@ -76,7 +76,7 @@ class VELoss:
 
 # @persistence.persistent_class
 class EDMLoss:
-    def __init__(self, P_mean=-1.2, P_std=1.2, sigma_data=0.5):
+    def __init__(self, P_mean=-1.2, P_std=1.2, sigma_data=0.3):
         self.P_mean = P_mean
         self.P_std = P_std
         self.sigma_data = sigma_data
@@ -91,6 +91,46 @@ class EDMLoss:
         D_yn = net(y + n, sigma, context=code)
         loss = weight * ((D_yn - y) ** 2)
         return loss
+
+
+class EDMLossCurriculum:
+    def __init__(
+        self,
+        P_mean_init=-2.0,
+        P_std_init=0.1,
+        P_mean_final=-1.2,
+        P_std_final=1.2,
+        sigma_data=0.3,
+        max_steps=100_000,
+    ):
+        self.P_mean_init = P_mean_init
+        self.P_std_init = P_std_init
+        self.P_mean_final = P_mean_final
+        self.P_std_final = P_std_final
+        self.sigma_data = sigma_data
+        self.max_steps = max_steps
+
+    def interpolate(self, start, end, pct):
+        return start + pct * (end - start)
+
+    def __call__(self, net, data, code, step, augment_pipe=None):
+        pct = min(step / self.max_steps, 1.0)
+
+        # Interpolate P_mean and P_std
+        P_mean = self.interpolate(self.P_mean_init, self.P_mean_final, pct)
+        P_std = self.interpolate(self.P_std_init, self.P_std_final, pct)
+        rnd_normal = torch.randn([data.shape[0], 1, 1], device=data.device)
+        P = rnd_normal * P_std + P_mean
+        sigma = P.exp()
+
+        weight = (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
+        y = data
+
+        n = torch.randn_like(y) * sigma
+
+        D_yn = net(y + n, sigma, context=code)
+        loss = weight * ((D_yn - y) ** 2)
+        return loss.mean()
 
 
 # ----------------------------------------------------------------------------

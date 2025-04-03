@@ -712,7 +712,7 @@ def train(opt, rank, world_size):
         end_lr=opt.end_lr,
     )
 
-    accumulation_steps = int(64 / opt.batch_size)
+    accumulation_steps = int(128 / opt.batch_size)
 
     cur_nimg = 0
 
@@ -724,7 +724,7 @@ def train(opt, rank, world_size):
     epoch = 0
 
     lambda_0 = 1
-    lambda_1 = 1
+    lambda_1 = 10
     lambda_2 = 1
     lambda_3 = 1
 
@@ -750,7 +750,7 @@ def train(opt, rank, world_size):
                 net.module if torch.cuda.device_count() > 1 and world_size > 1 else net
             )
 
-            diffusion_loss, code = module.get_loss(get_network_data(data))
+            diffusion_loss, code = module.get_loss(get_network_data(data), step=t)
             code_ = code[:, : opt.latent_dim * 3].reshape(
                 data["orig_offset"].shape[0], -1, 3
             )

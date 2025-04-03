@@ -37,7 +37,7 @@ class AEConfig:
     lr: float = 1e-3
     weight_decay: float = 0
     max_grad_norm: float = 10
-    end_lr: float = 1e-4
+    end_lr: float = 1e-3
     sched_start_epoch: int = 150 * THOUSAND
     sched_end_epoch: int = 300 * THOUSAND
     normalization: str = "none"
