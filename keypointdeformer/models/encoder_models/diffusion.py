@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -5,6 +7,12 @@ from torch import nn
 from torch.nn import Module, ModuleList
 
 from .common import ConcatSquashLinear
+
+
+def init_linear(layer, stddev):
+    nn.init.normal_(layer.weight, std=stddev)
+    if layer.bias is not None:
+        nn.init.constant_(layer.bias, 0.0)
 
 
 class VarianceSchedule(Module):
@@ -53,31 +61,84 @@ class VarianceSchedule(Module):
         return sigmas
 
 
+class CrossAttentionLayer(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout=0.1):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.ff = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim * 4),
+            nn.GELU(),
+            nn.Linear(embed_dim * 4, embed_dim),
+        )
+        self.norm2 = nn.LayerNorm(embed_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, k, v):
+        # Attention block with residual + norm
+        attn_out, _ = self.attn(x, k, v)
+        x = x + self.dropout(attn_out)
+        x = self.norm1(x)
+
+        # Feedforward block with residual + norm
+        ff_out = self.ff(x)
+        x = x + self.dropout(ff_out)
+        x = self.norm2(x)
+        return x
+
+
 class CrossAttentionBlock(nn.Module):
-    def __init__(self, point_dim, context_dim, embed_dim=128, num_heads=4):
+    def __init__(
+        self,
+        point_dim,
+        context_dim,
+        embed_dim=128,
+        num_heads=4,
+        n_layers=2,
+        dropout=0.1,
+    ):
         super().__init__()
         self.point_proj = nn.Linear(point_dim, embed_dim)
         self.context_proj = nn.Linear(context_dim, embed_dim)
-
-        self.attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         self.out_proj = nn.Linear(embed_dim, point_dim)
+
+        self.layers = nn.ModuleList(
+            [
+                CrossAttentionLayer(embed_dim, num_heads, dropout)
+                for _ in range(n_layers)
+            ]
+        )
 
     def forward(self, x, context):
         """
         x:       (B, N, point_dim)
         context: (B, 1, context_dim)
         """
-        B, N, _ = x.shape
-
-        # Project to embedding space
+        # Project inputs
         q = self.point_proj(x)  # (B, N, embed_dim)
         k = self.context_proj(context)  # (B, 1, embed_dim)
-        v = k  # standard cross-attn: K == V
+        v = k  # context-only keys/values
 
-        # MultiheadAttention expects (B, N, E) if batch_first=True
-        out, _ = self.attn(query=q, key=k, value=v)  # out: (B, N, embed_dim)
-        out = self.out_proj(out)  # project back to original point_dim
-        return out
+        for layer in self.layers:
+            q = layer(q, k, v)  # (B, N, embed_dim)
+
+        return self.out_proj(q)  # Project back to (B, N, point_dim)
+
+
+class MLP(nn.Module):
+    def __init__(
+        self, *, device: torch.device, dtype: torch.dtype, width: int, init_scale: float
+    ):
+        super().__init__()
+        self.width = width
+        self.c_fc = nn.Linear(width, width * 4, device=device, dtype=dtype)
+        self.c_proj = nn.Linear(width * 4, width, device=device, dtype=dtype)
+        self.gelu = nn.GELU()
+        init_linear(self.c_fc, init_scale)
+        init_linear(self.c_proj, init_scale)
+
+    def forward(self, x):
+        return self.c_proj(self.gelu(self.c_fc(x)))
 
 
 class PointwiseNet(Module):
@@ -86,20 +147,63 @@ class PointwiseNet(Module):
         self.act = F.leaky_relu
         self.residual = residual
         init_zero = {"init_mode": "kaiming_uniform", "init_weight": 0, "init_bias": 0}
+        init_scale = 1.0
+
+        self.width = 512
+        self.time_embed = MLP(
+            device="cuda",
+            dtype=torch.float32,
+            width=self.width,
+            init_scale=init_scale * math.sqrt(1.0 / self.width),
+        )
+
+        self.ctx_embed = MLP(
+            device="cuda",
+            dtype=torch.float32,
+            width=context_dim,
+            init_scale=init_scale * math.sqrt(1.0 / context_dim),
+        )
+
         self.cross_attn = CrossAttentionBlock(
-            point_dim=3, context_dim=context_dim + 3, embed_dim=128, num_heads=4
+            point_dim=3,
+            context_dim=context_dim + self.width,
+            embed_dim=128,
+            num_heads=4,
         )
 
         self.layers = ModuleList(
             [
-                ConcatSquashLinear(3, 128, context_dim + 3),
-                ConcatSquashLinear(128, 256, context_dim + 3),
-                ConcatSquashLinear(256, 512, context_dim + 3),
-                ConcatSquashLinear(512, 256, context_dim + 3),
-                ConcatSquashLinear(256, 128, context_dim + 3),
-                ConcatSquashLinear(128, 3, context_dim + 3, **init_zero),
+                ConcatSquashLinear(3, 128, context_dim + self.width),
+                ConcatSquashLinear(128, 256, context_dim + self.width),
+                ConcatSquashLinear(256, 512, context_dim + self.width),
+                ConcatSquashLinear(512, 256, context_dim + self.width),
+                ConcatSquashLinear(256, 128, context_dim + self.width),
+                ConcatSquashLinear(128, 3, context_dim + self.width, **init_zero),
             ]
         )
+
+    def timestep_embedding(self, timesteps, dim, max_period=10000):
+        """
+        Create sinusoidal timestep embeddings.
+        :param timesteps: a 1-D Tensor of N indices, one per batch element.
+                        These may be fractional.
+        :param dim: the dimension of the output.
+        :param max_period: controls the minimum frequency of the embeddings.
+        :return: an [N x dim] Tensor of positional embeddings.
+        """
+        half = dim // 2
+        freqs = torch.exp(
+            -math.log(max_period)
+            * torch.arange(start=0, end=half, dtype=torch.float32)
+            / half
+        ).to(device=timesteps.device)
+        args = timesteps[:, None].to(timesteps.dtype) * freqs[None]
+        embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+        if dim % 2:
+            embedding = torch.cat(
+                [embedding, torch.zeros_like(embedding[:, :1])], dim=-1
+            )
+        return embedding
 
     def forward(self, x, beta, context):
         """
@@ -112,10 +216,13 @@ class PointwiseNet(Module):
         beta = beta.view(batch_size, 1, 1)  # (B, 1, 1)
         context = context.view(batch_size, 1, -1)  # (B, 1, F)
 
-        time_emb = torch.cat(
-            [beta, torch.sin(beta), torch.cos(beta)], dim=-1
-        )  # (B, 1, 3)
-        ctx_emb = torch.cat([time_emb, context], dim=-1)  # (B, 1, F+3)
+        # time_emb = torch.cat(
+        #     [beta, torch.sin(beta), torch.cos(beta)], dim=-1
+        # )  # (B, 1, 3)
+        t_embed = self.time_embed(self.timestep_embedding(beta, self.width)).squeeze(2)
+        c_project = self.ctx_embed(context)
+
+        ctx_emb = torch.cat([t_embed, c_project], dim=-1)  # (B, 1, F+3)
 
         out = x + self.cross_attn(x, ctx_emb)
 

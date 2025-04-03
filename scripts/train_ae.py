@@ -24,7 +24,7 @@ import torch.utils.data
 import torch.utils.data.distributed
 from einops import repeat
 from tensorboardX import SummaryWriter
-from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.nn.parallel import DistributedDataParallel
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
@@ -632,7 +632,9 @@ def train(opt, rank, world_size):
 
     if torch.cuda.device_count() > 1 and world_size > 1:
         print("Using DistributedSampler for multiple GPUs.")
-        train_sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank)
+        train_sampler = distributed.DistributedSampler(
+            dataset, num_replicas=world_size, rank=rank
+        )
         shuffle = False
     else:
         print("Using regular DataLoader (no DistributedSampler).")
@@ -671,7 +673,7 @@ def train(opt, rank, world_size):
         ema = copy.deepcopy(net).eval().requires_grad_(False)
 
         print(f"Using DistributedDataParallel on {torch.cuda.device_count()}")
-        net = DDP(
+        net = DistributedDataParallel(
             net, device_ids=[rank], output_device=rank, find_unused_parameters=False
         )
     else:
@@ -878,6 +880,7 @@ if __name__ == "__main__":
 
         if rank == 0:
             RUN = wandb.init(project="diffuse_keypoints_lamp")
+            wandb.run.log_code(".")
         train(opt, rank, world_size)
     else:
         raise ValueError()
