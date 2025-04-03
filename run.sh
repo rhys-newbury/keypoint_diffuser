@@ -1,10 +1,11 @@
 #!/bin/bash
 
 SCRIPT=$1
-FOLDER=$2
+# FOLDER=$2
 LATENT_DIM=$3
 
-for file in /mnt/storage/keypoints/logs/"$FOLDER"/checkpoints/*.pth; do
+for file in $(ls -t /app/data/keypoints/logs/misunderstood-wood-95/checkpoints/*.pth); do
+# for file in /app/data/keypoints/logs/misunderstood-wood-95/checkpoints/*.pth; do
   echo "Processing $file"
 
   if [[ "$SCRIPT" == "main.py" ]]; then

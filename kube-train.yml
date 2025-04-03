@@ -1,7 +1,7 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: lamp
+  name: lamp2
 spec:
   maxRetry: 1
   minAvailable: 1
@@ -17,8 +17,8 @@ spec:
             - name: dkr-creds
           securityContext:
             runAsUser: 1000
-          # nodeSelector:
-            # nvidia.com/gpu.product: NVIDIA-GeForce-RTX-3090
+          nodeSelector:
+            nvidia.com/gpu.product: NVIDIA-RTX-A6000
           containers:
             - name: runner
               imagePullPolicy: Always
@@ -26,11 +26,10 @@ spec:
               command:
                 [
                   "python",
-                  "-u",
                   "scripts/train_ae.py",
-                  "--latent_dim=32",
-                  "--n_iterations=20000",
-                  "-c=configs/lamp.yaml",
+                  "--latent_dim=8",
+                  "--n_iterations=200000",
+                  "-c=configs/airplane-8kpt.yaml",
                 ]
                 # ["bash",
                 # "run.sh",
@@ -50,8 +49,10 @@ spec:
                 requests:
                   memory: 24Gi
                   cpu: 6000m
+                  nvidia.com/gpu: 1
                 limits:
-                  memory: 32Gi
+                  nvidia.com/gpu: 1
+                  memory: 28Gi
                   cpu: 10000m
               volumeMounts:
                 - name: storage

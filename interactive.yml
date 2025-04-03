@@ -10,7 +10,7 @@ spec:
     - event: PodEvicted
       action: RestartJob
   tasks:
-    - replicas: 64
+    - replicas: 4
       name: persistent-debugger
       policies:
         - event: TaskCompleted
