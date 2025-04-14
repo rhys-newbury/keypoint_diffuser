@@ -1,9 +1,10 @@
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch.nn import Module
 from torch.optim.lr_scheduler import LambdaLR
-import torch.nn.functional as F
+
 
 def reparameterize_gaussian(mean, logvar):
     std = torch.exp(0.5 * logvar)

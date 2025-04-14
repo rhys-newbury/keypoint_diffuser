@@ -2,7 +2,7 @@ from torch.nn import Module
 
 from keypointdeformer.utils.loss import EDMLossCurriculum
 
-from .diffusion import PointwiseNet
+from .diffusion import DiffusionPoint, PointwiseNet, VarianceSchedule
 from .encoders import PointTransformerv2
 from .vp_model import EDMPrecond
 
@@ -19,8 +19,21 @@ class AutoEncoder(Module):
             context_dim=args.latent_dim * 3 + args.extra_latent,
             residual=args.residual,
         )
-        self.diffusion = EDMPrecond(self.diffusion_)
-        self.loss = EDMLossCurriculum(max_steps=20000)
+        self.use_edm = args.use_edm
+
+        if self.use_edm:
+            self.diffusion = EDMPrecond(self.diffusion_)
+            self.loss = EDMLossCurriculum(max_steps=20000)
+        else:
+            self.diffusion = DiffusionPoint(
+                net=self.diffusion_,
+                var_sched=VarianceSchedule(
+                    num_steps=args.num_steps,
+                    beta_1=args.beta_1,
+                    beta_T=args.beta_T,
+                    mode=args.sched_mode,
+                ),
+            )
 
     def encode(self, x):
         """
@@ -44,7 +57,11 @@ class AutoEncoder(Module):
     def get_loss(self, x, step):
         code = self.encode(x)
         t = x["target_shape"].view(-1, 5000, 3).cuda()
-        loss = self.loss(
-            net=self.diffusion, data=t, code=code.detach(), step=step
-        ).mean()
+        if self.use_edm:
+            loss = self.loss(
+                net=self.diffusion, data=t, code=code.detach(), step=step
+            ).mean()
+        else:
+            loss = self.diffusion.get_loss(t.transpose(1, 2), code.detach())
+
         return loss, code
