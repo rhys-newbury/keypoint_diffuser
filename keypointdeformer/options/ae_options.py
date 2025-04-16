@@ -47,6 +47,7 @@ class AEConfig:
     mesh_dir: str = None
     keypoints_dir: str = None
 
+    use_old: bool = False
     use_edm: bool = False
 
     segmentations_dir: str = None

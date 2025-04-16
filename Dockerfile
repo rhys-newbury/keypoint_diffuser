@@ -20,5 +20,10 @@ WORKDIR /app
 COPY keypointdeformer/PCT_Pytorch /app/keypointdeformer/PCT_Pytorch
 RUN cd /app/keypointdeformer/PCT_Pytorch/pointnet2_ops_lib && pip install -e .
 
-COPY . /app
+RUN groupadd -g 1000 taco && useradd -u 1000 -g 1000 -m taco
+
+COPY --chown=taco:taco . /app
+
 WORKDIR app
+
+USER taco

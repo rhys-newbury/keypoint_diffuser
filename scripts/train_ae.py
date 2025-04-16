@@ -449,10 +449,10 @@ def test(opt, save_subdir="test"):
             #     code, target_shape_t.size(2), flexibility=opt.flexibility
             # ).detach()
 
-            recons = ae_model.decode_edm(code).detach()
+            # recons = ae_model.decode(code, 5000).detach()
 
-            all_ref.append(target_shape_t.detach().cpu())
-            all_recons.append(recons.detach().cpu())
+            # all_ref.append(target_shape_t.detach().cpu())
+            # all_recons.append(recons.detach().cpu())
 
             target_sampled_points = data["target_sampled_points"].view(
                 data["orig_offset"].shape[0], -1, 4
@@ -525,17 +525,17 @@ def test(opt, save_subdir="test"):
         # pdb.set_trace()
         print(average_correlation_per_keypoint)
 
-        all_ref = torch.cat(all_ref, dim=0).permute(0, 2, 1)
-        all_ref = normalize_point_clouds(all_ref, "shape_bbox")
-        all_recons = torch.cat(all_recons, dim=0)
-        all_recons = normalize_point_clouds(all_recons, "shape_bbox")
-        print(
-            EMD_CD(
-                all_recons.to("cuda").double(),
-                all_ref.to("cuda").double(),
-                opt.batch_size,
-            )
-        )
+        # all_ref = torch.cat(all_ref, dim=0).permute(0, 2, 1)
+        # all_ref = normalize_point_clouds(all_ref, "shape_bbox")
+        # all_recons = torch.cat(all_recons, dim=0)
+        # all_recons = normalize_point_clouds(all_recons, "shape_bbox")
+        # print(
+        #     EMD_CD(
+        #         all_recons.to("cuda").double(),
+        #         all_ref.to("cuda").double(),
+        #         opt.batch_size,
+        #     )
+        # )
 
 
 def get_linear_scheduler(optimizer, start_epoch, end_epoch, start_lr, end_lr):
@@ -724,7 +724,7 @@ def train(opt, rank, world_size):
     epoch = 0
 
     lambda_0 = 1
-    lambda_1 = 10
+    lambda_1 = 1
     lambda_2 = 1
     lambda_3 = 1
 

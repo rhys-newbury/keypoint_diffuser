@@ -1,7 +1,7 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: lamp2
+  name: lamp-reset-weights-eval
 spec:
   maxRetry: 1
   minAvailable: 1
@@ -24,19 +24,21 @@ spec:
               imagePullPolicy: Always
               image: mu00120825.eng.monash.edu.au:5021/keypoint_deformer:latest
               command:
-                [
-                  "python",
-                  "scripts/train_ae.py",
-                  "--latent_dim=8",
-                  "--n_iterations=200000",
-                  "-c=configs/airplane-8kpt.yaml",
-                ]
-                # ["bash",
-                # "run.sh",
-                # "main.py",
-                # "zesty-microwave-291",
-                # "8"
+                # [
+                #   "python",
+                #   "scripts/train_ae.py",
+                #   "--latent_dim=8",
+                #   "--n_iterations=200000",
+                #   "-c=configs/airplane-8kpt.yaml",
+                #   "--use_old=true"
                 # ]
+                ["bash",
+                "wait_for_new.sh",
+                "train_ae.py",
+                "misty-cloud-201",
+                "8",
+                "--use_old=true"
+                ]
               workingDir: /app
 
               env:
@@ -45,6 +47,8 @@ spec:
                     secretKeyRef:
                       name: wandb
                       key: api-key
+                - name: WANDB_CACHE_DIR
+                  value: /home/taco
               resources:
                 requests:
                   memory: 24Gi
