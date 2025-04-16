@@ -6,8 +6,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.nn import Module
 
-
-from .common import FiLMResidualMLP, ConcatSquashLinear
+from .common import ConcatSquashLinear, FiLMResidualMLP
 
 
 def init_linear(layer, stddev):
