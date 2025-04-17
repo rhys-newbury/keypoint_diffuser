@@ -24,6 +24,8 @@ import torch.utils.data
 import torch.utils.data.distributed
 from einops import repeat
 from tensorboardX import SummaryWriter
+from torch.distributions import Normal
+from torch.distributions.kl import kl_divergence
 from torch.nn.parallel import DistributedDataParallel
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import LambdaLR
@@ -371,6 +373,12 @@ def visualize_point_clouds(
     np.save(f"{save_dir}/kp_deformed.npy", kp_deformed_np)
 
 
+def reparameterize(mu, logvar):
+    std = torch.exp(0.5 * logvar)
+    eps = torch.randn_like(std)
+    return mu + eps * std
+
+
 def test(opt, save_subdir="test"):
     t = transforms.Compose(
         [
@@ -442,24 +450,23 @@ def test(opt, save_subdir="test"):
                 .cuda()
             )
 
-            code = ae_model.encode(get_network_data(data))
-            code[:, :-5].reshape(code.shape[0], -1, 3)
+            z0, mu, logvar = ae_model.encode(get_network_data(data))
+            z_aux = reparameterize(mu, logvar)  # sampled from q(z|x)
 
-            # recons = ae_model.decode(
-            #     code, target_shape_t.size(2), flexibility=opt.flexibility
-            # ).detach()
+            # Step 3: Concatenate
+            z_full = torch.cat([z0, z_aux], dim=1)
 
-            # recons = ae_model.decode(code, 5000).detach()
+            recons = ae_model.decode(z_full, 5000).detach()
 
-            # all_ref.append(target_shape_t.detach().cpu())
-            # all_recons.append(recons.detach().cpu())
+            all_ref.append(target_shape_t.detach().cpu())
+            all_recons.append(recons.detach().cpu())
 
             target_sampled_points = data["target_sampled_points"].view(
                 data["orig_offset"].shape[0], -1, 4
             )
 
-            for i in range(code.shape[0]):
-                kp = code[i, :-5].reshape(-1, 3)
+            for i in range(z0.shape[0]):
+                kp = z0[i, :].reshape(-1, 3)
 
                 # import pdb; pdb.set_trace()
 
@@ -525,17 +532,17 @@ def test(opt, save_subdir="test"):
         # pdb.set_trace()
         print(average_correlation_per_keypoint)
 
-        # all_ref = torch.cat(all_ref, dim=0).permute(0, 2, 1)
-        # all_ref = normalize_point_clouds(all_ref, "shape_bbox")
-        # all_recons = torch.cat(all_recons, dim=0)
-        # all_recons = normalize_point_clouds(all_recons, "shape_bbox")
-        # print(
-        #     EMD_CD(
-        #         all_recons.to("cuda").double(),
-        #         all_ref.to("cuda").double(),
-        #         opt.batch_size,
-        #     )
-        # )
+        all_ref = torch.cat(all_ref, dim=0).permute(0, 2, 1)
+        all_ref = normalize_point_clouds(all_ref, "shape_bbox")
+        all_recons = torch.cat(all_recons, dim=0)
+        all_recons = normalize_point_clouds(all_recons, "shape_bbox")
+        print(
+            EMD_CD(
+                all_recons.to("cuda").double(),
+                all_ref.to("cuda").double(),
+                opt.batch_size,
+            )
+        )
 
 
 def get_linear_scheduler(optimizer, start_epoch, end_epoch, start_lr, end_lr):
@@ -727,6 +734,7 @@ def train(opt, rank, world_size):
     lambda_1 = 1
     lambda_2 = 1
     lambda_3 = 1
+    lambda_4 = 1
 
     while t <= opt.n_iterations:
         print(t)
@@ -750,15 +758,25 @@ def train(opt, rank, world_size):
                 net.module if torch.cuda.device_count() > 1 and world_size > 1 else net
             )
 
-            diffusion_loss, code = module.get_loss(get_network_data(data), step=t)
+            diffusion_loss, code, mu, logvar = module.get_loss(
+                get_network_data(data), step=t
+            )
+
             code_ = code[:, : opt.latent_dim * 3].reshape(
                 data["orig_offset"].shape[0], -1, 3
             )
 
+            q = Normal(mu, torch.exp(0.5 * logvar))
+            p = Normal(torch.zeros_like(mu), torch.ones_like(logvar))
+            kl = kl_divergence(q, p).sum(dim=1).mean()
+
             if rank == 0:
                 wandb.log({"diffusion_loss": diffusion_loss}, step=t)
 
-            # if t < 1000:
+            if t > 1000 and lambda_0 > 0:
+                print("turing off FPS loss")
+                lambda_0 = 0
+
             fps = sample_farthest_points(target_shape_t, opt.latent_dim).transpose(2, 1)
 
             fps_loss, _ = pytorch3d.loss.chamfer_distance(fps, code_)
@@ -777,9 +795,9 @@ def train(opt, rank, world_size):
                 data["orig_offset"].shape[0], -1, 3
             )
 
-            kp_orig = code[:, :-5].reshape(code.shape[0], -1, 3)
-            deformed_code = net(get_network_data(data, "deformed"))
-            kp_deformed = deformed_code[:, :-5].reshape(code.shape[0], -1, 3)
+            kp_orig = code_.reshape(code.shape[0], -1, 3)
+            deformed_code, _, _ = net(get_network_data(data, "deformed"))
+            kp_deformed = deformed_code.reshape(code.shape[0], -1, 3)
             kp_transformed = torch.bmm(kp_orig, deformed_matrix.transpose(1, 2))
             mse_loss = torch.mean((kp_transformed - kp_deformed) ** 2)
 
@@ -788,6 +806,7 @@ def train(opt, rank, world_size):
                 + lambda_1 * diffusion_loss
                 + lambda_2 * chamfer_loss
                 + lambda_3 * mse_loss
+                + lambda_4 * kl
             )
 
             if rank == 0:

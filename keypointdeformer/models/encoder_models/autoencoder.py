@@ -1,3 +1,5 @@
+import torch
+from torch import nn
 from torch.nn import Module
 
 from keypointdeformer.utils.loss import EDMLossCurriculum
@@ -14,6 +16,19 @@ class AutoEncoder(Module):
         self.encoder = PointTransformerv2(
             zdim=args.latent_dim, extra_latent=args.extra_latent
         )
+
+        self.fc_mu = nn.Sequential(
+            nn.Linear(args.extra_latent, 64),
+            nn.ReLU(),
+            nn.Linear(64, args.extra_latent),
+        )
+
+        self.fc_logvar = nn.Sequential(
+            nn.Linear(args.extra_latent, 64),
+            nn.ReLU(),
+            nn.Linear(64, args.extra_latent),
+        )
+
         cls = PointwiseNetOld if args.use_old else PointwiseNet
 
         self.diffusion_ = cls(
@@ -43,7 +58,15 @@ class AutoEncoder(Module):
             x:  Point clouds to be encoded, (B, N, d).
         """
         code = self.encoder(x)
-        return code
+
+        z_kp = code[:, : self.args.latent_dim * 3]
+
+        z_aux_raw = code[:, self.args.latent_dim * 3 :]
+
+        mu = self.fc_mu(z_aux_raw)
+        logvar = self.fc_logvar(z_aux_raw)
+
+        return z_kp, mu, logvar
 
     def forward(self, x):
         return self.encode(x)
@@ -56,15 +79,23 @@ class AutoEncoder(Module):
             num_points, code, flexibility=flexibility, ret_traj=ret_traj
         )
 
-    # def decode_edm(self, code):
-    #     return self.diffusion.edm_sampler(code)
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
 
     def get_loss(self, x, step):
-        code = self.encode(x)
+        z0, mu, logvar = self.encode(x)
+
+        z_aux = self.reparameterize(mu, logvar)
+        code = torch.cat([z0, z_aux], dim=1)
+
         t = x["target_shape"].view(-1, 5000, 3).cuda()
         if self.use_edm:
-            loss = self.loss(net=self.diffusion, data=t, code=code, step=step).mean()
+            loss = self.loss(
+                net=self.diffusion, data=t, code=code.detach(), step=step
+            ).mean()
         else:
             loss = self.diffusion.get_loss(t.transpose(1, 2), code)
 
-        return loss, code
+        return loss, z0, mu, logvar
