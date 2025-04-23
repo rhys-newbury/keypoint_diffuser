@@ -13,3 +13,4 @@ data/
 keypointdeformer/utils/emd_loss/build
 *.egg
 *.egg-info
+*.log

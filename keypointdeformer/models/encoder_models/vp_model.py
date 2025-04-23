@@ -2,10 +2,6 @@ import numpy as np
 import torch
 
 
-# from torch_utils import persistence
-# from torch.nn.functional import silu
-
-
 class VPPrecond(torch.nn.Module):
     def __init__(
         self,
@@ -143,7 +139,6 @@ class EDMPrecond(torch.nn.Module):
     def forward(self, x, sigma, **model_kwargs):
         x = x.to(torch.float32)
         sigma = sigma.to(torch.float32).reshape(-1, 1, 1)
-        # class_labels = None if self.label_dim == 0 else torch.zeros([1, self.label_dim], device=x.device) if class_labels is None else class_labels.to(torch.float32).reshape(-1, self.label_dim)
         dtype = torch.float32
 
         c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)

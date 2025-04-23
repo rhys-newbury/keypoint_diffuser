@@ -53,8 +53,6 @@ CHECKPOINT_EXT = ".pth"
 
 # Initialize distributed environment
 def setup(rank, world_size):
-    # os.environ["MASTER_ADDR"] = "localhost"
-    # os.environ["MASTER_PORT"] = "12355"
     if torch.cuda.device_count() > 1:
         local_rank = int(os.environ["LOCAL_RANK"])
         print("local_rank", local_rank, "rank: ", rank, "world_size: ", world_size)
@@ -86,10 +84,8 @@ def normalize_point_clouds(pcs, mode):
 def get_data(dataset, data):
     data = dataset.uncollate(data)
 
-    # source_shape, target_shape = data["source_shape"], data["target_shape"]
     target_shape = data["target_shape"]
 
-    # source_shape_t = source_shape.transpose(1, 2)
     target_shape_t = target_shape.transpose(1, 2)
 
     return None, target_shape_t
@@ -142,7 +138,6 @@ def visualize_point_cloud(
                 [0, 0, 0, 1],
             ]
         )
-        # print("Running ICP...")
         reg_icp = o3d.pipelines.registration.registration_icp(
             pcd,
             orig_pcd,
@@ -265,9 +260,6 @@ def test(opt, save_subdir="test"):
         for data in tqdm(
             dataloader, desc="Processing data", unit="batch", total=total_batches
         ):
-            # import pdb; pdb.set_trace()
-            # data_ = dataset.uncollate(data)
-            # target_shape_t = data_["target_shape"].transpose(1, 2).cuda()
             target_shape_t = (
                 data["target_shape"]
                 .view(data["orig_offset"].shape[0], -1, 3)
@@ -293,14 +285,10 @@ def test(opt, save_subdir="test"):
             for i in range(z0.shape[0]):
                 kp = z0[i, :].reshape(-1, 3)
 
-                # import pdb; pdb.set_trace()
-
                 points = target_shape_t[i, ...].T
 
                 seg_labels = target_sampled_points[i, :, -1].int().cuda()
                 seg_points = target_sampled_points[i, :, :3]
-
-                # import pdb; pdb.set_trace()
 
                 seg_points = visualize_point_cloud(
                     seg_points,
@@ -320,7 +308,6 @@ def test(opt, save_subdir="test"):
                 keypoint_indices, seg_point_indices = torch.nonzero(
                     within_threshold_mask, as_tuple=True
                 )
-                # import pdb; pdb.set_trace()
                 valid_seg_labels = seg_labels[
                     seg_point_indices
                 ]  # The labels for valid segmentation points
@@ -338,9 +325,7 @@ def test(opt, save_subdir="test"):
                 label_presence_matrix[keypoint_indices, valid_seg_labels.long()] = True
 
                 closest_labels_.append(label_presence_matrix)
-            # break
 
-        # import pdb; pdb.set_trace()
         closest_labels_tensor = torch.stack(closest_labels_)
 
         average_correlation_per_keypoint = (
@@ -461,7 +446,7 @@ def train(opt, rank, world_size):
 
     if torch.cuda.device_count() > 1 and world_size > 1:
         print("Using DistributedSampler for multiple GPUs.")
-        train_sampler = distributed.DistributedSampler(
+        train_sampler = dist.DistributedSampler(
             dataset, num_replicas=world_size, rank=rank
         )
         shuffle = False
@@ -611,7 +596,6 @@ def train(opt, rank, world_size):
             if rank == 0:
                 wandb.log({"fps_loss": fps_loss}, step=t)
 
-            # else:
             max_schedule = 100000
             chamfer_loss, _ = pytorch3d.loss.chamfer_distance(
                 code_, target_shape_t.transpose(2, 1)
@@ -681,19 +665,9 @@ def train(opt, rank, world_size):
 
             t += 1
 
-        # torch.cuda.empty_cache()
-        # test_loss = 0
-        # net.eval()
         # with torch.no_grad():
         #     for _, data in enumerate(test_dataloader):
-        #         # target_shape_t = data["target_shape"].transpose(1, 2).cuda()
-        #         # print(target_shape_t.shape)
 
-        #         loss, code = net.get_loss(
-        #             get_network_data(data)
-        #         )
-        #         test_loss += loss
-        # wandb.log({"mse_test_loss": test_loss}, step=t)
     if rank == 0:
         save_network(net, checkpoints_dir, network_label="net", epoch_label="final")
 

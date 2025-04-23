@@ -9,7 +9,9 @@ from numpy.linalg import norm
 from scipy.stats import entropy
 from sklearn.neighbors import NearestNeighbors
 from tqdm.auto import tqdm
-from .emd_loss.emd_module import emdModule
+
+from .emd_loss.emd_module import EMDModule
+
 
 def downsample_batched_point_cloud(point_clouds, num_samples=4096):
     """
@@ -44,7 +46,7 @@ def downsample_batched_point_cloud(point_clouds, num_samples=4096):
 def emd_approx(sample, ref):
     N, N_ref = sample.size(1), ref.size(1)
     assert N_ref == N, "Not sure what would EMD do in this case"
-    emd = emdModule()
+    emd = EMDModule()
     sample_ = (downsample_batched_point_cloud(sample) + 1) / 2
     ref_ = (downsample_batched_point_cloud(ref) + 1) / 2
     dis, _ = emd(sample_, ref_, 0.002, 10000)  # 0.005, 50 for training
@@ -115,7 +117,6 @@ def _pairwise_EMD_CD_(sample_pcs, ref_pcs, batch_size, verbose=True):
         emd_lst = []
         sub_iterator = range(0, N_ref, batch_size)
         # if verbose:
-        #     sub_iterator = tqdm(sub_iterator, leave=False)
         for ref_b_start in sub_iterator:
             ref_b_end = min(N_ref, ref_b_start + batch_size)
             ref_batch = ref_pcs[ref_b_start:ref_b_end]
@@ -224,12 +225,6 @@ def compute_all_metrics(sample_pcs, ref_pcs, batch_size):
     res_cd = lgan_mmd_cov(M_rs_cd.t())
     results.update({"%s-CD" % k: v for k, v in res_cd.items()})
 
-    ## EMD
-    # res_emd = lgan_mmd_cov(M_rs_emd.t())
-    # results.update({
-    #     "%s-EMD" % k: v for k, v in res_emd.items()
-    # })
-
     for k, v in results.items():
         print(f"[{k}] {v.item():.8f}")
 
@@ -242,11 +237,6 @@ def compute_all_metrics(sample_pcs, ref_pcs, batch_size):
     results.update(
         {"1-NN-CD-%s" % k: v for k, v in one_nn_cd_res.items() if "acc" in k}
     )
-    ## EMD
-    # one_nn_emd_res = knn(M_rr_emd, M_rs_emd, M_ss_emd, 1, sqrt=False)
-    # results.update({
-    #     "1-NN-EMD-%s" % k: v for k, v in one_nn_emd_res.items() if 'acc' in k
-    # })
 
     return results
 

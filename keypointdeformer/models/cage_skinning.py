@@ -40,7 +40,6 @@ class CageSkinning(nn.Module):
         self.init_optimizer()
 
     def create_cage(self):
-        # cage (1, N, 3)
         mesh = pytorch3d.utils.ico_sphere(self.opt.ico_sphere_div, device="cuda:0")
         init_cage_V = mesh.verts_padded()
         init_cage_F = mesh.faces_padded()

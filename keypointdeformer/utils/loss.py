@@ -12,8 +12,6 @@ import torch
 from pytorch3d.loss import chamfer_distance
 
 
-# from torch_utils import persistence
-
 # ----------------------------------------------------------------------------
 # Loss function corresponding to the variance preserving (VP) formulation
 # from the paper "Score-Based Generative Modeling through Stochastic
@@ -32,7 +30,6 @@ class VPLoss:
         sigma = self.sigma(1 + rnd_uniform * (self.epsilon_t - 1))
         weight = 1 / sigma**2
         y = data
-        # y, augment_labels = augment_pipe(data) if augment_pipe is not None else (data, None)
         n = torch.randn_like(y) * sigma
         D_yn = net(y + n, sigma, context=code)
         loss = weight * ((D_yn - y) ** 2)
@@ -86,7 +83,6 @@ class EDMLoss:
         sigma = (rnd_normal * self.P_std + self.P_mean).exp()
         weight = (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
         y = data
-        # y, augment_labels = augment_pipe(data) if augment_pipe is not None else (data, None)
         n = torch.randn_like(y) * sigma
         D_yn = net(y + n, sigma, context=code)
         loss = weight * ((D_yn - y) ** 2)

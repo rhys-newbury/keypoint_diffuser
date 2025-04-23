@@ -42,14 +42,10 @@ class PointNetEncoder(nn.Module):
         m = F.relu(self.fc_bn1_m(self.fc1_m(x)))
         m = F.relu(self.fc_bn2_m(self.fc2_m(m)))
         m = self.fc3_m(m)
-        # bs = m.shape[0]
-        # print(m.shape)
-        # import pdb; pdb.set_trace()
-        # m = m[:, :-10].reshape(bs, -1, 3)
+
         v = F.relu(self.fc_bn1_v(self.fc1_v(x)))
         v = F.relu(self.fc_bn2_v(self.fc2_v(v)))
         v = self.fc3_v(v)
-        # v = v.reshape(bs, -1, 3)
 
         # Returns both mean and logvariance, just ignore the latter in deteministic cases.
         return m, v

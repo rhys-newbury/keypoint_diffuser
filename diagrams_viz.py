@@ -93,7 +93,6 @@ decoded = np.load("viz_decoded.npy")
 kp_orig = np.load("viz_code.npy")[:, :-5].reshape(16, -1, 3)
 kp_deformed = np.load("viz_code2.npy")[:, :-5].reshape(16, -1, 3)
 
-# import pdb; pdb.set_trace()
 cd = []
 i = 7
 # for i in range(x.shape[0]):
@@ -120,7 +119,6 @@ opt = vis.get_render_option()
 opt.background_color = np.array([0.0, 1.0, 0.0])
 
 vis.add_geometry(pcd2)
-# vis.add_geometry(kpts)
 keypoint_spheres = spheres_from_points(np.asarray(kpts.points), radius=0.02)
 for sph in keypoint_spheres:
     vis.add_geometry(sph)
@@ -133,8 +131,6 @@ ctr.set_up([0, 0, 1])
 ctr.set_zoom(0.6)
 
 # --- Save image ---
-# vis.capture_screen_image("plane_view.png")
-# vis.destroy_window()
 
 for _ in range(10):
     vis.poll_events()

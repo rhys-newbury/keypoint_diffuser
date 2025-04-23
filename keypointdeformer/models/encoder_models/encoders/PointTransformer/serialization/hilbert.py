@@ -30,8 +30,6 @@ def right_shift(binary, k=1, axis=-1):
         return torch.zeros_like(binary)
 
     # Determine the padding pattern.
-    # padding = [(0,0)] * len(binary.shape)
-    # padding[axis] = (k,0)
 
     # Determine the slicing pattern to eliminate just the last one.
     slicing = [slice(None)] * len(binary.shape)
@@ -293,7 +291,6 @@ def decode(hilberts, num_dims, num_bits):
     locs_chopped = padded.flip(-1).reshape((-1, num_dims, 8, 8))
 
     # Take those blocks and turn them unto uint8s.
-    # from IPython import embed; embed()
     locs_uint8 = (locs_chopped * bitpack_mask).sum(3).squeeze().type(torch.uint8)
 
     # Finally, treat these as uint64s.

@@ -8,7 +8,6 @@ from bottle import route, run, static_file, template
 
 
 bottle.TEMPLATE_PATH.insert(0, os.path.join("browse3d", "views"))
-# bottle.debug(True)
 
 app_root = os.path.dirname(os.path.abspath(__file__))
 

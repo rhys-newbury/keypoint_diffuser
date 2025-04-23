@@ -27,7 +27,7 @@ from torch import nn
 from torch.autograd import Function
 
 
-class emdFunction(Function):
+class EMDFunction(Function):
     @staticmethod
     def forward(ctx, xyz1, xyz2, eps, iters):
         batchsize, n, _ = xyz1.size()
@@ -84,7 +84,7 @@ class emdFunction(Function):
         return dist, assignment
 
     @staticmethod
-    def backward(ctx, graddist, gradidx):
+    def backward(ctx, graddist, _gradidx):
         xyz1, xyz2, assignment = ctx.saved_tensors
         graddist = graddist.contiguous()
 
@@ -95,18 +95,18 @@ class emdFunction(Function):
         return gradxyz1, gradxyz2, None, None
 
 
-class emdModule(nn.Module):
+class EMDModule(nn.Module):
     def __init__(self):
         super().__init__()
 
     def forward(self, input1, input2, eps, iters):
-        return emdFunction.apply(input1, input2, eps, iters)
+        return EMDFunction.apply(input1, input2, eps, iters)
 
 
 def test_emd():
     x1 = torch.rand(20, 8192, 3).cuda()  # please normalize your point cloud to [0, 1]
     x2 = torch.rand(20, 8192, 3).cuda()
-    emd = emdModule()
+    emd = EMDModule()
     start_time = time.perf_counter()
     dis, assignment = emd(x1, x2, 0.002, 10000)  # 0.005, 50 for training
     print("Input_size: ", x1.shape)
@@ -118,6 +118,3 @@ def test_emd():
     x2 = np.take_along_axis(x2, assignment, axis=1)
     d = (x1 - x2) * (x1 - x2)
     print("Verified EMD: %lf" % np.sqrt(d.cpu().sum(-1)).mean())
-
-
-# test_emd()

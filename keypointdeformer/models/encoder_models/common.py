@@ -132,9 +132,6 @@ class ConcatSquashLinear(Module):
     def forward(self, ctx, x):
         gate = torch.sigmoid(self._hyper_gate(ctx))
         bias = self._hyper_bias(ctx)
-        # if x.dim() == 3:
-        #     gate = gate.unsqueeze(1)
-        #     bias = bias.unsqueeze(1)
         ret = self._layer(x) * gate + bias
         return ret
 

@@ -100,7 +100,6 @@ t = int(sys.argv[1])
 # for t in range(0, data.shape[0], 5):
 print(t)
 x = data[t, ...]
-# import pdb; pdb.set_trace()
 cd = []
 i = 7
 # for i in range(x.shape[0]):

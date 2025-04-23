@@ -55,32 +55,6 @@ class Shapes(torch.utils.data.Dataset):
 
     @staticmethod
     def modify_commandline_options(parser):
-        # parser.add_argument("--segmentations_dir", type=str, default=None, help="")
-        # parser.add_argument("--seg_split_dir", type=str, default=None, help="")
-        # parser.add_argument("--keypointnet_dir", type=str, default=None, help="")
-        # parser.add_argument("--keypointnet_compatible", type=str, default=None, help="")
-        # parser.add_argument(
-        #     "--keypointnet_common_keypoints", action="store_true", help=""
-        # )
-        # parser.add_argument(
-        #     "--keypointnet_min_n_common_keypoints", type=int, default=6, help=""
-        # )
-        # parser.add_argument(
-        #     "--keypointnet_min_samples", type=float, default=0.8, help=""
-        # )
-        # parser.add_argument("--keypoints_gt_source", type=str, default=None, help="")
-        # parser.add_argument("--data_type", type=str, default="shapenet", help="")
-        # parser.add_argument("--split_file", type=str, default=None, help="")
-        # parser.add_argument("--split", type=str, default=None, help="")
-        # parser.add_argument("--fixed_source_index", type=int, default=None, help="")
-        # parser.add_argument("--fixed_target_index", type=int, default=None, help="")
-        # parser.add_argument("--normalize", type=str, default="unit_box", help="")
-        # parser.add_argument("--multiply", type=int, default=1, help="")
-        # parser.add_argument("--load_cages_test_pairs", action="store_true", help="")
-        # parser.add_argument("--load_test_pairs", action="store_true", help="")
-        # parser.add_argument("--load_mesh", action="store_true", help="")
-        # parser.add_argument("--sample_mesh", action="store_true", help="")
-        # parser.add_argument("--test_pairs_file", type=str, default=None, help="")
         return parser
 
     def normalize(self, x):
@@ -221,7 +195,6 @@ class Shapes(torch.utils.data.Dataset):
 
     def load_dataset(self):
         dataset = {}
-        # import pdb; pdb.set_trace()
         if self.opt.data_type == "shapenet":
             names = self._load_from_split_file(self.opt.split)
         elif self.opt.data_type == "keypointnet":
@@ -377,31 +350,25 @@ class Shapes(torch.utils.data.Dataset):
             time.time()
             mesh_path = self._get_mesh_path(name)
             V_mesh, F_mesh, mesh_obj = read_mesh(mesh_path, return_mesh=True)
-            # print(f"Mesh loading time: {time.time() - t1:.4f} sec")
 
         pc_path = Path(self._get_mesh_path(name)).parent / "point_resampled_labeled.npy"
 
         if False:
             time.time()
             points = resample_mesh(mesh_obj, self.opt.num_point)
-            # print(f"Mesh resampling time: {time.time() - t2:.4f} sec")
         else:
             time.time()
-            # print(self._get_pointcloud_path(name))
             points = np.load(self._get_pointcloud_path(name))
             points = torch.from_numpy(points).float()
-            # print(f"Point cloud loading time: {time.time() - t3:.4f} sec")
 
         time.time()
         points[:, :3], center, scale = self.normalize(points[:, :3])
         points = points.clone()
-        # print(f"Normalization time: {time.time() - t4:.4f} sec")
 
         time.time()
         normals = points[:, 3:6].clone()
         label = points[:, -1].clone()
         shape = points[:, :3].clone()
-        # print(f"Cloning data time: {time.time() - t5:.4f} sec")
 
         result = {
             "shape": shape,
@@ -410,7 +377,6 @@ class Shapes(torch.utils.data.Dataset):
             "cat": self.opt.category,
             "file": name,
         }
-        # import pdb; pdb.set_trace()
         if pc_path.is_file():
             # removed:
             # 022433,02691156,03595860,692797a818b4630f1aa3e317da5a1267,test
@@ -422,8 +388,6 @@ class Shapes(torch.utils.data.Dataset):
             result.update({"sampled_points": pc})
         else:
             pass
-            # import pdb; pdb.set_trace()
-            # print(f"Sampled points loading & processing time: {time.time() - t6:.4f} sec")
 
         if False:
             time.time()
@@ -431,7 +395,6 @@ class Shapes(torch.utils.data.Dataset):
             F_mesh = F_mesh[:, :3]
             V_mesh = (V_mesh - center) / scale
             result.update({"mesh": V_mesh, "face": F_mesh, "mesh_obj": mesh_obj})
-            # print(f"Mesh processing & scaling time: {time.time() - t7:.4f} sec")
 
         if self.opt.keypoints_gt_source == "keypointnet":
             time.time()
@@ -443,7 +406,6 @@ class Shapes(torch.utils.data.Dataset):
             result["keypoints_gt"] = keypoints_gt
             result["keypoints_gt_center"] = keypoints_gt_center
             result["keypoints_gt_scale"] = keypoints_gt_scale
-            # print(f"Keypoint ground truth loading time: {time.time() - t8:.4f} sec")
 
         if False:  # if self.opt.data_type == 'shapenetseg':  # Disabled condition
             time.time()
@@ -454,10 +416,8 @@ class Shapes(torch.utils.data.Dataset):
             seg_labels = torch.from_numpy(seg_labels)
             seg_points = (seg_points - center) / scale
             result.update({"seg_labels": seg_labels, "seg_points": seg_points})
-            # print(f"Segmentation data loading time: {time.time() - t9:.4f} sec")
 
         time.time()
-        # print(f"Total data loading time: {t_end - t_start:.4f} sec")
 
         return result
 
@@ -505,11 +465,9 @@ class Shapes(torch.utils.data.Dataset):
                         )
                     )
                 )
-                # import pdb; pdb.set_trace()
                 index += 1
 
             if self.transform:
-                # import pdb; pdb.set_trace()
                 transformed, deformed = self.transform(
                     {"coord": sample["target_shape"].cpu().numpy()}
                 )  # Apply transform

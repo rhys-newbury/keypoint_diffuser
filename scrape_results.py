@@ -15,21 +15,16 @@ data = []
 
 # Collect data from runs
 for run in tqdm.tqdm(runs, total=1176):
-    # print(run)
     # Get config values
     try:
         x = run.history()
         n_keypoints = int(x["n_keypoints"][0])
         run_type = x["type"][0]
-        # import pdb; pdb.set_trace()
 
         # Skip if necessary config values are missing
         # if n_keypoints is None or run_type is None:
-        # continue
 
         # Get metric history
-        # history = run.history(keys=["average_correlation_per_keypoint"], pandas=True)
-        # print(run.history)
 
         # if "average_correlation_per_keypoint" in history.columns:
         max_corr = x["average_correlation_per_keypoint"][1]

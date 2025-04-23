@@ -27,17 +27,14 @@ class PointNetfeat(nn.Module):
         self.conv1 = Conv1d(
             dim, 64, 1, activation=activation, normalization=normalization
         )
-        # self.stn_embedding = STN(num_points = num_points, K=64)
         self.conv2 = Conv1d(
             64, 128, 1, activation=activation, normalization=normalization
         )
         self.conv3 = Conv1d(
             128, bottleneck_size, 1, activation=None, normalization=normalization
         )
-        # self.mp1 = torch.nn.MaxPool1d(num_points)
 
         self.trans = trans
-        # self.mp1 = torch.nn.MaxPool1d(num_points)
         self.num_points = num_points
         self.global_feat = global_feat
 

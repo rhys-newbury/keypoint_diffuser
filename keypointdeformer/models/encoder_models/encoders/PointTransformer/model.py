@@ -90,7 +90,6 @@ class Point(Dict):
         if "grid_coord" not in self.keys():
             # if you don't want to operate GridSampling in data augmentation,
             # please add the following augmentation into your pipline:
-            # dict(type="Copy", keys_dict={"grid_size": 0.01}),
             # (adjust `grid_size` to what your want)
             assert {"grid_size", "coord"}.issubset(self.keys())
             self["grid_coord"] = torch.div(
@@ -111,7 +110,6 @@ class Point(Dict):
 
         # The serialization codes are arranged as following structures:
         # [Order1 ([n]),
-        #  Order2 ([n]),
         #   ...
         #  OrderN ([n])] (k, n)
         code = [
@@ -152,7 +150,6 @@ class Point(Dict):
         if "grid_coord" not in self.keys():
             # if you don't want to operate GridSampling in data augmentation,
             # please add the following augmentation into your pipline:
-            # dict(type="Copy", keys_dict={"grid_size": 0.01}),
             # (adjust `grid_size` to what your want)
             assert {"grid_size", "coord"}.issubset(self.keys())
             self["grid_coord"] = torch.div(

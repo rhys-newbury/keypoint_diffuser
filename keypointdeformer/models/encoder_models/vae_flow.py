@@ -36,11 +36,9 @@ class FlowVAE(Module):
             x:  Input point clouds, (B, N, d).
         """
         batch_size, _, _ = x.size()
-        # print(x.size())
         z_mu, z_sigma = self.encoder(x)
         z = reparameterize_gaussian(mean=z_mu, logvar=z_sigma)  # (B, F)
 
-        # H[Q(z|X)]
         entropy = gaussian_entropy(logvar=z_sigma)  # (B, )
 
         # P(z), Prior probability, parameterized by the flow: z -> w.

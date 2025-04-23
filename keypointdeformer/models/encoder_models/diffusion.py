@@ -278,9 +278,6 @@ class PointwiseNet(Module):
         beta = beta.view(batch_size, 1, 1)  # (B, 1, 1)
         context = context.view(batch_size, 1, -1)  # (B, 1, F)
 
-        # time_emb = torch.cat(
-        #     [beta, torch.sin(beta), torch.cos(beta)], dim=-1
-        # )  # (B, 1, 3)
         t_embed = self.time_embed(self.timestep_embedding(beta, self.width)).squeeze(2)
         c_project = self.ctx_embed(context)
 
@@ -288,7 +285,6 @@ class PointwiseNet(Module):
 
         out = x + self.cross_attn(x, ctx_emb)
 
-        # out = x
         for i, layer in enumerate(self.layers):
             out = layer(ctx=ctx_emb.squeeze(1), x=out)
             if i < len(self.layers) - 1:
@@ -309,7 +305,6 @@ class DiffusionPoint(Module):
 
     def freeze_network(self):
         pass
-        # self.frozen_net = copy.deepcopy(self.net)
 
     def get_loss(self, x_0, context, t=None):
         """

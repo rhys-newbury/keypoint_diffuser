@@ -253,7 +253,6 @@ def visualize_point_cloud(
                 [0, 0, 0, 1],
             ]
         )
-        # print("Running ICP...")
         reg_icp = o3d.pipelines.registration.registration_icp(
             pcd,
             orig_pcd,
@@ -307,7 +306,6 @@ def normalize_point_clouds(pcs, mode):
 
 def get_data(dataset, data):
     data = dataset.uncollate(data)
-    # print(data); import pdb; pdb.set_trace()
     source_shape, target_shape = data["source_shape"], data["target_shape"]
 
     source_shape_t = source_shape.transpose(1, 2)
@@ -390,7 +388,6 @@ def test(opt, save_subdir="test"):
                 keypoint_indices, seg_point_indices = torch.nonzero(
                     within_threshold_mask, as_tuple=True
                 )
-                # import pdb; pdb.set_trace()
                 valid_seg_labels = seg_labels[
                     seg_point_indices
                 ]  # The labels for valid segmentation points
@@ -422,7 +419,6 @@ def test(opt, save_subdir="test"):
         for key, value in metrics.items():
             print(f"{key}: {value.item():.10f}")
 
-        # import pdb; pdb.set_trace()
         closest_labels_tensor = torch.stack(closest_labels_)
 
         average_correlation_per_keypoint = (
@@ -453,7 +449,6 @@ def train(opt):
     )
 
     # network
-    # import pdb; pdb.set_trace()
     net = get_model(opt.model)(opt).cuda()
     net.apply(weights_init)
     if opt.ckpt:
@@ -488,9 +483,7 @@ def train(opt):
 
             source_shape_t, target_shape_t = get_data(dataset, data)
             outputs = net(source_shape_t, target_shape=target_shape_t)
-            import pdb
 
-            pdb.set_trace()
             current_loss = net.compute_loss(t)
             wandb.log(current_loss, step=t)
             net.optimize(current_loss, t)

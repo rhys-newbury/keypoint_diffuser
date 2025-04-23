@@ -76,7 +76,6 @@ def mean_value_coordinates_3D(
     B, F, _ = faces.shape
     _, P, _ = query.shape
     _, N, _ = vertices.shape
-    # u_i = p_i - x (B,P,N,3)
     uj = vertices.unsqueeze(1) - query.unsqueeze(2)
     # \|u_i\| (B,P,N,1)
     dj = torch.norm(uj, dim=-1, p=2, keepdim=True)
@@ -119,14 +118,12 @@ def mean_value_coordinates_3D(
     ci = torch.where(ci >= 1, ci - (ci.detach() - (1 - eps)), ci)
     ci = torch.where(ci <= -1, ci - (ci.detach() + (1 - eps)), ci)
     # si← sign[det[u1,u2,u3]]sqrt(1-ci^2)
-    # (B,P,F)*(B,P,F,3)
 
     si = torch.sign(torch.det(ui)).unsqueeze(-1) * torch.sqrt(
         1 - ci**2
     )  # sqrt gradient nan for 0
     if check_values:
         assert check_values(si)
-    # (B,P,F,3)
     di = torch.gather(
         dj.unsqueeze(2).squeeze(-1).expand(-1, -1, F, -1),
         3,
@@ -135,12 +132,6 @@ def mean_value_coordinates_3D(
     if check_values:
         assert check_values(di)
     # if si.requires_grad:
-    #     vertices.register_hook(save_grad("mvc/dv"))
-    #     li.register_hook(save_grad("mvc/dli"))
-    #     theta_i.register_hook(save_grad("mvc/dtheta"))
-    #     ci.register_hook(save_grad("mvc/dci"))
-    #     si.register_hook(save_grad("mvc/dsi"))
-    #     di.register_hook(save_grad("mvc/ddi"))
 
     # wi← (θi -c[i+1]θ[i-1] -c[i-1]θ[i+1])/(disin[θi+1]s[i-1])
     # B,P,F,3
@@ -154,7 +145,6 @@ def mean_value_coordinates_3D(
     wi = torch.where(
         torch.any(torch.abs(si) <= 1e-5, keepdim=True, dim=-1), torch.zeros_like(wi), wi
     )
-    # wi = torch.where(sqrdist <= 1e-5, torch.zeros_like(wi), wi)
 
     # if π -h < ε, x lies on t, use 2D barycentric coordinates
     # inside triangle
@@ -188,15 +178,11 @@ def mean_value_coordinates_3D(
     )
     wj = torch.where(close_to_point, torch.ones_like(wj), wj)
 
-    # (B,P,1)
     sumWj = torch.sum(wj, dim=-1, keepdim=True)
     sumWj = torch.where(sumWj == 0, torch.ones_like(sumWj), sumWj)
 
     wj_normalised = wj / sumWj
     # if wj.requires_grad:
-    #     saved_variables["mvc/wi"] = wi
-    #     wi.register_hook(save_grad("mvc/dwi"))
-    #     wj.register_hook(save_grad("mvc/dwj"))
     if verbose:
         return wj_normalised, wi
     else:

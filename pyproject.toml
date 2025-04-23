@@ -14,7 +14,7 @@ ignore = [
     "A001", "A002", "A003",
     "ARG001", "ARG002",
     "B905",
-    "ERA001", "E402",
+    "E402",
     "FBT001", "FBT002", "FBT003",
     "N802", "N806", "N812", "NPY002",
     "PD002",
@@ -60,8 +60,8 @@ lines-after-imports = 2
 extra-standard-library = ["typing_extensions"]
 
 [tool.ruff.pylint]
-max-statements = 100
-max-branches=20
+max-statements = 150
+max-branches=25
 max-args=15
 
 

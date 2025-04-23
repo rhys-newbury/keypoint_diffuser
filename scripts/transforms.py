@@ -213,7 +213,6 @@ class ApplyToBoth:
 
 class Deform:
     def __call__(self, data_dict):
-        # import pdb; pdb.set_trace()
         original = copy.deepcopy(data_dict)
 
         new_pc, transformation = apply_general_deformation(
