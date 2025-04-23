@@ -734,7 +734,9 @@ def train(opt, rank, world_size):
     lambda_1 = 1
     lambda_2 = 1
     lambda_3 = 1
-    lambda_4 = 1
+    lambda_4 = 0
+
+    kl_warmup_steps = 10000
 
     while t <= opt.n_iterations:
         print(t)
@@ -768,10 +770,13 @@ def train(opt, rank, world_size):
 
             q = Normal(mu, torch.exp(0.5 * logvar))
             p = Normal(torch.zeros_like(mu), torch.ones_like(logvar))
+
+            lambda_4 = min(1.0, t / kl_warmup_steps)
             kl = kl_divergence(q, p).sum(dim=1).mean()
 
             if rank == 0:
                 wandb.log({"diffusion_loss": diffusion_loss}, step=t)
+                wandb.log({"kl_divergence": kl}, step=t)
 
             if t > 1000 and lambda_0 > 0:
                 print("turing off FPS loss")
@@ -898,7 +903,7 @@ if __name__ == "__main__":
         print(f"Rank: {rank}, World size: {world_size}")
 
         if rank == 0:
-            RUN = wandb.init(project="diffuse_keypoints_lamp")
+            RUN = wandb.init(project="diffuse_keypoints_lamp_fr")
             wandb.run.log_code(".")
         train(opt, rank, world_size)
     else:
