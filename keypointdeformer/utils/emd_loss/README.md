@@ -13,10 +13,10 @@ We have extracted the EMDLoss component from the original project to make it mor
 - We have added missing __init__.py files to ensure proper module importing in Python.
 - To resolve import issues arising from overly short folder names in low-version Python environments, we have expanded the folder naming conventions.
 
-### Environment 
+### Environment
 Note: The environment should be consistent with the following, otherwise compiling may cause problems
 ``` bash
-conda create -n EMDLoss python==3.6 
+conda create -n EMDLoss python==3.6
 conda activate EMDLoss
 conda install pytorch==1.2.0 torchvision==0.4.0 cudatoolkit=10.0 -c pytorch
 ```
@@ -37,6 +37,3 @@ See `emd_module.py/test_emd()` for examples.
 
 - **dist**: a float tensor with shape `[#batch, #points]`. sqrt(dist) are the L2 distances between the pairs of points.
 - **assignment**: a int tensor with shape `[#batch, #points]`. The index of the matched point in the ground truth point cloud.
-
-
-

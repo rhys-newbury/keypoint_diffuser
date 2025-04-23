@@ -27,24 +27,24 @@ __global__ void clear(int b, int * cnt_tmp, int * unass_cnt) {
 	}
 }
 
-__global__ void calc_unass_cnt(int b, int n, int * assignment, int * unass_cnt) { 
+__global__ void calc_unass_cnt(int b, int n, int * assignment, int * unass_cnt) {
 	// count the number of unassigned points in each batch
-	const int BLOCK_SIZE = 1024; 
+	const int BLOCK_SIZE = 1024;
 	__shared__ int scan_array[BLOCK_SIZE];
 	for (int i = blockIdx.x; i < b; i += gridDim.x) {
 		scan_array[threadIdx.x] = assignment[i * n + blockIdx.y * BLOCK_SIZE + threadIdx.x] == -1 ? 1 : 0;
 		__syncthreads();
-		
+
 		int stride = 1;
 		while(stride <= BLOCK_SIZE / 2) {
-			int index = (threadIdx.x + 1) * stride * 2 - 1; 
+			int index = (threadIdx.x + 1) * stride * 2 - 1;
 			if(index < BLOCK_SIZE)
-				scan_array[index] += scan_array[index - stride]; 
+				scan_array[index] += scan_array[index - stride];
 			stride = stride * 2;
-			__syncthreads(); 
+			__syncthreads();
 		}
 		__syncthreads();
-		
+
 		if (threadIdx.x == BLOCK_SIZE - 1) {
 			atomicAdd(&unass_cnt[i], scan_array[threadIdx.x]);
 		}
@@ -58,26 +58,26 @@ __global__ void calc_unass_cnt_sum(int b, int * unass_cnt, int * unass_cnt_sum) 
 	__shared__ int scan_array[BLOCK_SIZE];
 	scan_array[threadIdx.x] = unass_cnt[threadIdx.x];
 	__syncthreads();
-	
+
 	int stride = 1;
 	while(stride <= BLOCK_SIZE / 2) {
-		int index = (threadIdx.x + 1) * stride * 2 - 1; 
+		int index = (threadIdx.x + 1) * stride * 2 - 1;
 		if(index < BLOCK_SIZE)
-			scan_array[index] += scan_array[index - stride]; 
+			scan_array[index] += scan_array[index - stride];
 		stride = stride * 2;
-		__syncthreads(); 
+		__syncthreads();
 	}
 	__syncthreads();
-	stride = BLOCK_SIZE / 4; 
+	stride = BLOCK_SIZE / 4;
 	while(stride > 0) {
-		int index = (threadIdx.x + 1) * stride * 2 - 1; 
+		int index = (threadIdx.x + 1) * stride * 2 - 1;
 		if((index + stride) < BLOCK_SIZE)
 			scan_array[index + stride] += scan_array[index];
 		stride = stride / 2;
-		__syncthreads(); 
+		__syncthreads();
 	}
-	__syncthreads(); 
-	
+	__syncthreads();
+
 	//printf("%d\n", unass_cnt_sum[b - 1]);
 	unass_cnt_sum[threadIdx.x] = scan_array[threadIdx.x];
 }
@@ -88,11 +88,11 @@ __global__ void calc_unass_idx(int b, int n, int * assignment, int * unass_idx, 
 		if (assignment[i * n + blockIdx.y * 1024 + threadIdx.x] == -1) {
 			int idx = atomicAdd(&cnt_tmp[i], 1);
 			unass_idx[unass_cnt_sum[i] - unass_cnt[i] + idx] = blockIdx.y * 1024 + threadIdx.x;
-		} 
+		}
 	}
 }
 
-__global__ void Bid(int b, int n, const float * xyz1, const float * xyz2, float eps, int * assignment, int * assignment_inv, float * price, 
+__global__ void Bid(int b, int n, const float * xyz1, const float * xyz2, float eps, int * assignment, int * assignment_inv, float * price,
 					int * bid, float * bid_increments, float * max_increments, int * unass_cnt, int * unass_cnt_sum, int * unass_idx) {
 	const int batch = 2048, block_size = 1024, block_cnt = n / 1024;
 	__shared__ float xyz2_buf[batch * 3];
@@ -108,7 +108,7 @@ __global__ void Bid(int b, int n, const float * xyz1, const float * xyz2, float 
 		int unass_per_block = (_unass_cnt + block_cnt - 1) / block_cnt;
 		int thread_per_unass = block_size / unass_per_block;
 		int unass_this_block = max(min(_unass_cnt - (int) blockIdx.y * unass_per_block, unass_per_block), 0);
-			
+
 		float x1, y1, z1, best = -1e9, better = -1e9;
 		int best_i = -1, _unass_id = -1, thread_in_unass;
 
@@ -136,7 +136,7 @@ __global__ void Bid(int b, int n, const float * xyz1, const float * xyz2, float 
 				int delta = (end_k + thread_per_unass - 1) / thread_per_unass;
 				int l = thread_in_unass * delta;
 				int r = min((thread_in_unass + 1) * delta, end_k);
-				for (int k = l; k < r; k++) 
+				for (int k = l; k < r; k++)
 				//if (!last || assignment_inv[i * n + k + k2] == -1)
 				{
 					float x2 = xyz2_buf[k * 3 + 0] - x1;
@@ -161,7 +161,7 @@ __global__ void Bid(int b, int n, const float * xyz1, const float * xyz2, float 
 		better_buf[threadIdx.x] = better;
 		best_i_buf[threadIdx.x] = best_i;
 		__syncthreads();
-		
+
 		if (_unass_id != -1 && thread_in_unass == 0) {
 			for (int j = threadIdx.x + 1; j < threadIdx.x + thread_per_unass; j++) {
 				if (best_buf[j] > best) {
@@ -172,7 +172,7 @@ __global__ void Bid(int b, int n, const float * xyz1, const float * xyz2, float 
 				else better = max(better, best_buf[j]);
 			}
 			bid[i * n + _unass_id] = best_i;
-			bid_increments[i * n + _unass_id] = best - better + eps; 
+			bid_increments[i * n + _unass_id] = best - better + eps;
 			atomicMax(&max_increments[i * n + best_i], best - better + eps);
 		}
 	}
@@ -185,7 +185,7 @@ __global__ void GetMax(int b, int n, int * assignment, int * bid, float * bid_in
 			int bid_id = bid[i * n + j];
 			float bid_inc = bid_increments[i * n + j];
 			float max_inc = max_increments[i * n + bid_id];
-			if (bid_inc - 1e-6 <= max_inc && max_inc <= bid_inc + 1e-6) 
+			if (bid_inc - 1e-6 <= max_inc && max_inc <= bid_inc + 1e-6)
 			{
 				max_idx[i * n + bid_id] = j;
 			}
@@ -198,7 +198,7 @@ __global__ void Assign(int b, int n, int * assignment, int * assignment_inv, flo
 		int j = threadIdx.x + blockIdx.y * blockDim.x;
 		if (assignment[i * n + j] == -1) {
 			int bid_id = bid[i * n + j];
-			if (last || max_idx[i * n + bid_id] == j) 
+			if (last || max_idx[i * n + bid_id] == j)
 			{
 				float bid_inc = bid_increments[i * n + j];
 				int ass_inv = assignment_inv[i * n + bid_id];
@@ -225,14 +225,14 @@ __global__ void CalcDist(int b, int n, float * xyz1, float * xyz2, float * dist,
 	}
 }
 
-int emd_cuda_forward(at::Tensor xyz1, at::Tensor xyz2, at::Tensor dist, at::Tensor assignment, at::Tensor price, 
+int emd_cuda_forward(at::Tensor xyz1, at::Tensor xyz2, at::Tensor dist, at::Tensor assignment, at::Tensor price,
 	                 at::Tensor assignment_inv, at::Tensor bid, at::Tensor bid_increments, at::Tensor max_increments,
 	                 at::Tensor unass_idx, at::Tensor unass_cnt, at::Tensor unass_cnt_sum, at::Tensor cnt_tmp, at::Tensor max_idx, float eps, int iters) {
 
 	const auto batch_size = xyz1.size(0);
 	const auto n = xyz1.size(1); //num_points point cloud A
 	const auto m = xyz2.size(1); //num_points point cloud B
-	
+
 	if (n != m) {
 		printf("Input Error! The two point clouds should have the same size.\n");
 		return -1;
@@ -257,9 +257,9 @@ int emd_cuda_forward(at::Tensor xyz1, at::Tensor xyz2, at::Tensor dist, at::Tens
 		clear<<<1, batch_size>>>(batch_size, cnt_tmp.data<int>(), unass_cnt.data<int>());
 		calc_unass_cnt<<<dim3(batch_size, n / 1024, 1), 1024>>>(batch_size, n, assignment.data<int>(), unass_cnt.data<int>());
 		calc_unass_cnt_sum<<<1, batch_size>>>(batch_size, unass_cnt.data<int>(), unass_cnt_sum.data<int>());
-		calc_unass_idx<<<dim3(batch_size, n / 1024, 1), 1024>>>(batch_size, n, assignment.data<int>(), unass_idx.data<int>(), unass_cnt.data<int>(), 
+		calc_unass_idx<<<dim3(batch_size, n / 1024, 1), 1024>>>(batch_size, n, assignment.data<int>(), unass_idx.data<int>(), unass_cnt.data<int>(),
 											 unass_cnt_sum.data<int>(), cnt_tmp.data<int>());
-		Bid<<<dim3(batch_size, n / 1024, 1), 1024>>>(batch_size, n, xyz1.data<float>(), xyz2.data<float>(), eps, assignment.data<int>(), assignment_inv.data<int>(), 
+		Bid<<<dim3(batch_size, n / 1024, 1), 1024>>>(batch_size, n, xyz1.data<float>(), xyz2.data<float>(), eps, assignment.data<int>(), assignment_inv.data<int>(),
 			                          price.data<float>(), bid.data<int>(), bid_increments.data<float>(), max_increments.data<float>(),
 			                          unass_cnt.data<int>(), unass_cnt_sum.data<int>(), unass_idx.data<int>());
 		GetMax<<<dim3(batch_size, n / 1024, 1), 1024>>>(batch_size, n, assignment.data<int>(), bid.data<int>(), bid_increments.data<float>(), max_increments.data<float>(), max_idx.data<int>());
@@ -301,16 +301,16 @@ __global__ void NmDistanceGradKernel(int b, int n, const float * xyz1, const flo
 
 int emd_cuda_backward(at::Tensor xyz1, at::Tensor xyz2, at::Tensor gradxyz, at::Tensor graddist, at::Tensor idx){
 	const auto batch_size = xyz1.size(0);
-	const auto n = xyz1.size(1); 
-	const auto m = xyz2.size(1); 
+	const auto n = xyz1.size(1);
+	const auto m = xyz2.size(1);
 
 	NmDistanceGradKernel<<<dim3(batch_size, n / 1024, 1), 1024>>>(batch_size, n, xyz1.data<float>(), xyz2.data<float>(), graddist.data<float>(), idx.data<int>(), gradxyz.data<float>());
-	
+
 	cudaError_t err = cudaGetLastError();
 	  if (err != cudaSuccess) {
 	    printf("error in nnd get grad: %s\n", cudaGetErrorString(err));
 	    return 0;
 	  }
 	  return 1;
-	
+
 }

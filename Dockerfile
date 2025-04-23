@@ -20,8 +20,8 @@ WORKDIR /app
 COPY keypointdeformer/PCT_Pytorch /app/keypointdeformer/PCT_Pytorch
 RUN cd /app/keypointdeformer/PCT_Pytorch/pointnet2_ops_lib && pip install -e .
 
-COPY keypointdeformer/utils/EMDLoss-for-large-scale-point-clouds /app/keypointdeformer/utils/EMDLoss-for-large-scale-point-clouds
-RUN cd /app/keypointdeformer/utils/EMDLoss-for-large-scale-point-clouds && python3 setup.py install
+COPY keypointdeformer/utils/emd_loss /app/keypointdeformer/utils/emd_loss
+RUN cd /app/keypointdeformer/utils/emd_loss && python3 setup.py install
 
 RUN groupadd -g 1000 taco && useradd -u 1000 -g 1000 -m taco
 

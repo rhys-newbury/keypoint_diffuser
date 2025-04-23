@@ -9,7 +9,6 @@ from numpy.linalg import norm
 from scipy.stats import entropy
 from sklearn.neighbors import NearestNeighbors
 from tqdm.auto import tqdm
-# from .StructuralLosses.match_cost import match_cost  # noqa
 from .emd_loss.emd_module import emdModule
 
 def downsample_batched_point_cloud(point_clouds, num_samples=4096):
@@ -24,15 +23,17 @@ def downsample_batched_point_cloud(point_clouds, num_samples=4096):
         torch.Tensor: Downsampled batched point clouds of shape (B, num_samples, 3)
     """
     B, N, C = point_clouds.shape
-    if N < num_samples:
+    if num_samples > N:
         raise ValueError("Cannot sample more points than exist in the point cloud.")
-    
+
     # Generate random indices for each batch element
     rand_vals = torch.rand(B, N, device=point_clouds.device)
     _, indices = rand_vals.topk(num_samples, dim=1, largest=False, sorted=False)
 
     # Expand batch indices to match indices shape
-    batch_indices = torch.arange(B, device=point_clouds.device).view(-1, 1).expand(-1, num_samples)
+    batch_indices = (
+        torch.arange(B, device=point_clouds.device).view(-1, 1).expand(-1, num_samples)
+    )
 
     # Gather points using advanced indexing
     downsampled = point_clouds[batch_indices, indices]  # Shape: (B, num_samples, 3)
@@ -40,17 +41,16 @@ def downsample_batched_point_cloud(point_clouds, num_samples=4096):
     return downsampled
 
 
-
-
 def emd_approx(sample, ref):
-    B, N, N_ref = sample.size(0), sample.size(1), ref.size(1)
-    assert N == N_ref, "Not sure what would EMD do in this case"
+    N, N_ref = sample.size(1), ref.size(1)
+    assert N_ref == N, "Not sure what would EMD do in this case"
     emd = emdModule()
-    sample_  = (downsample_batched_point_cloud(sample) + 1) / 2
+    sample_ = (downsample_batched_point_cloud(sample) + 1) / 2
     ref_ = (downsample_batched_point_cloud(ref) + 1) / 2
-    dis, assigment = emd(sample_, ref_, 0.002, 10000) # 0.005, 50 for training 
+    dis, _ = emd(sample_, ref_, 0.002, 10000)  # 0.005, 50 for training
     emd_norm = torch.sqrt(dis).mean(dim=1) / N
     return emd_norm
+
 
 # Borrow from https://github.com/ThibaultGROUEIX/AtlasNet
 def distChamfer(a, b):

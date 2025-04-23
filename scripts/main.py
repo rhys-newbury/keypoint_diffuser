@@ -17,6 +17,7 @@ import torch
 import torch.nn.parallel
 import torch.utils.data
 from tensorboardX import SummaryWriter
+from tqdm import tqdm
 
 import wandb
 from keypointdeformer.datasets import get_dataset
@@ -24,6 +25,7 @@ from keypointdeformer.models import get_model
 from keypointdeformer.options.base_options import BaseOptions
 from keypointdeformer.utils import io
 from keypointdeformer.utils.cages import deform_with_MVC
+from keypointdeformer.utils.eval_metrics import EMD_CD
 from keypointdeformer.utils.nn import load_network, save_network, weights_init
 from keypointdeformer.utils.utils import Timer
 
@@ -283,6 +285,26 @@ def visualize_point_cloud(
     return np.asarray(pcd.points)
 
 
+def normalize_point_clouds(pcs, mode):
+    if mode is None:
+        print("Will not normalize point clouds.")
+        return pcs
+    print(f"Normalization mode: {mode}")
+    for i in tqdm(range(pcs.size(0)), desc="Normalize"):
+        pc = pcs[i]
+        if mode == "shape_unit":
+            shift = pc.mean(dim=0).reshape(1, 3)
+            scale = pc.flatten().std().reshape(1, 1)
+        elif mode == "shape_bbox":
+            pc_max, _ = pc.max(dim=0, keepdim=True)  # (1, 3)
+            pc_min, _ = pc.min(dim=0, keepdim=True)  # (1, 3)
+            shift = ((pc_min + pc_max) / 2).view(1, 3)
+            scale = (pc_max - pc_min).max().reshape(1, 1) / 2
+        pc = (pc - shift) / scale
+        pcs[i] = pc
+    return pcs
+
+
 def get_data(dataset, data):
     data = dataset.uncollate(data)
     # print(data); import pdb; pdb.set_trace()
@@ -325,7 +347,8 @@ def test(opt, save_subdir="test"):
 
     timer = Timer("step")
     closest_labels_ = []
-
+    all_ref = []
+    all_recons = []
     with torch.no_grad():
         for data in dataloader:
             timer.stop()
@@ -338,6 +361,9 @@ def test(opt, save_subdir="test"):
             outputs = net(source_shape_t, target_shape=target_shape_t)
             code = outputs["target_keypoints"]
             target_sampled_points = data["target_sampled_points"]
+
+            all_ref.append(target_shape_t.detach().cpu().transpose(1, 2))
+            all_recons.append(outputs["deformed"].detach().cpu())
 
             for i in range(code.shape[0]):
                 kp = code[i, ...].T
@@ -382,6 +408,19 @@ def test(opt, save_subdir="test"):
                 label_presence_matrix[keypoint_indices, valid_seg_labels.long()] = True
 
                 closest_labels_.append(label_presence_matrix)
+
+        all_ref = torch.cat(all_ref, dim=0).permute(0, 2, 1)
+        all_ref = normalize_point_clouds(all_ref, "shape_bbox")
+        all_recons = torch.cat(all_recons, dim=0)
+        all_recons = normalize_point_clouds(all_recons, "shape_bbox")
+        metrics = EMD_CD(
+            all_recons.to("cuda").double(),
+            all_ref.to("cuda").double(),
+            opt.batch_size,
+        )
+        wandb.log(metrics)
+        for key, value in metrics.items():
+            print(f"{key}: {value.item():.10f}")
 
         # import pdb; pdb.set_trace()
         closest_labels_tensor = torch.stack(closest_labels_)
@@ -449,6 +488,9 @@ def train(opt):
 
             source_shape_t, target_shape_t = get_data(dataset, data)
             outputs = net(source_shape_t, target_shape=target_shape_t)
+            import pdb
+
+            pdb.set_trace()
             current_loss = net.compute_loss(t)
             wandb.log(current_loss, step=t)
             net.optimize(current_loss, t)
@@ -491,7 +533,7 @@ if __name__ == "__main__":
     # global RUN
 
     if opt.phase == "test":
-        RUN = wandb.init(project="diffuse_keypoints_test")
+        RUN = wandb.init(project="diffuse_keypoints_test_fr")
         wandb.log(
             {"ckpt": opt.ckpt, "n_keypoints": opt.n_keypoints, "type": "baseline"}
         )

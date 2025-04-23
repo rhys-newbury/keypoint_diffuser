@@ -7,7 +7,6 @@ kp_path = Path(__file__).resolve().absolute().parent.parent
 sys.path.append(str(kp_path))
 
 import copy
-import json
 import time
 from datetime import datetime
 from typing import Any
@@ -35,8 +34,6 @@ import wandb
 from keypointdeformer.datasets import get_dataset
 from keypointdeformer.models.encoder_models.autoencoder import AutoEncoder
 from keypointdeformer.options.ae_options import AEOptions
-from keypointdeformer.utils import io
-from keypointdeformer.utils.cages import deform_with_MVC
 from keypointdeformer.utils.eval_metrics import EMD_CD
 from keypointdeformer.utils.nn import load_network, save_network
 from keypointdeformer.utils.utils import Timer
@@ -54,22 +51,6 @@ CHECKPOINTS_DIR = "checkpoints"
 CHECKPOINT_EXT = ".pth"
 
 
-# def write_losses(writer, losses, step):
-#     for name, value in losses.items():
-#         writer.add_scalar('loss/' + name, value, global_step=step)
-
-
-def save_normalization(file_path, center, scale):
-    with open(file_path, "w") as f:
-        json.dump(
-            {
-                "center": [str(x) for x in center.cpu().numpy()],
-                "scale": str(scale.cpu().numpy()[0]),
-            },
-            f,
-        )
-
-
 # Initialize distributed environment
 def setup(rank, world_size):
     # os.environ["MASTER_ADDR"] = "localhost"
@@ -80,162 +61,6 @@ def setup(rank, world_size):
         torch.cuda.set_device(local_rank)
 
         dist.init_process_group("nccl", rank=rank, world_size=world_size)
-
-
-def save_data_keypoints(data, save_dir, name):
-    if name in data:
-        io.save_keypoints(os.path.join(save_dir, name + ".txt"), data[name])
-
-
-def save_data_txt(f, data, fmt):
-    np.savetxt(f, data.cpu().detach().numpy(), fmt=fmt)
-
-
-def save_pts(f, points, normals=None):
-    if normals is not None:
-        normals = normals.cpu().detach().numpy()
-    io.save_pts(f, points.cpu().detach().numpy(), normals=normals)
-
-
-def save_ply(f, verts, faces):
-    pytorch3d.io.save_ply(f, verts.cpu(), faces=faces.cpu())
-
-
-def save_output(save_dir_root, data, outputs, save_mesh=True, save_auxilary=True):
-    name = data["source_file"]
-    save_dir = os.path.join(save_dir_root, name)
-    os.makedirs(save_dir, exist_ok=True)
-
-    # save meshes
-    if save_mesh and "source_mesh" in data:
-        io.save_mesh(
-            os.path.join(save_dir, "source_mesh.obj"),
-            data["source_mesh"],
-            data["source_face"],
-        )
-
-        if save_auxilary:
-            save_data_txt(
-                os.path.join(save_dir, "source_vertices.txt"),
-                data["source_mesh"],
-                "%0.6f",
-            )
-            save_data_txt(
-                os.path.join(save_dir, "source_faces.txt"), data["source_face"], "%d"
-            )
-
-        io.save_mesh(
-            os.path.join(save_dir, "target_mesh.obj"),
-            data["target_mesh"],
-            data["target_face"],
-        )
-
-        if outputs is not None:
-            deformed, weights, _ = deform_with_MVC(
-                outputs["cage"][None],
-                outputs["new_cage"][None],
-                outputs["cage_face"][None],
-                data["source_mesh"][None],
-                verbose=True,
-            )
-            io.save_mesh(
-                os.path.join(save_dir, "deformed_mesh.obj"),
-                deformed[0],
-                data["source_face"],
-            )
-            if save_auxilary:
-                save_data_txt(
-                    os.path.join(save_dir, "weights.txt"), weights[0], "%0.6f"
-                )
-
-    # save pointclouds
-    save_pts(
-        os.path.join(save_dir, "source_pointcloud.pts"),
-        data["source_shape"],
-        normals=data["source_normals"],
-    )
-    if outputs is not None:
-        save_pts(os.path.join(save_dir, "deformed_pointcloud.pts"), outputs["deformed"])
-        if save_auxilary:
-            save_data_txt(
-                os.path.join(save_dir, "influence.txt"), outputs["influence"], "%0.6f"
-            )
-
-    save_pts(
-        os.path.join(save_dir, "target_pointcloud.pts"),
-        data["target_shape"],
-        normals=data["target_normals"],
-    )
-
-    # save cages
-    if outputs is not None:
-        save_ply(
-            os.path.join(save_dir, "cage.ply"), outputs["cage"], outputs["cage_face"]
-        )
-        if save_auxilary:
-            save_data_txt(os.path.join(save_dir, "cage.txt"), outputs["cage"], "%0.6f")
-        save_ply(
-            os.path.join(save_dir, "deformed_cage.ply"),
-            outputs["new_cage"],
-            outputs["cage_face"],
-        )
-
-        if outputs is not None:
-            io.save_keypoints(
-                os.path.join(save_dir, "source_keypoints.txt"),
-                outputs["source_keypoints"].transpose(0, 1),
-            )
-            io.save_keypoints(
-                os.path.join(save_dir, "target_keypoints.txt"),
-                outputs["target_keypoints"].transpose(0, 1),
-            )
-
-        save_data_keypoints(data, save_dir, "source_keypoints_gt")
-        save_data_keypoints(data, save_dir, "target_keypoints_gt")
-
-        io.save_keypoints(
-            os.path.join(save_dir, "source_init_keypoints.txt"),
-            outputs["source_init_keypoints"].transpose(0, 1),
-        )
-        io.save_keypoints(
-            os.path.join(save_dir, "target_init_keypoints.txt"),
-            outputs["target_init_keypoints"].transpose(0, 1),
-        )
-
-        if "source_keypoints_gt_center" in data:
-            save_normalization(
-                os.path.join(save_dir, "source_keypoints_gt_normalization.txt"),
-                data["source_keypoints_gt_center"],
-                data["source_keypoints_gt_scale"],
-            )
-
-        if "source_seg_points" in data:
-            io.save_labelled_pointcloud(
-                os.path.join(save_dir, "source_seg_points.xyzrgb"),
-                data["source_seg_points"].detach().cpu().numpy(),
-                data["source_seg_labels"].detach().cpu().numpy(),
-            )
-            save_data_txt(
-                os.path.join(save_dir, "source_seg_labels.txt"),
-                data["source_seg_labels"],
-                "%d",
-            )
-
-
-def split_batch(data, b, singleton_keys=None):
-    return {
-        k: v[b] if k not in (singleton_keys or []) else v[0] for k, v in data.items()
-    }
-
-
-def save_outputs(outputs_save_dir, data, outputs, save_mesh=True):
-    for b in range(data["source_shape"].shape[0]):
-        save_output(
-            outputs_save_dir,
-            split_batch(data, b, singleton_keys=["cage_face"]),
-            split_batch(outputs, b, singleton_keys=["cage_face"]),
-            save_mesh=save_mesh,
-        )
 
 
 def normalize_point_clouds(pcs, mode):
@@ -522,14 +347,10 @@ def test(opt, save_subdir="test"):
             closest_labels_tensor[:, :, :].sum(dim=0).max(dim=1)[0]
             / closest_labels_tensor.shape[0]
         ).mean()
-        # print()
         wandb.log(
             {"average_correlation_per_keypoint": average_correlation_per_keypoint}
         )
 
-        # import pdb
-
-        # pdb.set_trace()
         print(average_correlation_per_keypoint)
 
         all_ref = torch.cat(all_ref, dim=0).permute(0, 2, 1)
@@ -537,11 +358,11 @@ def test(opt, save_subdir="test"):
         all_recons = torch.cat(all_recons, dim=0)
         all_recons = normalize_point_clouds(all_recons, "shape_bbox")
         metrics = EMD_CD(
-                all_recons.to("cuda").double(),
-                all_ref.to("cuda").double(),
-                opt.batch_size,
-            )
-
+            all_recons.to("cuda").double(),
+            all_ref.to("cuda").double(),
+            opt.batch_size,
+        )
+        wandb.log(metrics)
         for key, value in metrics.items():
             print(f"{key}: {value.item():.10f}")
 
@@ -896,7 +717,7 @@ if __name__ == "__main__":
     np.random.seed(seed)
 
     if opt.phase == "test":
-        RUN = wandb.init(project="diffuse_keypoints_test")
+        RUN = wandb.init(project="diffuse_keypoints_test_fr")
         wandb.log({"ckpt": opt.ckpt, "n_keypoints": opt.latent_dim, "type": "ours"})
 
         test(opt, save_subdir=opt.subdir)
