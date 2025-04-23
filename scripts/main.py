@@ -528,7 +528,12 @@ if __name__ == "__main__":
     if opt.phase == "test":
         RUN = wandb.init(project="diffuse_keypoints_test_fr")
         wandb.log(
-            {"ckpt": opt.ckpt, "n_keypoints": opt.n_keypoints, "type": "baseline"}
+            {
+                "ckpt": opt.ckpt,
+                "n_keypoints": opt.n_keypoints,
+                "type": "baseline",
+                "category": opt.category,
+            }
         )
         test(opt, save_subdir=opt.subdir)
     elif opt.phase == "train":
