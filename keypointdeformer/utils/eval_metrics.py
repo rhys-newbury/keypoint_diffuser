@@ -9,25 +9,48 @@ from numpy.linalg import norm
 from scipy.stats import entropy
 from sklearn.neighbors import NearestNeighbors
 from tqdm.auto import tqdm
+# from .StructuralLosses.match_cost import match_cost  # noqa
+from .emd_loss.emd_module import emdModule
+
+def downsample_batched_point_cloud(point_clouds, num_samples=4096):
+    """
+    Vectorized downsampling of batched point clouds using random sampling.
+
+    Args:
+        point_clouds (torch.Tensor): Batched point clouds of shape (B, N, 3)
+        num_samples (int): Number of points to sample per batch
+
+    Returns:
+        torch.Tensor: Downsampled batched point clouds of shape (B, num_samples, 3)
+    """
+    B, N, C = point_clouds.shape
+    if N < num_samples:
+        raise ValueError("Cannot sample more points than exist in the point cloud.")
+    
+    # Generate random indices for each batch element
+    rand_vals = torch.rand(B, N, device=point_clouds.device)
+    _, indices = rand_vals.topk(num_samples, dim=1, largest=False, sorted=False)
+
+    # Expand batch indices to match indices shape
+    batch_indices = torch.arange(B, device=point_clouds.device).view(-1, 1).expand(-1, num_samples)
+
+    # Gather points using advanced indexing
+    downsampled = point_clouds[batch_indices, indices]  # Shape: (B, num_samples, 3)
+
+    return downsampled
 
 
-_EMD_NOT_IMPL_WARNED = False
 
 
 def emd_approx(sample, ref):
-    global _EMD_NOT_IMPL_WARNED
-    emd = torch.zeros([sample.size(0)]).to(sample)
-    if not _EMD_NOT_IMPL_WARNED:
-        _EMD_NOT_IMPL_WARNED = True
-        print("\n\n[WARNING]")
-        print("  * EMD is not implemented due to GPU compatibility issue.")
-        print("  * We will set all EMD to zero by default.")
-        print(
-            "  * You may implement your own EMD in the function `emd_approx` in ./evaluation/evaluation_metrics.py"
-        )
-        print("\n")
-    return emd
-
+    B, N, N_ref = sample.size(0), sample.size(1), ref.size(1)
+    assert N == N_ref, "Not sure what would EMD do in this case"
+    emd = emdModule()
+    sample_  = (downsample_batched_point_cloud(sample) + 1) / 2
+    ref_ = (downsample_batched_point_cloud(ref) + 1) / 2
+    dis, assigment = emd(sample_, ref_, 0.002, 10000) # 0.005, 50 for training 
+    emd_norm = torch.sqrt(dis).mean(dim=1) / N
+    return emd_norm
 
 # Borrow from https://github.com/ThibaultGROUEIX/AtlasNet
 def distChamfer(a, b):

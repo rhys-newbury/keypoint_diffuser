@@ -536,13 +536,14 @@ def test(opt, save_subdir="test"):
         all_ref = normalize_point_clouds(all_ref, "shape_bbox")
         all_recons = torch.cat(all_recons, dim=0)
         all_recons = normalize_point_clouds(all_recons, "shape_bbox")
-        print(
-            EMD_CD(
+        metrics = EMD_CD(
                 all_recons.to("cuda").double(),
                 all_ref.to("cuda").double(),
                 opt.batch_size,
             )
-        )
+
+        for key, value in metrics.items():
+            print(f"{key}: {value.item():.10f}")
 
 
 def get_linear_scheduler(optimizer, start_epoch, end_epoch, start_lr, end_lr):

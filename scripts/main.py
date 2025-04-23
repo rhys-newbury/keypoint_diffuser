@@ -395,9 +395,6 @@ def test(opt, save_subdir="test"):
             {"average_correlation_per_keypoint": average_correlation_per_keypoint}
         )
 
-        print(outputs)
-        # import pdb; pdb.set_trace()
-
         save_outputs(os.path.join(log_dir, save_subdir), data, outputs)
 
 
