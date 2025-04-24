@@ -539,5 +539,6 @@ if __name__ == "__main__":
     elif opt.phase == "train":
         RUN = wandb.init(project="diffuse_keypoints")
         train(opt)
+        print(f"Run name: {wandb.run.name}")
     else:
         raise ValueError()

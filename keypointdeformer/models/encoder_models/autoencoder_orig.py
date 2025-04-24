@@ -8,10 +8,11 @@ class AutoEncoderOrig(Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.encoder = PointNetEncoder(zdim=args.latent_dim)
+        context_dim = args.latent_dim * 3 + args.extra_latent
+        self.encoder = PointNetEncoder(zdim=context_dim)
         self.diffusion = DiffusionPointOrig(
             net=PointwiseNetOld(
-                point_dim=3, context_dim=args.latent_dim, residual=args.residual
+                point_dim=3, context_dim=context_dim, residual=args.residual
             ),
             var_sched=VarianceSchedule(
                 num_steps=args.num_steps,

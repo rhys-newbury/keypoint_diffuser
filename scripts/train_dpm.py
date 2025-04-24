@@ -10,9 +10,7 @@ import copy
 import time
 from datetime import datetime
 
-import matplotlib.pyplot as plt
 import numpy as np
-import open3d as o3d
 import torch
 import torch.distributed as dist
 import torch.nn.parallel
@@ -30,14 +28,11 @@ from keypointdeformer.models.encoder_models.autoencoder_orig import AutoEncoderO
 from keypointdeformer.options.ae_options import AEOptions
 from keypointdeformer.utils.eval_metrics import EMD_CD
 from keypointdeformer.utils.nn import load_network, save_network
-from keypointdeformer.utils.utils import Timer
 
 
 torch.autograd.set_detect_anomaly(True)
 RUN = None
 
-from torchvision import transforms
-from transforms import ApplyToBoth, Collect, Deform, GridSample, ToTensor
 from utils import collate_fn
 
 
@@ -75,143 +70,12 @@ def normalize_point_clouds(pcs, mode):
     return pcs
 
 
-def visualize_point_cloud(
-    points, labels, keypoints, orig_shape, visual=False, icp=True
-):
-    """
-    Visualize a 3D point cloud with color based on labels.
-
-    Args:
-    - points (torch.Tensor): Shape [N, 3], point cloud data.
-    - keypoints (torch.Tensor): Shape [M, 3], point cloud data, which are bigger and blue
-
-    - labels (torch.Tensor): Shape [N], labels for each point.
-    """
-    # Convert tensors to NumPy arrays
-    points_np = points.cpu().numpy()  # Shape: [N, 3]
-    labels_np = labels.cpu().numpy().astype(np.int32)  # Shape: [N]
-    orig_shape = orig_shape.cpu().numpy()
-    keypoints_np = keypoints.cpu().numpy().T  # Shape: [M, 3]
-
-    # Normalize labels to be in range [0, 1] for color mapping
-    max_label = labels_np.max() + 1  # Avoid division by 0
-
-    colors = plt.cm.get_cmap("tab10", max_label)(labels_np / max_label)[
-        :, :3
-    ]  # RGB from colormap
-
-    # Create Open3D point cloud
-    orig_pcd = o3d.geometry.PointCloud()
-    orig_pcd.points = o3d.utility.Vector3dVector(orig_shape)
-    orig_pcd.paint_uniform_color([1, 0, 1])
-
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points_np)
-    pcd.colors = o3d.utility.Vector3dVector(colors)
-
-    if icp:
-        threshold = 0.2  # Distance threshold for ICP
-        np.eye(4)  # Initial transformation (identity matrix)
-
-        theta = 0  # 90 degrees in radians
-        initial_rotation_y = np.array(
-            [
-                [np.cos(theta), 0, np.sin(theta), 0],
-                [0, 1, 0, 0],
-                [-np.sin(theta), 0, np.cos(theta), 0],
-                [0, 0, 0, 1],
-            ]
-        )
-        reg_icp = o3d.pipelines.registration.registration_icp(
-            pcd,
-            orig_pcd,
-            threshold,
-            initial_rotation_y,
-            o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-        )
-
-        pcd.transform(reg_icp.transformation)
-
-    if visual:
-        keypoint_spheres = []
-        for keypoint in keypoints_np:
-            sphere = o3d.geometry.TriangleMesh.create_sphere(
-                radius=0.05
-            )  # Adjust radius as needed
-
-            sphere.translate(keypoint)
-            sphere.paint_uniform_color([0, 0, 1])  # Blue color
-            keypoint_spheres.append(sphere)
-            break
-
-        # Visualize
-        o3d.visualization.draw_geometries(
-            [pcd, orig_pcd, *keypoint_spheres],
-            window_name="Point Cloud with Labels and Keypoints",
-        )
-
-    return np.asarray(pcd.points)
-
-
-def visualize_point_clouds(
-    original, deformed, kp_orig, kp_transformed, kp_deformed, save_dir="./"
-):
-    """
-    Visualizes the first point cloud in the batch before and after deformation.
-
-    Args:
-        original: (B, N, 3) tensor of original point cloud.
-        deformed: (B, N, 3) tensor of deformed point cloud.
-    """
-    original_np = original[0].cpu().numpy()  # Extract first sample, convert to NumPy
-    deformed_np = deformed[0].cpu().numpy()  # Extract first sample, convert to NumPy
-    kp_orig_np = kp_orig[0].cpu().numpy()  # Extract first sample's keypoints
-    kp_transformed_np = kp_transformed[0].cpu().numpy()  # Transformed keypoints
-    kp_deformed_np = kp_deformed[0].cpu().numpy()  # Keypoints from deformed shape
-
-    # Save NumPy arrays
-    np.save(f"{save_dir}/original_point_cloud.npy", original_np)
-    np.save(f"{save_dir}/deformed_point_cloud.npy", deformed_np)
-    np.save(f"{save_dir}/kp_orig.npy", kp_orig_np)
-    np.save(f"{save_dir}/kp_transformed.npy", kp_transformed_np)
-    np.save(f"{save_dir}/kp_deformed.npy", kp_deformed_np)
-
-
-def reparameterize(mu, logvar):
-    std = torch.exp(0.5 * logvar)
-    eps = torch.randn_like(std)
-    return mu + eps * std
-
-
 def test(opt, save_subdir="test"):
-    t = transforms.Compose(
-        [
-            Deform(),  # Forks into two versions: original and deformed
-            ApplyToBoth(
-                transforms.Compose(
-                    [
-                        GridSample(
-                            keys=("coord",),
-                            hash_type="fnv",
-                            mode="train",
-                            return_grid_coord=True,
-                        ),
-                        ToTensor(),
-                        Collect(
-                            keys=("coord", "grid_coord", "transformation", "shape"),
-                            feat_keys=("coord",),
-                        ),
-                    ]
-                )
-            ),
-        ]
-    )
-
     log_dir = os.path.join(opt.log_dir, opt.name)
     checkpoints_dir = os.path.join(log_dir, CHECKPOINTS_DIR)
     # /app/data/keypoints/logs/autumn-waterfall-200/checkpoints/net_final.pth
     opt.phase = "test"
-    dataset = get_dataset(opt.dataset)(opt, transform=t)
+    dataset = get_dataset(opt.dataset)(opt)
 
     dataloader = torch.utils.data.DataLoader(
         dataset,
@@ -234,10 +98,7 @@ def test(opt, save_subdir="test"):
     ae_model.eval()
     all_ref = []
     all_recons = []
-    Timer("step")
     with torch.no_grad():
-        closest_labels_ = []
-
         total_batches = len(dataloader)
 
         # Wrap the dataloader with tqdm
@@ -251,71 +112,13 @@ def test(opt, save_subdir="test"):
                 .cuda()
             )
 
-            z0 = ae_model.encode(data)
-            recons = ae_model.decode(z0).detach()
+            x = data["target_shape"].view(len(data["target_cat"]), -1, 3).cuda()
+
+            z0 = ae_model.encode(x)
+            recons = ae_model.decode(z0, 5000).detach()
 
             all_ref.append(target_shape_t.detach().cpu())
             all_recons.append(recons.detach().cpu())
-
-            target_sampled_points = data["target_sampled_points"].view(
-                len(data["target_cat"]), -1, 4
-            )
-
-            for i in range(z0.shape[0]):
-                kp = z0[i, :].reshape(-1, 3)
-
-                points = target_shape_t[i, ...].T
-
-                seg_labels = target_sampled_points[i, :, -1].int().cuda()
-                seg_points = target_sampled_points[i, :, :3]
-
-                seg_points = visualize_point_cloud(
-                    seg_points,
-                    seg_labels,
-                    kp,
-                    points,
-                    visual=False,
-                )
-
-                distances = torch.cdist(kp.double(), torch.tensor(seg_points).cuda())
-                threshold = 0.05
-
-                within_threshold_mask = (
-                    distances <= threshold
-                )  # True where distance <= 0.05
-
-                keypoint_indices, seg_point_indices = torch.nonzero(
-                    within_threshold_mask, as_tuple=True
-                )
-                valid_seg_labels = seg_labels[
-                    seg_point_indices
-                ]  # The labels for valid segmentation points
-
-                max_label = 5  # Ensure it includes the highest label
-
-                # Create a Boolean matrix: (num_keypoints, max_label)
-                label_presence_matrix = torch.zeros(
-                    (distances.size(0), max_label),
-                    dtype=torch.bool,
-                    device=seg_labels.device,
-                )
-
-                # Mark True for each label that is present for each keypoint
-                label_presence_matrix[keypoint_indices, valid_seg_labels.long()] = True
-
-                closest_labels_.append(label_presence_matrix)
-
-        closest_labels_tensor = torch.stack(closest_labels_)
-
-        average_correlation_per_keypoint = (
-            closest_labels_tensor[:, :, :].sum(dim=0).max(dim=1)[0]
-            / closest_labels_tensor.shape[0]
-        ).mean()
-        wandb.log(
-            {"average_correlation_per_keypoint": average_correlation_per_keypoint}
-        )
-
-        print(average_correlation_per_keypoint)
 
         all_ref = torch.cat(all_ref, dim=0).permute(0, 2, 1)
         all_ref = normalize_point_clouds(all_ref, "shape_bbox")
@@ -453,7 +256,6 @@ def train(opt, rank, world_size):
                 break
 
             x = data["target_shape"].view(len(data["target_cat"]), -1, 3).cuda()
-
             loss = net.get_loss(x)
             loss.backward()
 
