@@ -691,7 +691,6 @@ if __name__ == "__main__":
     np.random.seed(seed)
 
     if opt.phase == "test":
-
         RUN = wandb.init(project="diffuse_keypoints_test_fr")
         wandb.log(
             {

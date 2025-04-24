@@ -1,33 +1,20 @@
 import os
+import re
 import sqlite3
 import subprocess
 import time
 import uuid
-import re
+
 
 DB_PATH = "/mnt/slow/jobs.db"
 SLEEP_INTERVAL = 10
 GPU_ENV = os.environ.get("GPU_TYPE", "3090")
 
-def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS jobs (
-                id TEXT,
-                type TEXT,
-                status TEXT,
-                command TEXT,
-                wandb_name TEXT,
-                gpu_type TEXT,
-                worker_id TEXT,
-                PRIMARY KEY (id, type)
-            )
-        """)
-        conn.commit()
 
 def extract_wandb_name(output):
     match = re.search(r"Run name[:\s]+([a-zA-Z0-9_\-]+)", output)
     return match.group(1) if match else None
+
 
 def claim_job():
     with sqlite3.connect(DB_PATH) as conn:
@@ -47,7 +34,9 @@ def claim_job():
 
             if row["type"] == "test":
                 # Only run test if training completed & wandb_name exists
-                cur.execute("SELECT * FROM jobs WHERE id=? AND type='train'", (row["id"],))
+                cur.execute(
+                    "SELECT * FROM jobs WHERE id=? AND type='train'", (row["id"],)
+                )
                 train = cur.fetchone()
                 if not train or train["status"] != "done" or not train["wandb_name"]:
                     continue
@@ -56,7 +45,7 @@ def claim_job():
             worker_id = str(uuid.uuid4())
             cur.execute(
                 "UPDATE jobs SET status='running', worker_id=? WHERE id=? AND type=? AND status='pending'",
-                (worker_id, row["id"], row["type"])
+                (worker_id, row["id"], row["type"]),
             )
             if cur.rowcount > 0:
                 conn.commit()
@@ -66,14 +55,18 @@ def claim_job():
 
     return None
 
+
 def run_command(cmd):
     try:
         print(f"Running: {cmd}")
-        result = subprocess.run(cmd, shell=True, text=True, capture_output=True, check=True)
+        result = subprocess.run(
+            cmd, shell=True, text=True, capture_output=True, check=True
+        )
         return True, result.stdout
     except subprocess.CalledProcessError as e:
         print(f"Error: {e.stderr}")
         return False, None
+
 
 def complete_job(job, success, output):
     with sqlite3.connect(DB_PATH) as conn:
@@ -81,17 +74,17 @@ def complete_job(job, success, output):
             wandb_name = extract_wandb_name(output)
             conn.execute(
                 "UPDATE jobs SET status='done', wandb_name=? WHERE id=? AND type=?",
-                (wandb_name, job["id"], job["type"])
+                (wandb_name, job["id"], job["type"]),
             )
         else:
             conn.execute(
                 "UPDATE jobs SET status=? WHERE id=? AND type=?",
-                ('done' if success else 'failed', job["id"], job["type"])
+                ("done" if success else "failed", job["id"], job["type"]),
             )
         conn.commit()
 
+
 def main():
-    init_db()
     while True:
         job = claim_job()
         if job:
@@ -100,8 +93,8 @@ def main():
                 with sqlite3.connect(DB_PATH) as conn:
                     conn.row_factory = sqlite3.Row
                     train = conn.execute(
-                        "SELECT wandb_name FROM jobs WHERE id=? AND type='train'", 
-                        (job["id"],)
+                        "SELECT wandb_name FROM jobs WHERE id=? AND type='train'",
+                        (job["id"],),
                     ).fetchone()
                     if train:
                         cmd = cmd.replace("$WANDB_NAME", train["wandb_name"])
@@ -111,6 +104,7 @@ def main():
         else:
             print("No eligible jobs. Sleeping...")
             time.sleep(SLEEP_INTERVAL)
+
 
 if __name__ == "__main__":
     main()

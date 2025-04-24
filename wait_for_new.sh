@@ -25,9 +25,9 @@ while true; do
       SEEN_FILES+=("$file")
 
       if [[ "$SCRIPT" == "main.py" ]]; then
-        python scripts/"$SCRIPT" --n_keypoints="$LATENT_DIM" --ckpt="$file" -c configs/airplane-8kpt.yaml -t configs/test.yaml "$@"
+        python scripts/"$SCRIPT" --n_keypoints="$LATENT_DIM" --ckpt="$file" -c configs/lamp.yaml -t configs/test.yaml "$@"
       elif [[ "$SCRIPT" == "train_ae.py" ]]; then
-        python scripts/"$SCRIPT" --latent_dim="$LATENT_DIM" --ckpt="$file" -c configs/airplane-8kpt.yaml -t configs/test.yaml "$@"
+        python scripts/"$SCRIPT" --latent_dim="$LATENT_DIM" --ckpt="$file" -c configs/lamp.yaml -t configs/test.yaml "$@"
       else
         echo "Unknown script: $SCRIPT"
         exit 1
