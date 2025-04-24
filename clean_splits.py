@@ -12,12 +12,19 @@ for idx, line in tqdm.tqdm(
         p = Path(
             "/run/user/1000/gvfs/smb-share:server=130.194.128.238,share=slow/Shapenetcore_benchmark"
         )
+        p2 = Path(
+            "/run/user/1000/gvfs/smb-share:server=130.194.128.238,share=slow/shape-data"
+        )
         _, folder, _, name, _ = line.strip().split(",")
         if "test" in line:
             if (p / folder / "points_label" / f"{name}.seg").is_file():
                 out.append(line.strip())
         else:
-            out.append(line.strip())
+            if (p2 / folder / name).is_dir():
+                files = list((p2 / folder / name).rglob("new_samples_*.npy"))
+                if len(files) == 5:
+                    out.append(line.strip())
+
     else:
         out.append(line.strip())
 

@@ -1,14 +1,14 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: lamp-reset-weights-eval
+  name: manager
 spec:
   maxRetry: 1
   minAvailable: 1
   schedulerName: volcano
   queue: default
   tasks:
-    - replicas: 1
+    - replicas: 5
       name: train
       template:
         spec:
@@ -17,28 +17,28 @@ spec:
             - name: dkr-creds
           securityContext:
             runAsUser: 1000
-          nodeSelector:
-            nvidia.com/gpu.product: NVIDIA-RTX-A6000
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: nvidia.com/gpu.product
+                        operator: In
+                        values:
+                          - NVIDIA-RTX-A6000
+                          - NVIDIA-GeForce-RTX-3090
+                          - NVIDIA-GeForce-RTX-2080-Ti
           containers:
             - name: runner
               imagePullPolicy: Always
               image: mu00120825.eng.monash.edu.au:5021/keypoint_deformer:latest
               command:
-                # [
-                #   "python",
-                #   "scripts/train_ae.py",
-                #   "--latent_dim=8",
-                #   "--n_iterations=200000",
-                #   "-c=configs/airplane-8kpt.yaml",
-                #   "--use_old=true"
-                # ]
-                ["bash",
-                "wait_for_new.sh",
-                "train_ae.py",
-                "misty-cloud-201",
-                "8",
-                "--use_old=true"
+                [
+                  "python",
+                  "-u",
+                  "manager.py"
                 ]
+
               workingDir: /app
 
               env:
@@ -49,6 +49,7 @@ spec:
                       key: api-key
                 - name: WANDB_CACHE_DIR
                   value: /home/taco
+
               resources:
                 requests:
                   memory: 24Gi
