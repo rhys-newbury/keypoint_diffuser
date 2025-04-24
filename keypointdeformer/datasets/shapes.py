@@ -287,9 +287,6 @@ class Shapes(torch.utils.data.Dataset):
         keypoints = torch.from_numpy(keypoints).float()
         return keypoints
 
-    def get_item(self, index):
-        return self.get_item_by_name(self.dataset["name"][index])
-
     def normalize_pytorch_mesh_with_center_scale(
         self,
         mesh: pytorch3d.structures.Meshes,
@@ -343,7 +340,7 @@ class Shapes(torch.utils.data.Dataset):
         )
         return point_cloud[indices]
 
-    def get_item_by_name(self, name, sample_mesh=False, load_mesh=False):
+    def get_item_by_name(self, name, is_test, sample_mesh=False, load_mesh=False):
         time.time()
 
         if False:
@@ -377,7 +374,7 @@ class Shapes(torch.utils.data.Dataset):
             "cat": self.opt.category,
             "file": name,
         }
-        if pc_path.is_file():
+        if pc_path.is_file() and is_test:
             # removed:
             # 022433,02691156,03595860,692797a818b4630f1aa3e317da5a1267,test
 
@@ -437,12 +434,13 @@ class Shapes(torch.utils.data.Dataset):
             name_2 = self.dataset["name"][index_2]
 
         sample_mesh = self.opt.sample_mesh or self.opt.points_dir is None
+        is_test = self.opt.phase == "test"
         target_data = self.get_item_by_name(
-            name_2, load_mesh=self.opt.load_mesh, sample_mesh=sample_mesh
+            name_2, is_test, load_mesh=self.opt.load_mesh, sample_mesh=sample_mesh
         )
 
         source_data = self.get_item_by_name(
-            name, load_mesh=self.opt.load_mesh, sample_mesh=sample_mesh
+            name, is_test, load_mesh=self.opt.load_mesh, sample_mesh=sample_mesh
         )
 
         result = {"source_" + k: v for k, v in source_data.items()}
