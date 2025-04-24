@@ -5,7 +5,7 @@ from torch.nn import Module
 from keypointdeformer.utils.loss import EDMLossCurriculum
 
 from .diffusion import DiffusionPoint, PointwiseNet, PointwiseNetOld, VarianceSchedule
-from .encoders import PointTransformerv2
+from .encoders.point_transformer import PointTransformerv2
 from .vp_model import EDMPrecond
 
 

@@ -1,7 +1,7 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: interactive-example
+  name: interactive-example-resample
 spec:
   minAvailable: 1
   schedulerName: volcano
@@ -10,7 +10,7 @@ spec:
     - event: PodEvicted
       action: RestartJob
   tasks:
-    - replicas: 4
+    - replicas: 1
       name: persistent-debugger
       policies:
         - event: TaskCompleted
@@ -23,10 +23,10 @@ spec:
             - name: pytorch-session
               imagePullPolicy: Always
               image: mu00120825.eng.monash.edu.au:5021/keypoint_deformer:latest
-              command: ["python", "-u", "resample.py"]
+              # command: ["python", "-u", "resample.py"]
               # args: ["while true; do sleep 30; done;"]
-              # command: ["/bin/bash", "-c", "--"]
-              # args: ["while true; do sleep 30; done;"]
+              command: ["/bin/bash", "-c", "--"]
+              args: ["while true; do sleep 30; done;"]
               workingDir: /mnt/slow/shape-data
               volumeMounts:
                 - mountPath: /dev/shm

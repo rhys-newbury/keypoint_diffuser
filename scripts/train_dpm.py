@@ -1,0 +1,528 @@
+import os
+import sys
+from pathlib import Path
+
+
+kp_path = Path(__file__).resolve().absolute().parent.parent
+sys.path.append(str(kp_path))
+
+import copy
+import time
+from datetime import datetime
+
+import matplotlib.pyplot as plt
+import numpy as np
+import open3d as o3d
+import torch
+import torch.distributed as dist
+import torch.nn.parallel
+import torch.utils.data
+import torch.utils.data.distributed
+from tensorboardX import SummaryWriter
+from torch.nn.parallel import DistributedDataParallel
+from torch.nn.utils import clip_grad_norm_
+from torch.optim.lr_scheduler import LambdaLR
+from tqdm import tqdm
+
+import wandb
+from keypointdeformer.datasets import get_dataset
+from keypointdeformer.models.encoder_models.autoencoder_orig import AutoEncoderOrig
+from keypointdeformer.options.ae_options import AEOptions
+from keypointdeformer.utils.eval_metrics import EMD_CD
+from keypointdeformer.utils.nn import load_network, save_network
+from keypointdeformer.utils.utils import Timer
+
+
+torch.autograd.set_detect_anomaly(True)
+RUN = None
+
+from torchvision import transforms
+from transforms import ApplyToBoth, Collect, Deform, GridSample, ToTensor
+from utils import collate_fn
+
+
+CHECKPOINTS_DIR = "checkpoints"
+CHECKPOINT_EXT = ".pth"
+
+
+# Initialize distributed environment
+def setup(rank, world_size):
+    if torch.cuda.device_count() > 1:
+        local_rank = int(os.environ["LOCAL_RANK"])
+        print("local_rank", local_rank, "rank: ", rank, "world_size: ", world_size)
+        torch.cuda.set_device(local_rank)
+
+        dist.init_process_group("nccl", rank=rank, world_size=world_size)
+
+
+def normalize_point_clouds(pcs, mode):
+    if mode is None:
+        print("Will not normalize point clouds.")
+        return pcs
+    print(f"Normalization mode: {mode}")
+    for i in tqdm(range(pcs.size(0)), desc="Normalize"):
+        pc = pcs[i]
+        if mode == "shape_unit":
+            shift = pc.mean(dim=0).reshape(1, 3)
+            scale = pc.flatten().std().reshape(1, 1)
+        elif mode == "shape_bbox":
+            pc_max, _ = pc.max(dim=0, keepdim=True)  # (1, 3)
+            pc_min, _ = pc.min(dim=0, keepdim=True)  # (1, 3)
+            shift = ((pc_min + pc_max) / 2).view(1, 3)
+            scale = (pc_max - pc_min).max().reshape(1, 1) / 2
+        pc = (pc - shift) / scale
+        pcs[i] = pc
+    return pcs
+
+
+def visualize_point_cloud(
+    points, labels, keypoints, orig_shape, visual=False, icp=True
+):
+    """
+    Visualize a 3D point cloud with color based on labels.
+
+    Args:
+    - points (torch.Tensor): Shape [N, 3], point cloud data.
+    - keypoints (torch.Tensor): Shape [M, 3], point cloud data, which are bigger and blue
+
+    - labels (torch.Tensor): Shape [N], labels for each point.
+    """
+    # Convert tensors to NumPy arrays
+    points_np = points.cpu().numpy()  # Shape: [N, 3]
+    labels_np = labels.cpu().numpy().astype(np.int32)  # Shape: [N]
+    orig_shape = orig_shape.cpu().numpy()
+    keypoints_np = keypoints.cpu().numpy().T  # Shape: [M, 3]
+
+    # Normalize labels to be in range [0, 1] for color mapping
+    max_label = labels_np.max() + 1  # Avoid division by 0
+
+    colors = plt.cm.get_cmap("tab10", max_label)(labels_np / max_label)[
+        :, :3
+    ]  # RGB from colormap
+
+    # Create Open3D point cloud
+    orig_pcd = o3d.geometry.PointCloud()
+    orig_pcd.points = o3d.utility.Vector3dVector(orig_shape)
+    orig_pcd.paint_uniform_color([1, 0, 1])
+
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points_np)
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    if icp:
+        threshold = 0.2  # Distance threshold for ICP
+        np.eye(4)  # Initial transformation (identity matrix)
+
+        theta = 0  # 90 degrees in radians
+        initial_rotation_y = np.array(
+            [
+                [np.cos(theta), 0, np.sin(theta), 0],
+                [0, 1, 0, 0],
+                [-np.sin(theta), 0, np.cos(theta), 0],
+                [0, 0, 0, 1],
+            ]
+        )
+        reg_icp = o3d.pipelines.registration.registration_icp(
+            pcd,
+            orig_pcd,
+            threshold,
+            initial_rotation_y,
+            o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+        )
+
+        pcd.transform(reg_icp.transformation)
+
+    if visual:
+        keypoint_spheres = []
+        for keypoint in keypoints_np:
+            sphere = o3d.geometry.TriangleMesh.create_sphere(
+                radius=0.05
+            )  # Adjust radius as needed
+
+            sphere.translate(keypoint)
+            sphere.paint_uniform_color([0, 0, 1])  # Blue color
+            keypoint_spheres.append(sphere)
+            break
+
+        # Visualize
+        o3d.visualization.draw_geometries(
+            [pcd, orig_pcd, *keypoint_spheres],
+            window_name="Point Cloud with Labels and Keypoints",
+        )
+
+    return np.asarray(pcd.points)
+
+
+def visualize_point_clouds(
+    original, deformed, kp_orig, kp_transformed, kp_deformed, save_dir="./"
+):
+    """
+    Visualizes the first point cloud in the batch before and after deformation.
+
+    Args:
+        original: (B, N, 3) tensor of original point cloud.
+        deformed: (B, N, 3) tensor of deformed point cloud.
+    """
+    original_np = original[0].cpu().numpy()  # Extract first sample, convert to NumPy
+    deformed_np = deformed[0].cpu().numpy()  # Extract first sample, convert to NumPy
+    kp_orig_np = kp_orig[0].cpu().numpy()  # Extract first sample's keypoints
+    kp_transformed_np = kp_transformed[0].cpu().numpy()  # Transformed keypoints
+    kp_deformed_np = kp_deformed[0].cpu().numpy()  # Keypoints from deformed shape
+
+    # Save NumPy arrays
+    np.save(f"{save_dir}/original_point_cloud.npy", original_np)
+    np.save(f"{save_dir}/deformed_point_cloud.npy", deformed_np)
+    np.save(f"{save_dir}/kp_orig.npy", kp_orig_np)
+    np.save(f"{save_dir}/kp_transformed.npy", kp_transformed_np)
+    np.save(f"{save_dir}/kp_deformed.npy", kp_deformed_np)
+
+
+def reparameterize(mu, logvar):
+    std = torch.exp(0.5 * logvar)
+    eps = torch.randn_like(std)
+    return mu + eps * std
+
+
+def test(opt, save_subdir="test"):
+    t = transforms.Compose(
+        [
+            Deform(),  # Forks into two versions: original and deformed
+            ApplyToBoth(
+                transforms.Compose(
+                    [
+                        GridSample(
+                            keys=("coord",),
+                            hash_type="fnv",
+                            mode="train",
+                            return_grid_coord=True,
+                        ),
+                        ToTensor(),
+                        Collect(
+                            keys=("coord", "grid_coord", "transformation", "shape"),
+                            feat_keys=("coord",),
+                        ),
+                    ]
+                )
+            ),
+        ]
+    )
+
+    log_dir = os.path.join(opt.log_dir, opt.name)
+    checkpoints_dir = os.path.join(log_dir, CHECKPOINTS_DIR)
+    # /app/data/keypoints/logs/autumn-waterfall-200/checkpoints/net_final.pth
+    opt.phase = "test"
+    dataset = get_dataset(opt.dataset)(opt, transform=t)
+
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=opt.batch_size,
+        shuffle=False,
+        drop_last=False,
+        collate_fn=collate_fn,
+        num_workers=0,
+        worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
+    )
+
+    ckpt = opt.ckpt
+    if not ckpt.startswith(os.path.sep):
+        ckpt = os.path.join(checkpoints_dir, ckpt + CHECKPOINT_EXT)
+
+    ckpt = torch.load(ckpt)
+
+    ae_model = AutoEncoderOrig(opt).cuda()
+    ae_model.load_state_dict(ckpt["states"])
+    ae_model.eval()
+    all_ref = []
+    all_recons = []
+    Timer("step")
+    with torch.no_grad():
+        closest_labels_ = []
+
+        total_batches = len(dataloader)
+
+        # Wrap the dataloader with tqdm
+        for data in tqdm(
+            dataloader, desc="Processing data", unit="batch", total=total_batches
+        ):
+            target_shape_t = (
+                data["target_shape"]
+                .view(len(data["target_cat"]), -1, 3)
+                .transpose(1, 2)
+                .cuda()
+            )
+
+            z0 = ae_model.encode(data)
+            recons = ae_model.decode(z0).detach()
+
+            all_ref.append(target_shape_t.detach().cpu())
+            all_recons.append(recons.detach().cpu())
+
+            target_sampled_points = data["target_sampled_points"].view(
+                len(data["target_cat"]), -1, 4
+            )
+
+            for i in range(z0.shape[0]):
+                kp = z0[i, :].reshape(-1, 3)
+
+                points = target_shape_t[i, ...].T
+
+                seg_labels = target_sampled_points[i, :, -1].int().cuda()
+                seg_points = target_sampled_points[i, :, :3]
+
+                seg_points = visualize_point_cloud(
+                    seg_points,
+                    seg_labels,
+                    kp,
+                    points,
+                    visual=False,
+                )
+
+                distances = torch.cdist(kp.double(), torch.tensor(seg_points).cuda())
+                threshold = 0.05
+
+                within_threshold_mask = (
+                    distances <= threshold
+                )  # True where distance <= 0.05
+
+                keypoint_indices, seg_point_indices = torch.nonzero(
+                    within_threshold_mask, as_tuple=True
+                )
+                valid_seg_labels = seg_labels[
+                    seg_point_indices
+                ]  # The labels for valid segmentation points
+
+                max_label = 5  # Ensure it includes the highest label
+
+                # Create a Boolean matrix: (num_keypoints, max_label)
+                label_presence_matrix = torch.zeros(
+                    (distances.size(0), max_label),
+                    dtype=torch.bool,
+                    device=seg_labels.device,
+                )
+
+                # Mark True for each label that is present for each keypoint
+                label_presence_matrix[keypoint_indices, valid_seg_labels.long()] = True
+
+                closest_labels_.append(label_presence_matrix)
+
+        closest_labels_tensor = torch.stack(closest_labels_)
+
+        average_correlation_per_keypoint = (
+            closest_labels_tensor[:, :, :].sum(dim=0).max(dim=1)[0]
+            / closest_labels_tensor.shape[0]
+        ).mean()
+        wandb.log(
+            {"average_correlation_per_keypoint": average_correlation_per_keypoint}
+        )
+
+        print(average_correlation_per_keypoint)
+
+        all_ref = torch.cat(all_ref, dim=0).permute(0, 2, 1)
+        all_ref = normalize_point_clouds(all_ref, "shape_bbox")
+        all_recons = torch.cat(all_recons, dim=0)
+        all_recons = normalize_point_clouds(all_recons, "shape_bbox")
+        metrics = EMD_CD(
+            all_recons.to("cuda").double(),
+            all_ref.to("cuda").double(),
+            opt.batch_size,
+        )
+        wandb.log(metrics)
+        for key, value in metrics.items():
+            print(f"{key}: {value.item():.10f}")
+
+
+def get_linear_scheduler(optimizer, start_epoch, end_epoch, start_lr, end_lr):
+    def lr_func(epoch):
+        if epoch <= start_epoch:
+            return 1.0
+        elif epoch <= end_epoch:
+            total = end_epoch - start_epoch
+            delta = epoch - start_epoch
+            frac = delta / total
+            return (1 - frac) * 1.0 + frac * (end_lr / start_lr)
+        else:
+            return end_lr / start_lr
+
+    return LambdaLR(optimizer, lr_lambda=lr_func)
+
+
+def train(opt, rank, world_size):
+    if rank == 0:
+        log_dir = os.path.join(opt.log_dir, RUN.name)
+        checkpoints_dir = os.path.join(log_dir, CHECKPOINTS_DIR)
+
+    dataset = get_dataset(opt.dataset)(opt)
+
+    if torch.cuda.device_count() > 1 and world_size > 1:
+        print("Using DistributedSampler for multiple GPUs.")
+        train_sampler = dist.DistributedSampler(
+            dataset, num_replicas=world_size, rank=rank
+        )
+        shuffle = False
+    else:
+        print("Using regular DataLoader (no DistributedSampler).")
+        train_sampler = None
+        shuffle = True  # Only shuffle when not using DistributedSampler
+
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=opt.batch_size,
+        sampler=train_sampler,
+        shuffle=shuffle,
+        drop_last=True,
+        collate_fn=collate_fn,
+        num_workers=opt.n_workers,
+        worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
+    )
+
+    opt_test = copy.deepcopy(opt)
+    opt_test.phase = "test"
+    test_dataset = get_dataset(opt_test.dataset)(opt_test)
+
+    torch.utils.data.DataLoader(
+        test_dataset,
+        batch_size=8,
+        shuffle=True,
+        drop_last=True,
+        collate_fn=collate_fn,
+        num_workers=opt.n_workers,
+        worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
+    )
+
+    net = AutoEncoderOrig(opt).cuda()
+
+    if torch.cuda.device_count() > 1:
+        net = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net)
+        copy.deepcopy(net).eval().requires_grad_(False)
+
+        print(f"Using DistributedDataParallel on {torch.cuda.device_count()}")
+        net = DistributedDataParallel(
+            net, device_ids=[rank], output_device=rank, find_unused_parameters=False
+        )
+    else:
+        copy.deepcopy(net).eval().requires_grad_(False)
+
+    if opt.ckpt:
+        ckpt = opt.ckpt
+        if not ckpt.startswith(os.path.sep):
+            ckpt = os.path.join(checkpoints_dir, ckpt + CHECKPOINT_EXT)
+        load_network(net, ckpt)
+
+    # train
+    net.train()
+    t = 0
+
+    # train
+    if rank == 0:
+        os.makedirs(checkpoints_dir, exist_ok=True)
+        log_path = os.path.join(checkpoints_dir, "training_log.txt")
+        with open(log_path, "a") as log_file:
+            log_file.write(str(net) + "\n")
+        summary_dir = datetime.now().strftime("%y%m%d-%H%M%S")
+        writer = SummaryWriter(
+            logdir=os.path.join(checkpoints_dir, "logs", summary_dir), flush_secs=5
+        )
+
+    optimizer = torch.optim.Adam(
+        net.parameters(), lr=opt.lr, weight_decay=opt.weight_decay
+    )
+
+    scheduler = get_linear_scheduler(
+        optimizer,
+        start_epoch=opt.sched_start_epoch,
+        end_epoch=opt.sched_end_epoch,
+        start_lr=opt.lr,
+        end_lr=opt.end_lr,
+    )
+
+    if opt.iteration:
+        t = opt.iteration
+
+    iter_time_start = time.time()
+
+    epoch = 0
+
+    while t <= opt.n_iterations:
+        epoch += 1
+        iter_time_start = time.time()  # Start iteration timer
+        if torch.cuda.device_count() > 1 and world_size > 1:
+            dataloader.sampler.set_epoch(epoch)
+
+        for _, data in enumerate(dataloader):
+            if t > opt.n_iterations:
+                break
+
+            x = data["target_shape"].view(len(data["target_cat"]), -1, 3).cuda()
+
+            loss = net.get_loss(x)
+            loss.backward()
+
+            clip_grad_norm_(net.parameters(), opt.max_grad_norm)
+            optimizer.step()
+            scheduler.step()
+
+            if t % opt.save_interval == 0 and rank == 0:
+                os.path.join(checkpoints_dir, "outputs", "%07d" % t)
+                save_network(net, checkpoints_dir, network_label="net", epoch_label=t)
+
+            iter_time = time.time() - iter_time_start
+            iter_time_start = time.time()
+
+            if t % opt.log_interval == 0 and rank == 0:
+                samples_sec = opt.batch_size / iter_time
+                losses_str = str(loss)
+                log_str = "{:d}: iter {:.1f} sec, {:.1f} samples/sec {}".format(
+                    t, iter_time, samples_sec, losses_str
+                )
+                print(log_str)
+                with open(log_path, "a") as log_file:
+                    log_file.write(log_str + "\n")
+                writer.add_scalar("train/loss", loss, t)
+
+            t += 1
+
+    if rank == 0:
+        save_network(net, checkpoints_dir, network_label="net", epoch_label="final")
+
+
+if __name__ == "__main__":
+    if torch.cuda.device_count() > 1:
+        rank = int(os.environ["RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
+        setup(rank, world_size)
+    else:
+        rank = 0
+        world_size = 1
+
+    print("SETUP IS COMPLETE!!!!!!!!!!!!!!!!")
+
+    parser = AEOptions()
+    opt = parser.parse()
+
+    seed = opt.seed
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    if opt.phase == "test":
+        RUN = wandb.init(project="diffuse_keypoints_test_fr")
+        wandb.log(
+            {
+                "ckpt": opt.ckpt,
+                "n_keypoints": opt.latent_dim,
+                "type": "dpm",
+                "category": opt.category,
+            }
+        )
+
+        test(opt, save_subdir=opt.subdir)
+    elif opt.phase == "train":
+        print(f"Rank: {rank}, World size: {world_size}")
+
+        if rank == 0:
+            RUN = wandb.init(project="diffuse_keypoints_lamp_fr")
+            wandb.run.log_code(".")
+        train(opt, rank, world_size)
+        print(f"Run name: {wandb.run.name}")
+
+    else:
+        raise ValueError()

@@ -17,9 +17,6 @@ RUN conda install pytorch-cluster pytorch-scatter pytorch-sparse -c pyg -y
 
 WORKDIR /app
 
-COPY keypointdeformer/PCT_Pytorch /app/keypointdeformer/PCT_Pytorch
-RUN cd /app/keypointdeformer/PCT_Pytorch/pointnet2_ops_lib && pip install -e .
-
 COPY keypointdeformer/utils/emd_loss /app/keypointdeformer/utils/emd_loss
 RUN cd /app/keypointdeformer/utils/emd_loss && python3 setup.py install
 

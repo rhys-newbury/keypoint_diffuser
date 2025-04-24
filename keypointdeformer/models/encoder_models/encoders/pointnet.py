@@ -19,14 +19,14 @@ class PointNetEncoder(nn.Module):
         # Mapping to [c], cmean
         self.fc1_m = nn.Linear(512, 256)
         self.fc2_m = nn.Linear(256, 128)
-        self.fc3_m = nn.Linear(128, zdim * 3)  # + 10
+        self.fc3_m = nn.Linear(128, zdim)  # + 10
         self.fc_bn1_m = nn.BatchNorm1d(256)
         self.fc_bn2_m = nn.BatchNorm1d(128)
 
         # Mapping to [c], cmean
         self.fc1_v = nn.Linear(512, 256)
         self.fc2_v = nn.Linear(256, 128)
-        self.fc3_v = nn.Linear(128, zdim * 3)  # + 10
+        self.fc3_v = nn.Linear(128, zdim)  # + 10
         self.fc_bn1_v = nn.BatchNorm1d(256)
         self.fc_bn2_v = nn.BatchNorm1d(128)
 

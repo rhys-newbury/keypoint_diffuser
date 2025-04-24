@@ -1,14 +1,14 @@
-name: airplane-8kpt
+name: chair-8kpt
 
-category: 03636649
+category: 02958343
 split: train
 
 mesh_dir: /mnt/slow/shape-data
 points_dir: /mnt/slow/shape-data
 split_file: /mnt/storage/shapenet_split/all.csv
-log_dir: /mnt/storage/keypoints/logs
+log_dir: /mnt/slow/keypoints/logs
 
-batch_size: 8
+batch_size: 18
 # mesh_dir: /app/data/shapenet/shape_data
 # points_dir: /app/data/shapenet/shape_data
 # split_file: data/shapenet_split/all.csv
