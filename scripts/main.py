@@ -406,7 +406,7 @@ def test(opt, save_subdir="test"):
 
                 closest_labels_.append(label_presence_matrix)
 
-        all_ref = torch.cat(all_ref, dim=0).permute(0, 2, 1)
+        all_ref = torch.cat(all_ref, dim=0)
         all_ref = normalize_point_clouds(all_ref, "shape_bbox")
         all_recons = torch.cat(all_recons, dim=0)
         all_recons = normalize_point_clouds(all_recons, "shape_bbox")

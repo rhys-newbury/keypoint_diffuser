@@ -691,6 +691,7 @@ if __name__ == "__main__":
     np.random.seed(seed)
 
     if opt.phase == "test":
+
         RUN = wandb.init(project="diffuse_keypoints_test_fr")
         wandb.log(
             {
@@ -709,5 +710,7 @@ if __name__ == "__main__":
             RUN = wandb.init(project="diffuse_keypoints_lamp_fr")
             wandb.run.log_code(".")
         train(opt, rank, world_size)
+        print(f"Run name: {wandb.run.name}")
+
     else:
         raise ValueError()
