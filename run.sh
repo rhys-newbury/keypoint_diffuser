@@ -33,6 +33,8 @@ for file in $(ls -t "$BASE_PATH"/net_*.pth 2>/dev/null); do
                         python -u scripts/"$SCRIPT" --n_keypoints="$LATENT_DIM" --ckpt="$file" -c "$CONFIG" -t configs/test.yaml "$@"
                     elif [[ "$SCRIPT" == "train_ae.py" ]]; then
                         python -u scripts/"$SCRIPT" --latent_dim="$LATENT_DIM" --ckpt="$file" -c "$CONFIG" -t configs/test.yaml "$@"
+                    elif [[ "$SCRIPT" == "train_dpm.py" ]]; then
+                        python -u scripts/"$SCRIPT" --latent_dim="$LATENT_DIM" --ckpt="$file" -c "$CONFIG" -t configs/test.yaml "$@"
                     else
                         echo "Unknown script: $SCRIPT"
                         exit 1

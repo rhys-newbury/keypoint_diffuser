@@ -639,7 +639,7 @@ def train(opt, rank, world_size):
             if ema_rampup_ratio is not None:
                 ema_halflife_nimg = min(ema_halflife_nimg, cur_nimg * ema_rampup_ratio)
             ema_beta = 0.5 ** (opt.batch_size / max(ema_halflife_nimg, 1e-8))
-            for p_ema, p_net in zip(ema.parameters(), net.parameters()):
+            for p_ema, p_net in zip(ema.parameters(), net.parameters(), strict=False):
                 p_ema.copy_(p_net.detach().lerp(p_ema, ema_beta))
 
             cur_nimg += opt.batch_size

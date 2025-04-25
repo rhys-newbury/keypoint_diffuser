@@ -29,7 +29,7 @@ def collate_fn(batch):
     elif isinstance(batch[0], Sequence):
         for data in batch:
             data.append(torch.tensor([data[0].shape[0]]))
-        batch = [collate_fn(samples) for samples in zip(*batch)]
+        batch = [collate_fn(samples) for samples in zip(*batch, strict=False)]
         batch[-1] = torch.cumsum(batch[-1], dim=0).int()
         return batch
     elif isinstance(batch[0], Mapping):

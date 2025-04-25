@@ -31,7 +31,7 @@ def save_keypoints(file_path, keypoints):
 def save_labelled_pointcloud(file_path, points, labels):
     colors = ["0 0 0", "0 1 0", "0 0 1", "1 0 0", "0.5 0.5 0.5", "0.5 0.5 0", "0.5 0 0"]
     s = ""
-    for point, label in zip(points, labels):
+    for point, label in zip(points, labels, strict=False):
         s += " ".join([str(float(x)) for x in point]) + " " + colors[label] + "\n"
     with open(file_path, "w") as f:
         f.write(s)

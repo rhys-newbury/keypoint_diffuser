@@ -179,7 +179,7 @@ class Shapes(torch.utils.data.Dataset):
 
     def _get_shapenet_id_to_model_id(self):
         data_frame = pd.read_csv(self.opt.split_file)
-        return {k: v for k, v in zip(data_frame.id, data_frame.modelId)}
+        return {k: v for k, v in zip(data_frame.id, data_frame.modelId, strict=False)}
 
     def _load_test_pairs(self):
         with open(self.opt.test_pairs_file) as f:

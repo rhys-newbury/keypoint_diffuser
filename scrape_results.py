@@ -43,7 +43,7 @@ def fetch_run_data(run):
 with ThreadPoolExecutor(max_workers=16) as executor:
     print(runs)
     futures = [
-        executor.submit(fetch_run_data, run) for run in tqdm.tqdm(runs, total=770)
+        executor.submit(fetch_run_data, run) for run in tqdm.tqdm(runs, total=2828)
     ]
     print(len(futures))
 

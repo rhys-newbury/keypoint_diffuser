@@ -5,7 +5,7 @@ split: test
 
 # ckpt: /app/data/keypoints/logs/airplane-8kpt/checkpoints/net_final.pth
 # ckpt: /app/data/keypoints/logs/autumn-waterfall-200/checkpoints/net_final.pth
-# ckpt: /app/data/keypoints/logs/misunderstood-wood-95/checkpoints/net_37800.pth
+# ckpt: /app/data/keypoints/logs/likely-lion-32/checkpoints/net_5400.pth
 
 n_workers: 8
 batch_size: 8
