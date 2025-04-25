@@ -392,7 +392,7 @@ def test(opt, save_subdir="test"):
                     seg_point_indices
                 ]  # The labels for valid segmentation points
 
-                max_label = 5  # Ensure it includes the highest label
+                max_label = 7  # Ensure it includes the highest label
 
                 # Create a Boolean matrix: (num_keypoints, max_label)
                 label_presence_matrix = torch.zeros(

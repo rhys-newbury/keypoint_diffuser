@@ -1,3 +1,4 @@
+import argparse
 import fcntl
 import os
 import re
@@ -5,13 +6,24 @@ import subprocess
 import sys
 import time
 import uuid
+from pathlib import Path
 
 import torch
 import yaml
 
 
-JOBS_PATH = "/mnt/slow/job_list.yaml"
-LOCK_PATH = "/mnt/slow/job_list.lock"
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--jobs_path",
+    type=str,
+    default="/mnt/slow/job_list.yaml",
+    help="Path to the job list YAML file.",
+)
+args = parser.parse_args()
+
+JOBS_PATH = Path(args.jobs_path)
+LOCK_PATH = JOBS_PATH.with_suffix(".lock")
+
 SLEEP_INTERVAL = 10
 
 
