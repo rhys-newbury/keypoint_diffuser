@@ -1,67 +1,140 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
+import requests
+import json
 import pandas as pd
 import plotly.express as px
-import tqdm
+import numpy as np
+category_mapping = {
+    "02691156": "Airplane",
+    "02773838": "Bag",
+    "02954340": "Cap",
+    "02958343": "Car",
+    "03001627": "Chair",
+    "03261776": "Earphone",
+    "03467517": "Guitar",
+    "03624134": "Knife",
+    "03636649": "Lamp",
+    "03642806": "Laptop",
+    "03790512": "Motorbike",
+    "03797390": "Mug",
+    "03948459": "Pistol",
+    "04099429": "Rocket",
+    "04225987": "Skateboard",
+    "04379243": "Table",
+}
 
-import wandb
 
+WANDB_API_KEY = "db09fabd9a9cd7887ace1f168b3701bfa094f12b"  # Replace with your actual API key
+entity = "rhys-newbury"
+project = "diffuse_keypoints_test_fr"
 
-# Initialize wandb API
-api = wandb.Api()
+url = "https://api.wandb.ai/graphql"
 
-# Replace with your project path
-runs = api.runs("rhys-newbury/diffuse_keypoints_test_fr")
+headers = {
+    "Authorization": f"Bearer {WANDB_API_KEY}",
+    "Content-Type": "application/json",
+}
 
-data = []
-
-
-def get_latest_valid(history, key):
-    series = history[key].dropna()
-    return series.iloc[-1] if not series.empty else None
-
-
-def fetch_run_data(run):
-    try:
-        x = run.history()
-        return {
-            "name": run.name,
-            "n_keypoints": int(get_latest_valid(x, "n_keypoints")),
-            "type": get_latest_valid(x, "type"),
-            "category": get_latest_valid(x, "category"),
-            "average_correlation_per_keypoint": get_latest_valid(
-                x, "average_correlation_per_keypoint"
-            ),
-            "MMD-EMD": get_latest_valid(x, "MMD-EMD"),
-            "MMD-CD": get_latest_valid(x, "MMD-CD"),
+query = """
+query Runs($entity: String!, $project: String!, $first: Int, $after: String) {
+  project(entityName: $entity, name: $project) {
+    runs(first: $first, after: $after) {
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+      edges {
+        node {
+          displayName
+          summaryMetrics
         }
+      }
+    }
+  }
+}
+"""
+
+summaryMetrics = []
+run_display_names = []
+
+after_cursor = None
+
+while True:
+    variables = {
+        "entity": entity,
+        "project": project,
+        "first": 1000,
+        "after": after_cursor,
+    }
+
+    response = requests.post(
+        url, headers=headers, json={"query": query, "variables": variables}
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    edges = data["data"]["project"]["runs"]["edges"]
+    for edge in edges:
+        summaryMetrics.append(edge["node"]["summaryMetrics"])
+        run_display_names.append(edge["node"]["displayName"])
+
+    page_info = data["data"]["project"]["runs"]["pageInfo"]
+    if page_info["hasNextPage"]:
+        after_cursor = page_info["endCursor"]
+    else:
+        break
+
+# Done: All runs fetched!
+data = []
+# Example print
+for summaryMetric, run_display_name in zip(summaryMetrics, run_display_names):
+    summaryMetric_ = json.loads(summaryMetric)
+    try:
+        x = {
+            "name": run_display_name,
+            "n_keypoints": summaryMetric_["n_keypoints"],
+            "type": summaryMetric_["type"],
+            "category": summaryMetric_["category"],
+            "average_correlation_per_keypoint": summaryMetric_.get(
+                "average_correlation_per_keypoint", -1
+            ),
+            "MMD-EMD": summaryMetric_["MMD-EMD"],
+            "MMD-CD": summaryMetric_["MMD-CD"],
+        }
+        data.append(x)
     except Exception as e:
-        print(f"Error in run {run.name}: {e}")
-        return None
+        print(e)
+        pass
+
+print(f"Total runs collected: {len(summaryMetrics)}")
+
+df = pd.DataFrame(data).dropna()
+
+df = df.replace(-1, pd.NA)
+print(df.columns.tolist(), data)
+df["MMD-CD"] = pd.to_numeric(df["MMD-CD"], errors="coerce")
+df["average_correlation_per_keypoint"] = pd.to_numeric(df["average_correlation_per_keypoint"], errors="coerce")
 
 
-with ThreadPoolExecutor(max_workers=16) as executor:
-    print(runs)
-    futures = [
-        executor.submit(fetch_run_data, run) for run in tqdm.tqdm(runs, total=2828)
-    ]
-    print(len(futures))
+df.to_csv("output.csv", index=False)
 
-    # Show tqdm progress bar as tasks complete
-    data = []
-    for future in tqdm.tqdm(as_completed(futures), total=len(futures)):
-        result = future.result()
-        if result is not None:
-            data.append(result)
+df_filtered = df.dropna(subset=["average_correlation_per_keypoint", "MMD-CD"], how="all")
 
-# Convert to DataFrame
-df = pd.DataFrame(data)
+# Define a custom selection function
+def select_best(group):
+    if group["average_correlation_per_keypoint"].notna().any():
+        # If any non-NaN correlations, pick the highest correlation
+        best_idx = group["average_correlation_per_keypoint"].idxmax()
+    else:
+        # Otherwise, pick the lowest MMD-CD
+        best_idx = group["MMD-CD"].idxmin()
+    return best_idx
 
-best_per_group = df.loc[
-    df.groupby(["n_keypoints", "type", "category"])[
-        "average_correlation_per_keypoint"
-    ].idxmax()
-].reset_index(drop=True)
+# Apply per group
+best_indices = df_filtered.groupby(["n_keypoints", "type", "category"]).apply(select_best)
+
+# Select the rows
+best_per_group = df_filtered.loc[best_indices].reset_index(drop=True)
+
 
 # Sort by category to group visually
 df_sorted = best_per_group.sort_values(by=["category", "type", "n_keypoints"])
@@ -100,21 +173,123 @@ metrics = {
     "MMD-CD": "MMD-CD",
 }
 
-# Plot each metric in its own chart
-for metric_key, metric_title in metrics.items():
-    fig = px.bar(
-        plot_df,
-        y="label",
-        x=metric_key,
-        orientation="h",
-        hover_data=["category", "type", "n_keypoints", metric_key],
-        title=metric_title,
-        labels={metric_key: metric_title},
+
+# Extract rows
+# Only keep rows where n_keypoints == 8
+list_view = plot_df[plot_df["n_keypoints"] == 8][["category", "type", "n_keypoints"] + list(metrics.keys())]
+
+latex_tables = {
+    "Average Correlation per Keypoint": [],
+    "MMD-CD": [],
+    "MMD-EMD": [],
+}
+
+# Extract rows into LaTeX structure
+for idx, row in list_view.iterrows():
+    category = row["category"]
+    type_ = row["type"]
+    
+    latex_tables["Average Correlation per Keypoint"].append(
+        (type_, category, row['average_correlation_per_keypoint'])
+    )
+    latex_tables["MMD-CD"].append(
+        (type_, category, row['MMD-CD'])
+    )
+    latex_tables["MMD-EMD"].append(
+        (type_, category, row['MMD-EMD'])
     )
 
-    fig.update_layout(
-        yaxis={"autorange": "reversed"},
-        height=600,
-    )
+def generate_latex_table(metric_name, data, maximize=True, scientific=False):
+    categories = sorted(set(x[1] for x in data))
+    types = sorted(set(x[0] for x in data))
 
-    fig.show()
+    lookup = {(t, c): v for (t, c, v) in data}
+
+    # Precompute best per category
+    best_values = {}
+    for cat in categories:
+        values = [(t, lookup.get((t, cat))) for t in types]
+        values = [(t, v) for (t, v) in values if v is not None]
+        if not values:
+            continue
+        if maximize:
+            best_value = max(v for (t, v) in values)
+        else:
+            best_value = min(v for (t, v) in values)
+        best_values[cat] = best_value
+
+    # Precompute averages
+    averages = {}
+    for type_ in types:
+        values = [lookup.get((type_, cat)) for cat in categories]
+        values = [v for v in values if v is not None]
+        if values:
+            averages[type_] = sum(values) / len(values)
+        else:
+            averages[type_] = None
+
+    # Find the best average
+    avg_values = [(t, v) for (t, v) in averages.items() if v is not None]
+    if maximize:
+        best_avg_value = max(avg_values, key=lambda x: x[1])[1]
+    else:
+        best_avg_value = min(avg_values, key=lambda x: x[1])[1]
+
+    mapped_categories = [category_mapping.get(c, c) for c in categories]
+
+    table = "\\begin{table*}[h]\n\\centering\n\\begin{adjustbox}{max width=\\textwidth}\n\\begin{tabular}{l|" + "c" * (len(categories)) + "|c}\n"
+    table += "\\toprule\n"
+    table += "Type & " + " & ".join(mapped_categories) + " & Average \\\\\n"
+    table += "\\midrule\n"
+
+    for type_ in types:
+        row_entries = []
+        for cat in categories:
+            value = lookup.get((type_, cat), None)
+            if value is None:
+                row_entries.append("-")
+            else:
+                if scientific:
+                    formatted = f"{value:.2e}"
+                else:
+                    formatted = f"{value:.4f}"
+                if value == best_values.get(cat):
+                    formatted = f"\\textbf{{{formatted}}}"
+                row_entries.append(formatted)
+
+        # Add average
+        avg_value = averages.get(type_)
+        if avg_value is None:
+            avg_formatted = "-"
+        else:
+            if scientific:
+                avg_formatted = f"{avg_value:.2e}"
+            else:
+                avg_formatted = f"{avg_value:.4f}"
+
+            if avg_value == best_avg_value:
+                avg_formatted = f"\\textbf{{{avg_formatted}}}"
+
+        row_entries.append(avg_formatted)
+
+        table += f"{type_} & " + " & ".join(row_entries) + " \\\\\n"
+
+    table += "\\bottomrule\n\\end{tabular}\n\end{adjustbox}\n"
+    table += f"\\caption{{{metric_name}}}\n\\end{{table*}}\n"
+    return table
+
+# Generate and print LaTeX tables
+for metric_name, data in latex_tables.items():
+    if metric_name == "Average Correlation per Keypoint":
+        maximize = True
+        scientific = False
+    elif metric_name == "MMD-EMD":
+        maximize = False
+        scientific = True
+    else:
+        maximize = False
+        scientific = False
+
+    latex_code = generate_latex_table(metric_name, data, maximize=maximize, scientific=scientific)
+    print(latex_code)
+    print("\n\n")
