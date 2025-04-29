@@ -1,8 +1,9 @@
-import requests
 import json
+
 import pandas as pd
-import plotly.express as px
-import numpy as np
+import requests
+
+
 category_mapping = {
     "02691156": "Airplane",
     "02773838": "Bag",
@@ -23,7 +24,9 @@ category_mapping = {
 }
 
 
-WANDB_API_KEY = "db09fabd9a9cd7887ace1f168b3701bfa094f12b"  # Replace with your actual API key
+WANDB_API_KEY = (
+    "db09fabd9a9cd7887ace1f168b3701bfa094f12b"  # Replace with your actual API key
+)
 entity = "rhys-newbury"
 project = "diffuse_keypoints_test_fr"
 
@@ -112,12 +115,17 @@ df = pd.DataFrame(data).dropna()
 df = df.replace(-1, pd.NA)
 print(df.columns.tolist(), data)
 df["MMD-CD"] = pd.to_numeric(df["MMD-CD"], errors="coerce")
-df["average_correlation_per_keypoint"] = pd.to_numeric(df["average_correlation_per_keypoint"], errors="coerce")
+df["average_correlation_per_keypoint"] = pd.to_numeric(
+    df["average_correlation_per_keypoint"], errors="coerce"
+)
 
 
 df.to_csv("output.csv", index=False)
 
-df_filtered = df.dropna(subset=["average_correlation_per_keypoint", "MMD-CD"], how="all")
+df_filtered = df.dropna(
+    subset=["average_correlation_per_keypoint", "MMD-CD"], how="all"
+)
+
 
 # Define a custom selection function
 def select_best(group):
@@ -129,8 +137,11 @@ def select_best(group):
         best_idx = group["MMD-CD"].idxmin()
     return best_idx
 
+
 # Apply per group
-best_indices = df_filtered.groupby(["n_keypoints", "type", "category"]).apply(select_best)
+best_indices = df_filtered.groupby(["n_keypoints", "type", "category"]).apply(
+    select_best
+)
 
 # Select the rows
 best_per_group = df_filtered.loc[best_indices].reset_index(drop=True)
@@ -176,7 +187,9 @@ metrics = {
 
 # Extract rows
 # Only keep rows where n_keypoints == 8
-list_view = plot_df[plot_df["n_keypoints"] == 8][["category", "type", "n_keypoints"] + list(metrics.keys())]
+list_view = plot_df[plot_df["n_keypoints"] == 8][
+    ["category", "type", "n_keypoints", *list(metrics.keys())]
+]
 
 latex_tables = {
     "Average Correlation per Keypoint": [],
@@ -185,23 +198,20 @@ latex_tables = {
 }
 
 # Extract rows into LaTeX structure
-for idx, row in list_view.iterrows():
+for _idx, row in list_view.iterrows():
     category = row["category"]
     type_ = row["type"]
-    
+
     latex_tables["Average Correlation per Keypoint"].append(
-        (type_, category, row['average_correlation_per_keypoint'])
+        (type_, category, row["average_correlation_per_keypoint"])
     )
-    latex_tables["MMD-CD"].append(
-        (type_, category, row['MMD-CD'])
-    )
-    latex_tables["MMD-EMD"].append(
-        (type_, category, row['MMD-EMD'])
-    )
+    latex_tables["MMD-CD"].append((type_, category, row["MMD-CD"]))
+    latex_tables["MMD-EMD"].append((type_, category, row["MMD-EMD"]))
+
 
 def generate_latex_table(metric_name, data, maximize=True, scientific=False):
-    categories = sorted(set(x[1] for x in data))
-    types = sorted(set(x[0] for x in data))
+    categories = sorted({x[1] for x in data})
+    types = sorted({x[0] for x in data})
 
     lookup = {(t, c): v for (t, c, v) in data}
 
@@ -212,10 +222,7 @@ def generate_latex_table(metric_name, data, maximize=True, scientific=False):
         values = [(t, v) for (t, v) in values if v is not None]
         if not values:
             continue
-        if maximize:
-            best_value = max(v for (t, v) in values)
-        else:
-            best_value = min(v for (t, v) in values)
+        best_value = max(v for t, v in values) if maximize else min(v for t, v in values)
         best_values[cat] = best_value
 
     # Precompute averages
@@ -237,7 +244,11 @@ def generate_latex_table(metric_name, data, maximize=True, scientific=False):
 
     mapped_categories = [category_mapping.get(c, c) for c in categories]
 
-    table = "\\begin{table*}[h]\n\\centering\n\\begin{adjustbox}{max width=\\textwidth}\n\\begin{tabular}{l|" + "c" * (len(categories)) + "|c}\n"
+    table = (
+        "\\begin{table*}[h]\n\\centering\n\\begin{adjustbox}{max width=\\textwidth}\n\\begin{tabular}{l|"
+        + "c" * (len(categories))
+        + "|c}\n"
+    )
     table += "\\toprule\n"
     table += "Type & " + " & ".join(mapped_categories) + " & Average \\\\\n"
     table += "\\midrule\n"
@@ -249,10 +260,7 @@ def generate_latex_table(metric_name, data, maximize=True, scientific=False):
             if value is None:
                 row_entries.append("-")
             else:
-                if scientific:
-                    formatted = f"{value:.2e}"
-                else:
-                    formatted = f"{value:.4f}"
+                formatted = f"{value:.2e}" if scientific else f"{value:.4f}"
                 if value == best_values.get(cat):
                     formatted = f"\\textbf{{{formatted}}}"
                 row_entries.append(formatted)
@@ -262,10 +270,7 @@ def generate_latex_table(metric_name, data, maximize=True, scientific=False):
         if avg_value is None:
             avg_formatted = "-"
         else:
-            if scientific:
-                avg_formatted = f"{avg_value:.2e}"
-            else:
-                avg_formatted = f"{avg_value:.4f}"
+            avg_formatted = f"{avg_value:.2e}" if scientific else f"{avg_value:.4f}"
 
             if avg_value == best_avg_value:
                 avg_formatted = f"\\textbf{{{avg_formatted}}}"
@@ -274,9 +279,10 @@ def generate_latex_table(metric_name, data, maximize=True, scientific=False):
 
         table += f"{type_} & " + " & ".join(row_entries) + " \\\\\n"
 
-    table += "\\bottomrule\n\\end{tabular}\n\end{adjustbox}\n"
+    table += "\\bottomrule\n\\end{tabular}\n\\end{adjustbox}\n"
     table += f"\\caption{{{metric_name}}}\n\\end{{table*}}\n"
     return table
+
 
 # Generate and print LaTeX tables
 for metric_name, data in latex_tables.items():
@@ -290,6 +296,8 @@ for metric_name, data in latex_tables.items():
         maximize = False
         scientific = False
 
-    latex_code = generate_latex_table(metric_name, data, maximize=maximize, scientific=scientific)
+    latex_code = generate_latex_table(
+        metric_name, data, maximize=maximize, scientific=scientific
+    )
     print(latex_code)
     print("\n\n")
