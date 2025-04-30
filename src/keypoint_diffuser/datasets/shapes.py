@@ -139,7 +139,7 @@ class Shapes(torch.utils.data.Dataset):
 
         if self.opt.keypointnet_common_keypoints:
             # get most common keypoint ids
-            ids = [list(id) for _, id in keypoints.values()]
+            ids = [list(id_) for _, id_ in keypoints.values()]
             max_keypoints = len(set(itertools.chain(*ids)))
             # start with the highest number of keypoints
             success = False
@@ -156,9 +156,9 @@ class Shapes(torch.utils.data.Dataset):
                 )
                 # prune keypoints
                 pruned_keypoints = {}
-                for name, (sample_keypoints, id) in keypoints.items():
-                    if set(most_common_ids).issubset(id):
-                        indices = [id.index(x) for x in most_common_ids]
+                for name, (sample_keypoints, id_) in keypoints.items():
+                    if set(most_common_ids).issubset(id_):
+                        indices = [id_.index(x) for x in most_common_ids]
                         new_keypoints = sample_keypoints[indices]
                         pruned_keypoints[name] = new_keypoints
                 if (
@@ -417,7 +417,8 @@ class Shapes(torch.utils.data.Dataset):
                     batched[key] = torch.utils.data.dataloader.default_collate(
                         [e[key] for e in batch]
                     )
-                except Exception:
+                except Exception as e:
+                    print(e)
                     continue
         return batched
 

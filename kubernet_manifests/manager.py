@@ -132,9 +132,8 @@ def main():
         job = claim_job()
         if job:
             cmd = job["command"]
-            if job["type"] == "test" and "$WANDB_NAME" in cmd:
-                if job.get("wandb_name"):
-                    cmd = cmd.replace("$WANDB_NAME", job["wandb_name"])
+            if job["type"] == "test" and "$WANDB_NAME" in cmd and job.get("wandb_name"):
+                cmd = cmd.replace("$WANDB_NAME", job["wandb_name"])
             success, output = run_command(cmd)
             complete_job(job, success, output)
         else:

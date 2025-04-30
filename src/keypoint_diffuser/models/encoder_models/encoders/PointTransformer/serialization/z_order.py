@@ -25,13 +25,17 @@ class KeyLUT:
         }
         self._decode = {device: self.key2xyz(r512, 9)}
 
-    def encode_lut(self, device=torch.device("cpu")):
+    def encode_lut(self, device=None):
+        if device is None:
+            device = torch.device("cpu")
         if device not in self._encode:
             cpu = torch.device("cpu")
             self._encode[device] = tuple(e.to(device) for e in self._encode[cpu])
         return self._encode[device]
 
-    def decode_lut(self, device=torch.device("cpu")):
+    def decode_lut(self, device=None):
+        if device is None:
+            device = torch.device("cpu")
         if device not in self._decode:
             cpu = torch.device("cpu")
             self._decode[device] = tuple(e.to(device) for e in self._decode[cpu])

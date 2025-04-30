@@ -178,7 +178,7 @@ def reparameterize(mu, logvar):
     return mu + eps * std
 
 
-def test(opt, save_subdir="test"):
+def test(opt):
     t = transforms.Compose(
         [
             Deform(),  # Forks into two versions: original and deformed
@@ -215,7 +215,7 @@ def test(opt, save_subdir="test"):
         drop_last=False,
         collate_fn=collate_fn,
         num_workers=0,
-        worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
+        worker_init_fn=lambda id_: np.random.seed(np.random.get_state()[1][0] + id_),
     )
 
     ckpt = opt.ckpt
@@ -427,7 +427,7 @@ def train(opt, rank, world_size):
         drop_last=True,
         collate_fn=collate_fn,
         num_workers=opt.n_workers,
-        worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
+        worker_init_fn=lambda id_: np.random.seed(np.random.get_state()[1][0] + id_),
     )
 
     opt_test = copy.deepcopy(opt)
@@ -441,7 +441,7 @@ def train(opt, rank, world_size):
         drop_last=True,
         collate_fn=collate_fn,
         num_workers=opt.n_workers,
-        worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
+        worker_init_fn=lambda id_: np.random.seed(np.random.get_state()[1][0] + id_),
     )
 
     net = AutoEncoder(opt).cuda()
@@ -665,7 +665,7 @@ if __name__ == "__main__":
             }
         )
 
-        test(opt, save_subdir=opt.subdir)
+        test(opt)
     elif opt.phase == "train":
         print(f"Rank: {rank}, World size: {world_size}")
 

@@ -186,7 +186,9 @@ def save_output(save_dir_root, data, outputs, save_mesh=True, save_auxilary=True
             )
 
 
-def split_batch(data, b, singleton_keys=[]):
+def split_batch(data, b, singleton_keys=None):
+    if singleton_keys is None:
+        singleton_keys = []
     return {k: v[b] if k not in singleton_keys else v[0] for k, v in data.items()}
 
 
@@ -302,7 +304,7 @@ def test(opt, save_subdir="test"):
         drop_last=False,
         collate_fn=dataset.collate,
         num_workers=0,
-        worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
+        worker_init_fn=lambda id_: np.random.seed(np.random.get_state()[1][0] + id_),
     )
 
     # network
@@ -419,7 +421,7 @@ def train(opt):
         drop_last=True,
         collate_fn=dataset.collate,
         num_workers=opt.n_workers,
-        worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
+        worker_init_fn=lambda id_: np.random.seed(np.random.get_state()[1][0] + id_),
     )
 
     # network

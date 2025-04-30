@@ -20,17 +20,17 @@ from pytorch3d.loss import chamfer_distance
 class EDMLossCurriculum:
     def __init__(
         self,
-        P_mean_init=-2.0,
-        P_std_init=0.1,
-        P_mean_final=-1.2,
-        P_std_final=1.2,
+        p_mean_init=-2.0,
+        p_std_init=0.1,
+        p_mean_final=-1.2,
+        p_std_final=1.2,
         sigma_data=0.3,
         max_steps=100_000,
     ):
-        self.P_mean_init = P_mean_init
-        self.P_std_init = P_std_init
-        self.P_mean_final = P_mean_final
-        self.P_std_final = P_std_final
+        self.p_mean_init = p_mean_init
+        self.p_std_init = p_std_init
+        self.p_mean_final = p_mean_final
+        self.p_std_final = p_std_final
         self.sigma_data = sigma_data
         self.max_steps = max_steps
 
@@ -41,8 +41,8 @@ class EDMLossCurriculum:
         pct = min(step / self.max_steps, 1.0)
 
         # Interpolate P_mean and P_std
-        P_mean = self.interpolate(self.P_mean_init, self.P_mean_final, pct)
-        P_std = self.interpolate(self.P_std_init, self.P_std_final, pct)
+        P_mean = self.interpolate(self.p_mean_init, self.p_mean_final, pct)
+        P_std = self.interpolate(self.p_std_init, self.p_std_final, pct)
         rnd_normal = torch.randn([data.shape[0], 1, 1], device=data.device)
         P = rnd_normal * P_std + P_mean
         sigma = P.exp()

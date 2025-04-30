@@ -44,10 +44,9 @@ def setup(rank, world_size):
         dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
 
-def test(opt, save_subdir="test"):
+def test(opt):
     log_dir = os.path.join(opt.log_dir, opt.name)
     checkpoints_dir = os.path.join(log_dir, CHECKPOINTS_DIR)
-    # /app/data/keypoints/logs/autumn-waterfall-200/checkpoints/net_final.pth
     opt.phase = "test"
     dataset = get_dataset(opt.dataset)(opt)
 
@@ -58,7 +57,7 @@ def test(opt, save_subdir="test"):
         drop_last=False,
         collate_fn=collate_fn,
         num_workers=0,
-        worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
+        worker_init_fn=lambda id_: np.random.seed(np.random.get_state()[1][0] + id_),
     )
 
     ckpt = opt.ckpt
@@ -134,7 +133,7 @@ def train(opt, rank, world_size):
         drop_last=True,
         collate_fn=collate_fn,
         num_workers=opt.n_workers,
-        worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
+        worker_init_fn=lambda id_: np.random.seed(np.random.get_state()[1][0] + id_),
     )
 
     opt_test = copy.deepcopy(opt)
@@ -148,7 +147,7 @@ def train(opt, rank, world_size):
         drop_last=True,
         collate_fn=collate_fn,
         num_workers=opt.n_workers,
-        worker_init_fn=lambda id: np.random.seed(np.random.get_state()[1][0] + id),
+        worker_init_fn=lambda id_: np.random.seed(np.random.get_state()[1][0] + id_),
     )
 
     net = AutoEncoderOrig(opt).cuda()
@@ -275,7 +274,7 @@ if __name__ == "__main__":
             }
         )
 
-        test(opt, save_subdir=opt.subdir)
+        test(opt)
     elif opt.phase == "train":
         print(f"Rank: {rank}, World size: {world_size}")
 

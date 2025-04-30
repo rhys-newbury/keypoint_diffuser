@@ -29,7 +29,7 @@ class AEConfig:
     extra_latent: int = 5
     num_steps: int = 200
     beta_1: float = 1e-4
-    beta_T: float = 0.05
+    beta_t: float = 0.05
     sched_mode: str = "linear"
     flexibility: float = 0.0
     residual: bool = False

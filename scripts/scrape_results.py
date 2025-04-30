@@ -111,19 +111,19 @@ for summary_metric, run_display_name in zip(
 
 print(f"Total runs collected: {len(summary_metrics)}")
 
-df = pd.DataFrame(data).dropna()
+data_frame = pd.DataFrame(data).dropna()
 
-df = df.replace(-1, pd.NA)
-print(df.columns.tolist(), data)
-df["MMD-CD"] = pd.to_numeric(df["MMD-CD"], errors="coerce")
-df["average_correlation_per_keypoint"] = pd.to_numeric(
-    df["average_correlation_per_keypoint"], errors="coerce"
+data_frame = data_frame.replace(-1, pd.NA)
+print(data_frame.columns.tolist(), data)
+data_frame["MMD-CD"] = pd.to_numeric(data_frame["MMD-CD"], errors="coerce")
+data_frame["average_correlation_per_keypoint"] = pd.to_numeric(
+    data_frame["average_correlation_per_keypoint"], errors="coerce"
 )
 
 
-df.to_csv("output.csv", index=False)
+data_frame.to_csv("output.csv", index=False)
 
-df_filtered = df.dropna(
+df_filtered = data_frame.dropna(
     subset=["average_correlation_per_keypoint", "MMD-CD"], how="all"
 )
 

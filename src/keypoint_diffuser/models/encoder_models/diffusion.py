@@ -16,16 +16,16 @@ def init_linear(layer, stddev):
 
 
 class VarianceSchedule(Module):
-    def __init__(self, num_steps, beta_1, beta_T, mode="linear"):
+    def __init__(self, num_steps, beta_1, beta_t, mode="linear"):
         super().__init__()
         assert mode in ("linear",)
         self.num_steps = num_steps
         self.beta_1 = beta_1
-        self.beta_T = beta_T
+        self.beta_t = beta_t
         self.mode = mode
 
         if mode == "linear":
-            betas = torch.linspace(beta_1, beta_T, steps=num_steps)
+            betas = torch.linspace(beta_1, beta_t, steps=num_steps)
 
         betas = torch.cat([torch.zeros([1]), betas], dim=0)  # Padding
 

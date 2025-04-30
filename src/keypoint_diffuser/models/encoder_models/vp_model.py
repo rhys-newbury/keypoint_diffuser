@@ -25,10 +25,10 @@ class EDMPrecond(torch.nn.Module):
         sigma_min=0.002,
         sigma_max=80,
         rho=7,
-        S_churn=0,
-        S_min=0,
-        S_max=float("inf"),
-        S_noise=1,
+        s_churn=0,
+        s_min=0,
+        s_max=float("inf"),
+        s_noise=1,
     ):
         batch_size = code.shape[0]
         latents = torch.randn([batch_size, 5000, 3], device=code.device)
@@ -60,12 +60,12 @@ class EDMPrecond(torch.nn.Module):
 
             # Increase noise temporarily.
             gamma = (
-                min(S_churn / num_steps, np.sqrt(2) - 1)
-                if S_min <= t_cur <= S_max
+                min(s_churn / num_steps, np.sqrt(2) - 1)
+                if s_min <= t_cur <= s_max
                 else 0
             )
             t_hat = self.round_sigma(t_cur + gamma * t_cur)
-            x_hat = x_cur + (t_hat**2 - t_cur**2).sqrt() * S_noise * randn_like(
+            x_hat = x_cur + (t_hat**2 - t_cur**2).sqrt() * s_noise * randn_like(
                 x_cur
             )
 

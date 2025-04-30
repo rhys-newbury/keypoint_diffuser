@@ -221,32 +221,31 @@ class PointSequential(PointModule):
                 raise KeyError("name exists")
         self.add_module(name, module)
 
-    def forward(self, input):
+    def forward(self, inp):
         for _k, module in self._modules.items():
             # Point module
             if isinstance(module, PointModule):
-                input = module(input)
+                inp = module(inp)
             # Spconv module
             elif spconv.modules.is_spconv_module(module):
-                if isinstance(input, Point):
-                    input.sparse_conv_feat = module(input.sparse_conv_feat)
-                    input.feat = input.sparse_conv_feat.features
+                if isinstance(inp, Point):
+                    inp.sparse_conv_feat = module(inp.sparse_conv_feat)
+                    inp.feat = inp.sparse_conv_feat.features
                 else:
-                    input = module(input)
+                    inp = module(inp)
             # PyTorch module
+            elif isinstance(inp, Point):
+                inp.feat = module(inp.feat)
+                if "sparse_conv_feat" in inp:
+                    inp.sparse_conv_feat = inp.sparse_conv_feat.replace_feature(
+                        inp.feat
+                    )
+            elif isinstance(inp, spconv.SparseConvTensor):
+                if inp.indices.shape[0] != 0:
+                    inp = inp.replace_feature(module(inp.features))
             else:
-                if isinstance(input, Point):
-                    input.feat = module(input.feat)
-                    if "sparse_conv_feat" in input:
-                        input.sparse_conv_feat = input.sparse_conv_feat.replace_feature(
-                            input.feat
-                        )
-                elif isinstance(input, spconv.SparseConvTensor):
-                    if input.indices.shape[0] != 0:
-                        input = input.replace_feature(module(input.features))
-                else:
-                    input = module(input)
-        return input
+                inp = module(inp)
+        return inp
 
 
 class PDNorm(PointModule):

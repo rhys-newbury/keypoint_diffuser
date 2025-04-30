@@ -47,7 +47,7 @@ class AutoEncoder(Module):
                 var_sched=VarianceSchedule(
                     num_steps=args.num_steps,
                     beta_1=args.beta_1,
-                    beta_T=args.beta_T,
+                    beta_t=args.beta_t,
                     mode=args.sched_mode,
                 ),
             )
