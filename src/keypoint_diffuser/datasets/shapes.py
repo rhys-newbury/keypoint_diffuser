@@ -3,7 +3,6 @@ import itertools
 import json
 import os
 import random
-import time
 import traceback
 import warnings
 from collections import Counter
@@ -11,11 +10,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pytorch3d
 import torch
 
-from ..utils.io import find_files, read_keypoints, read_mesh, read_pcd
-from ..utils.utils import normalize_to_box, resample_mesh
+from ..utils.io import find_files, read_keypoints, read_pcd
+from ..utils.utils import normalize_to_box
 
 
 class Shapes(torch.utils.data.Dataset):
@@ -287,41 +285,6 @@ class Shapes(torch.utils.data.Dataset):
         keypoints = torch.from_numpy(keypoints).float()
         return keypoints
 
-    def normalize_pytorch_mesh_with_center_scale(
-        self,
-        mesh: pytorch3d.structures.Meshes,
-        centroid: torch.Tensor,
-        scale: torch.Tensor,
-    ):
-        """
-        Normalize a PyTorch3D Mesh object using a given centroid and scale.
-        The mesh will be translated to the origin based on the centroid,
-        and scaled based on the scale.
-
-        Args:
-        - mesh (Meshes): The input PyTorch3D Mesh object.
-        - centroid (torch.Tensor): The center of the mesh (shape: [1, 3]).
-        - scale (torch.Tensor): The scaling factor to normalize the mesh (shape: [1, 3]).
-
-        Returns:
-        - Meshes: The normalized Mesh object.
-        """
-        # Extract vertices from the mesh
-        vertices = mesh.verts_packed()
-
-        # Translate the vertices (move to origin based on the centroid)
-        vertices = vertices - centroid
-
-        # Scale the vertices (fit into a unit bounding box using the provided scale)
-        vertices = vertices / scale
-
-        # Create a new Mesh object with the normalized vertices
-        normalized_mesh = pytorch3d.structures.Meshes(
-            verts=[vertices], faces=mesh.faces_packed()
-        )
-
-        return normalized_mesh
-
     def random_downsample(self, point_cloud, target_num_points):
         """
         Randomly downsamples a point cloud to the target number of points.
@@ -341,28 +304,14 @@ class Shapes(torch.utils.data.Dataset):
         return point_cloud[indices]
 
     def get_item_by_name(self, name, is_test, sample_mesh=False, load_mesh=False):
-        time.time()
-
-        if False:
-            time.time()
-            mesh_path = self._get_mesh_path(name)
-            V_mesh, F_mesh, mesh_obj = read_mesh(mesh_path, return_mesh=True)
-
         pc_path = Path(self._get_mesh_path(name)).parent / "point_resampled_labeled.npy"
 
-        if False:
-            time.time()
-            points = resample_mesh(mesh_obj, self.opt.num_point)
-        else:
-            time.time()
-            points = np.load(self._get_pointcloud_path(name))
-            points = torch.from_numpy(points).float()
+        points = np.load(self._get_pointcloud_path(name))
+        points = torch.from_numpy(points).float()
 
-        time.time()
         points[:, :3], center, scale = self.normalize(points[:, :3])
         points = points.clone()
 
-        time.time()
         normals = points[:, 3:6].clone()
         label = points[:, -1].clone()
         shape = points[:, :3].clone()
@@ -375,26 +324,12 @@ class Shapes(torch.utils.data.Dataset):
             "file": name,
         }
         if pc_path.is_file() and is_test:
-            # removed:
-            # 022433,02691156,03595860,692797a818b4630f1aa3e317da5a1267,test
-
-            time.time()
             pc = np.load(pc_path)
             pc = torch.from_numpy(self.random_downsample(pc, 5000))
             pc[:, :3] = (pc[:, :3] - center) / scale
             result.update({"sampled_points": pc})
-        else:
-            pass
-
-        if False:
-            time.time()
-            V_mesh = V_mesh[:, :3]
-            F_mesh = F_mesh[:, :3]
-            V_mesh = (V_mesh - center) / scale
-            result.update({"mesh": V_mesh, "face": F_mesh, "mesh_obj": mesh_obj})
 
         if self.opt.keypoints_gt_source == "keypointnet":
-            time.time()
             (
                 keypoints_gt,
                 keypoints_gt_center,
@@ -403,18 +338,6 @@ class Shapes(torch.utils.data.Dataset):
             result["keypoints_gt"] = keypoints_gt
             result["keypoints_gt_center"] = keypoints_gt_center
             result["keypoints_gt_scale"] = keypoints_gt_scale
-
-        if False:  # if self.opt.data_type == 'shapenetseg':  # Disabled condition
-            time.time()
-            assert self.opt.segmentations_dir is not None
-            seg_points = np.loadtxt(self._get_seg_points_path(name)).astype(np.float32)
-            seg_labels = np.loadtxt(self._get_seg_labels_path(name)).astype(np.int32)
-            seg_points = torch.from_numpy(seg_points)
-            seg_labels = torch.from_numpy(seg_labels)
-            seg_points = (seg_points - center) / scale
-            result.update({"seg_labels": seg_labels, "seg_points": seg_points})
-
-        time.time()
 
         return result
 

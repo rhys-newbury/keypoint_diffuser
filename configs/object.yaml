@@ -12,5 +12,3 @@ batch_size: 18
 # points_dir: /app/data/shapenet/shape_data
 # split_file: data/shapenet_split/all.csv
 # log_dir: /app/data/keypoints/logs
-
-segmentations_dir: /home/taco/repos/keypoint_deformer/data/seg

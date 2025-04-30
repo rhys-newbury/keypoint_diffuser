@@ -1,8 +1,6 @@
 __pycache__
 logs
 wandb/*
-depth_images/*
-rgb_images/*
 __logs
 data/
 **.npy
