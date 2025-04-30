@@ -17,9 +17,9 @@ from keypoint_diffuser.utils import io
 from keypoint_diffuser.utils.cages import deform_with_MVC
 from keypoint_diffuser.utils.eval_metrics import EMD_CD
 from keypoint_diffuser.utils.nn import load_network, save_network, weights_init
+from keypoint_diffuser.utils.pc_utils import normalize_point_clouds
 from keypoint_diffuser.utils.utils import Timer
 from tensorboardX import SummaryWriter
-from tqdm import tqdm
 
 import wandb
 
@@ -276,26 +276,6 @@ def visualize_point_cloud(
         )
 
     return np.asarray(pcd.points)
-
-
-def normalize_point_clouds(pcs, mode):
-    if mode is None:
-        print("Will not normalize point clouds.")
-        return pcs
-    print(f"Normalization mode: {mode}")
-    for i in tqdm(range(pcs.size(0)), desc="Normalize"):
-        pc = pcs[i]
-        if mode == "shape_unit":
-            shift = pc.mean(dim=0).reshape(1, 3)
-            scale = pc.flatten().std().reshape(1, 1)
-        elif mode == "shape_bbox":
-            pc_max, _ = pc.max(dim=0, keepdim=True)  # (1, 3)
-            pc_min, _ = pc.min(dim=0, keepdim=True)  # (1, 3)
-            shift = ((pc_min + pc_max) / 2).view(1, 3)
-            scale = (pc_max - pc_min).max().reshape(1, 1) / 2
-        pc = (pc - shift) / scale
-        pcs[i] = pc
-    return pcs
 
 
 def get_data(dataset, data):

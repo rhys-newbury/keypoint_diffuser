@@ -11,6 +11,3 @@ n_workers: 8
 batch_size: 8
 
 load_mesh: True
-
-
-segmentations_dir: /home/taco/repos/keypoint_deformer/data/seg

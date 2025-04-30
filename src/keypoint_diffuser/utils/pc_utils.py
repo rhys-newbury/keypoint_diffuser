@@ -1,16 +1,28 @@
-"""
-Utils for Datasets
-
-Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com)
-Please cite our work if the code is helpful to you.
-"""
-
-import random
 from collections.abc import Mapping, Sequence
 
-import numpy as np
 import torch
 from torch.utils.data.dataloader import default_collate
+from tqdm import tqdm
+
+
+def normalize_point_clouds(pcs, mode):
+    if mode is None:
+        print("Will not normalize point clouds.")
+        return pcs
+    print(f"Normalization mode: {mode}")
+    for i in tqdm(range(pcs.size(0)), desc="Normalize"):
+        pc = pcs[i]
+        if mode == "shape_unit":
+            shift = pc.mean(dim=0).reshape(1, 3)
+            scale = pc.flatten().std().reshape(1, 1)
+        elif mode == "shape_bbox":
+            pc_max, _ = pc.max(dim=0, keepdim=True)  # (1, 3)
+            pc_min, _ = pc.min(dim=0, keepdim=True)  # (1, 3)
+            shift = ((pc_min + pc_max) / 2).view(1, 3)
+            scale = (pc_max - pc_min).max().reshape(1, 1) / 2
+        pc = (pc - shift) / scale
+        pcs[i] = pc
+    return pcs
 
 
 def collate_fn(batch):
@@ -40,21 +52,3 @@ def collate_fn(batch):
         return batch
     else:
         return default_collate(batch)
-
-
-def point_collate_fn(batch, mix_prob=0):
-    assert isinstance(
-        batch[0], Mapping
-    )  # currently, only support input_dict, rather than input_list
-    batch = collate_fn(batch)
-    if "offset" in batch:
-        # Mix3d (https://arxiv.org/pdf/2110.02210.pdf)
-        if random.random() < mix_prob:
-            batch["offset"] = torch.cat(
-                [batch["offset"][1:-1:2], batch["offset"][-1].unsqueeze(0)], dim=0
-            )
-    return batch
-
-
-def gaussian_kernel(dist2: np.array, a: float = 1, c: float = 5):
-    return a * np.exp(-dist2 / (2 * c**2))

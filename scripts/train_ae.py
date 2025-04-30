@@ -16,6 +16,7 @@ import torch.utils.data
 import torch.utils.data.distributed
 from einops import repeat
 from keypoint_diffuser.datasets import get_dataset
+from keypoint_diffuser.models.encoder_models import get_linear_scheduler
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.options.ae_options import AEOptions
 from keypoint_diffuser.utils.eval_metrics import EMD_CD
@@ -26,7 +27,6 @@ from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
 from torch.nn.parallel import DistributedDataParallel
 from torch.nn.utils import clip_grad_norm_
-from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
 import wandb
@@ -35,9 +35,15 @@ import wandb
 torch.autograd.set_detect_anomaly(True)
 RUN = None
 
+from keypoint_diffuser.utils.pc_utils import collate_fn, normalize_point_clouds
+from keypoint_diffuser.utils.transforms import (
+    ApplyToBoth,
+    Collect,
+    Deform,
+    GridSample,
+    ToTensor,
+)
 from torchvision import transforms
-from transforms import ApplyToBoth, Collect, Deform, GridSample, ToTensor
-from utils import collate_fn
 
 
 CHECKPOINTS_DIR = "checkpoints"
@@ -52,26 +58,6 @@ def setup(rank, world_size):
         torch.cuda.set_device(local_rank)
 
         dist.init_process_group("nccl", rank=rank, world_size=world_size)
-
-
-def normalize_point_clouds(pcs, mode):
-    if mode is None:
-        print("Will not normalize point clouds.")
-        return pcs
-    print(f"Normalization mode: {mode}")
-    for i in tqdm(range(pcs.size(0)), desc="Normalize"):
-        pc = pcs[i]
-        if mode == "shape_unit":
-            shift = pc.mean(dim=0).reshape(1, 3)
-            scale = pc.flatten().std().reshape(1, 1)
-        elif mode == "shape_bbox":
-            pc_max, _ = pc.max(dim=0, keepdim=True)  # (1, 3)
-            pc_min, _ = pc.min(dim=0, keepdim=True)  # (1, 3)
-            shift = ((pc_min + pc_max) / 2).view(1, 3)
-            scale = (pc_max - pc_min).max().reshape(1, 1) / 2
-        pc = (pc - shift) / scale
-        pcs[i] = pc
-    return pcs
 
 
 def get_data(dataset, data):
@@ -343,21 +329,6 @@ def test(opt, save_subdir="test"):
         wandb.log(metrics)
         for key, value in metrics.items():
             print(f"{key}: {value.item():.10f}")
-
-
-def get_linear_scheduler(optimizer, start_epoch, end_epoch, start_lr, end_lr):
-    def lr_func(epoch):
-        if epoch <= start_epoch:
-            return 1.0
-        elif epoch <= end_epoch:
-            total = end_epoch - start_epoch
-            delta = epoch - start_epoch
-            frac = delta / total
-            return (1 - frac) * 1.0 + frac * (end_lr / start_lr)
-        else:
-            return end_lr / start_lr
-
-    return LambdaLR(optimizer, lr_lambda=lr_func)
 
 
 def sample_farthest_points(points, num_samples, return_index=False):

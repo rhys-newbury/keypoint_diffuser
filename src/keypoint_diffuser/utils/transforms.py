@@ -3,7 +3,8 @@ from collections.abc import Mapping, Sequence
 
 import numpy as np
 import torch
-from deform import apply_general_deformation
+
+from .deform import apply_general_deformation
 
 
 class GridSample:
