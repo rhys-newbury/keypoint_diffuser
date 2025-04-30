@@ -114,7 +114,7 @@ print(f"Total runs collected: {len(summary_metrics)}")
 df = pd.DataFrame(data).dropna()
 
 df = df.replace(-1, pd.NA)
-print(df.columns.tolist(), data)
+print(df.columns.tolist())
 df["MMD-CD"] = pd.to_numeric(df["MMD-CD"], errors="coerce")
 df["average_correlation_per_keypoint"] = pd.to_numeric(
     df["average_correlation_per_keypoint"], errors="coerce"
@@ -188,9 +188,10 @@ metrics = {
 
 # Extract rows
 # Only keep rows where n_keypoints == 8
-list_view = plot_df[plot_df["n_keypoints"] == 8][
+list_view = plot_df[plot_df["category"] == "03797390"][
     ["category", "type", "n_keypoints", *list(metrics.keys())]
 ]
+
 
 latex_tables = {
     "Average Correlation per Keypoint": [],
@@ -202,19 +203,20 @@ latex_tables = {
 for _idx, row in list_view.iterrows():
     category = row["category"]
     type_ = row["type"]
+    n_keypoints = row["n_keypoints"]
 
     latex_tables["Average Correlation per Keypoint"].append(
-        (type_, category, row["average_correlation_per_keypoint"])
+        (type_, category, n_keypoints, row["average_correlation_per_keypoint"])
     )
-    latex_tables["MMD-CD"].append((type_, category, row["MMD-CD"]))
-    latex_tables["MMD-EMD"].append((type_, category, row["MMD-EMD"]))
+    latex_tables["MMD-CD"].append((type_, category, n_keypoints, row["MMD-CD"]))
+    latex_tables["MMD-EMD"].append((type_, category, n_keypoints, row["MMD-EMD"]))
 
 
 def generate_latex_table(metric_name, data, maximize=True, scientific=False):
-    categories = sorted({x[1] for x in data})
+    categories = sorted({x[2] for x in data})  # x[2] = n_keypoints
     types = sorted({x[0] for x in data})
 
-    lookup = {(t, c): v for (t, c, v) in data}
+    lookup = {(t, c): v for (t, _, c, v) in data}
 
     # Precompute best per category
     best_values = {}
@@ -245,7 +247,7 @@ def generate_latex_table(metric_name, data, maximize=True, scientific=False):
     else:
         best_avg_value = min(avg_values, key=lambda x: x[1])[1]
 
-    mapped_categories = [category_mapping.get(c, c) for c in categories]
+    mapped_categories = [str(c) for c in categories]
 
     table = (
         "\\begin{table*}[h]\n\\centering\n\\begin{adjustbox}{max width=\\textwidth}\n\\begin{tabular}{l|"

@@ -1,14 +1,14 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: manager
+  name: manager-list2
 spec:
   maxRetry: 1
   minAvailable: 1
   schedulerName: volcano
   queue: default
   tasks:
-    - replicas: 6
+    - replicas: 4
       name: train
       template:
         spec:
@@ -27,7 +27,6 @@ spec:
                         values:
                           - NVIDIA-RTX-A6000
                           - NVIDIA-GeForce-RTX-3090
-                          - NVIDIA-GeForce-RTX-2080-Ti
           containers:
             - name: runner
               imagePullPolicy: Always
@@ -36,7 +35,8 @@ spec:
                 [
                   "python",
                   "-u",
-                  "manager.py"
+                  "manager.py",
+                  "--jobs_path=/mnt/slow/job_list.yaml"
                 ]
 
               workingDir: /app

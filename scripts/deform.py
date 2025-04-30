@@ -8,6 +8,7 @@ def apply_general_deformation(
     max_twist_factor: float = 0.9,
     max_taper_factor: float = 0.6,
     max_noise_std: float = 0.02,
+    *,
     apply_stretch: bool = True,
     apply_bend: bool = True,
     apply_twist: bool = True,

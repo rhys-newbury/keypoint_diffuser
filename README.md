@@ -1,57 +1,42 @@
-# [KeypointDeformer: Unsupervised 3D Keypoint Discovery for Shape Control](https://tomasjakab.github.io/KeypointDeformer/)
+# Unsupervised 3D Keypoint Learning via Latent Diffusion Models for Shape Reconstruction
 
-[Tomas Jakab](http://www.robots.ox.ac.uk/~tomj), Richard Tucker, Ameesh Makadia, Jiajun Wu, Noah Snavely, Angjoo Kanazawa.
-CVPR, 2021 (Oral presentation).
+Rhys Newbury, Juyan Zhang, Tin Tran, Hanna Kurniawati, Dana Kulić
 
-We present KeypointDeformer, a novel unsupervised method for shape control through automatically discovered 3D keypoints. Our approach produces intuitive and semantically consistent control of shape deformations. Moreover, our discovered 3D keypoints are consistent across object category instances despite large shape variations. Since our method is unsupervised, it can be readily deployed to new object categories without requiring expensive annotations for 3D keypoints and deformations.
+We present an unsupervised framework for learning semantically meaningful 3D keypoints from point cloud data using a latent diffusion model. Our method encodes input shapes into a structured latent space consisting of a set of 3D keypoints. These keypoints serve as a compact and interpretable representation that conditions an Elucidated Diffusion Model (EDM) to reconstruct the full shape. To ensure the extracted keypoints are both spatially meaningful and consistent across object instances, we introduce several geometric supervision strategies: a Chamfer loss to anchor keypoints near the input shape, and a deformation consistency loss to encourage robustness under geometric transformations.
 
 
-## Install
-Clone the repo
-```
-git clone https://github.com/tomasjakab/keypoint_deformer
-cd keypoint_deformer
-```
+A lot of this code is built upon the following repos:
 
-Install using [conda](https://docs.conda.io/en/latest/):
-```
-conda env create -f environment.yml
-conda activate keypointdeformer
-```
-Set-up python path:
-```
-export PYTHONPATH=$PYTHONPATH:$(pwd)
-```
+- [KeyPointDeformer](https://github.com/tomasjakab/keypoint_deformer)
+- [DPM](https://github.com/luost26/diffusion-point-cloud)
+- [Point Transformer v3](https://github.com/Pointcept/PointTransformerV3)
+- [EMDLoss](https://github.com/ZirongLiu/EMDLoss-for-large-scale-point-clouds)
+
 
 ## Training
-Download [ShapeNet](https://shapenet.org/download/shapenetcore) to `data/shapenet`. The path to ShapeNet can be also customized in config files `configs/*` with the option `mesh_dir`.
+Download ShapeNet from HuggingFace
 
 To train a model on the airplane category with 8 unsupervised keypoints run:
 ```
-python scripts/main.py -c configs/airplane-8kpt.yaml
-```
-
-To train a model on the chair category with 12 unsupervised keypoints run:
-```
-python scripts/main.py -c configs/chair-12kpt.yaml
+python scripts/train_ae.py -c configs/airplane-8kpt.yaml
 ```
 
 ## Testing
 To test the trained model run:
 ```
-python scripts/main.py -c configs/airplane-8kpt.yaml -t configs/test.yaml
+python scripts/train_ae.py -c configs/airplane-8kpt.yaml -t configs/test.yaml
 ```
-This will create result files in `logs/airplane-8kpt/test/<SAMPLE NAME>`. The file `source_mesh.obj` contains the input mesh and the file `source_keypoints.txt` predicted unsupervised keypoints.
 
-To visualize the results run:
-```
-python browse3d/browse3d.py --log_dir logs/airplane-8kpt/test --port 5050
-```
-and open `localhost:5050` in your web browser.
+## Contributing
 
-## Demo
-Try the [interactive demo](https://tomasjakab.github.io/KeypointDeformer/demo.html) without any installation.
+### Git hooks
 
+The CI will run several checks on the new code pushed to the repository. These checks can also be run locally without waiting for the CI by following the steps below:
 
-## Acknowledgments
-Parts of the code are based on [Neural Cages](https://github.com/yifita/deep_cage).
+1. [install `pre-commit`](https://pre-commit.com/#install),
+2. Install the Git hooks by running `pre-commit install`.
+
+Once those two steps are done, the Git hooks will be run automatically at every new commit.
+The Git hooks can also be run manually with `pre-commit run --all-files`, and if needed they can be skipped (not recommended) with `git commit --no-verify`.
+
+**Note:** you may have to run `pre-commit run --all-files` manually a couple of times to make it pass when you commit, as each formatting tool will first format the code and fail the first time but should pass the second time.

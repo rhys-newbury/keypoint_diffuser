@@ -216,7 +216,12 @@ class Deform:
         original = copy.deepcopy(data_dict)
 
         new_pc, transformation = apply_general_deformation(
-            torch.Tensor(data_dict["coord"][None, :, :]).cuda()
+            torch.Tensor(data_dict["coord"][None, :, :]).cuda(),
+            apply_stretch=True,
+            apply_bend=True,
+            apply_twist=True,
+            apply_taper=True,
+            apply_noise=False,
         )
 
         data_dict["shape"] = new_pc.cpu().numpy().squeeze()

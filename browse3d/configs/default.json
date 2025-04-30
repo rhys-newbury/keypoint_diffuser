@@ -1,9 +1,0 @@
-[
-    {
-        "title": "source",
-        "visuals": {
-            "obj": "source_mesh.obj",
-            "kpts": "source_keypoints.txt"
-        }
-    }
-]
