@@ -10,7 +10,7 @@ data/
 *.png
 *.json
 *.pth
-keypointdeformer/utils/emd_loss/build
+src/keypoint_diffuser/utils/emd_loss/build
 *.egg
 *.egg-info
 *.log

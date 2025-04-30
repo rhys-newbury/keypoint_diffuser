@@ -1,12 +1,5 @@
-import os
-import sys
-from pathlib import Path
-
-
-kp_path = Path(__file__).resolve().absolute().parent.parent
-sys.path.append(str(kp_path))
-
 import copy
+import os
 import time
 from datetime import datetime
 from typing import Any
@@ -22,6 +15,12 @@ import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
 from einops import repeat
+from keypoint_diffuser.datasets import get_dataset
+from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
+from keypoint_diffuser.options.ae_options import AEOptions
+from keypoint_diffuser.utils.eval_metrics import EMD_CD
+from keypoint_diffuser.utils.nn import load_network, save_network
+from keypoint_diffuser.utils.utils import Timer
 from tensorboardX import SummaryWriter
 from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
@@ -31,12 +30,6 @@ from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
 import wandb
-from keypointdeformer.datasets import get_dataset
-from keypointdeformer.models.encoder_models.autoencoder import AutoEncoder
-from keypointdeformer.options.ae_options import AEOptions
-from keypointdeformer.utils.eval_metrics import EMD_CD
-from keypointdeformer.utils.nn import load_network, save_network
-from keypointdeformer.utils.utils import Timer
 
 
 torch.autograd.set_detect_anomaly(True)

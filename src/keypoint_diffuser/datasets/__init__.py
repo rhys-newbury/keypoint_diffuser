@@ -1,7 +1,7 @@
 from ..utils import importer
 
 
-MODULE = "keypointdeformer.datasets"
+MODULE = "keypoint_diffuser.datasets"
 
 
 def get_option_setter(dataset_name):

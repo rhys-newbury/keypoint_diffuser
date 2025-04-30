@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from torch.nn import Module
 
-from keypointdeformer.utils.loss import EDMLossCurriculum
+from keypoint_diffuser.utils.loss import EDMLossCurriculum
 
 from .diffusion import DiffusionPoint, PointwiseNet, PointwiseNetOld, VarianceSchedule
 from .encoders.point_transformer import PointTransformerv2

@@ -1,11 +1,5 @@
 import json
 import os
-import sys
-from pathlib import Path
-
-
-kp_path = Path(__file__).resolve().absolute().parent.parent
-sys.path.append(str(kp_path))
 import time
 from datetime import datetime
 
@@ -16,18 +10,18 @@ import pytorch3d.io
 import torch
 import torch.nn.parallel
 import torch.utils.data
+from keypoint_diffuser.datasets import get_dataset
+from keypoint_diffuser.models import get_model
+from keypoint_diffuser.options.base_options import BaseOptions
+from keypoint_diffuser.utils import io
+from keypoint_diffuser.utils.cages import deform_with_MVC
+from keypoint_diffuser.utils.eval_metrics import EMD_CD
+from keypoint_diffuser.utils.nn import load_network, save_network, weights_init
+from keypoint_diffuser.utils.utils import Timer
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
 import wandb
-from keypointdeformer.datasets import get_dataset
-from keypointdeformer.models import get_model
-from keypointdeformer.options.base_options import BaseOptions
-from keypointdeformer.utils import io
-from keypointdeformer.utils.cages import deform_with_MVC
-from keypointdeformer.utils.eval_metrics import EMD_CD
-from keypointdeformer.utils.nn import load_network, save_network, weights_init
-from keypointdeformer.utils.utils import Timer
 
 
 CHECKPOINTS_DIR = "checkpoints"

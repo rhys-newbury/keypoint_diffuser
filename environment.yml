@@ -1,4 +1,4 @@
-name: keypointdeformer
+name: keypoint_diffuser
 channels:
   - pytorch3d
   - iopath

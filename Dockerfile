@@ -17,13 +17,16 @@ RUN conda install pytorch-cluster pytorch-scatter pytorch-sparse -c pyg -y
 
 WORKDIR /app
 
-COPY keypointdeformer/utils/emd_loss /app/keypointdeformer/utils/emd_loss
-RUN cd /app/keypointdeformer/utils/emd_loss && python3 setup.py install
+COPY keypoint_diffuser/utils/emd_loss /app/keypoint_diffuser/utils/emd_loss
+RUN cd /app/keypoint_diffuser/utils/emd_loss && python3 setup.py install
 
-RUN groupadd -g 1000 taco && useradd -u 1000 -g 1000 -m taco
+RUN groupadd -g 1000 user && useradd -u 1000 -g 1000 -m user
 
-COPY --chown=taco:taco . /app
+COPY --chown=user:user . /app
+
 
 WORKDIR app
 
-USER taco
+RUN pip install -e .
+
+USER user

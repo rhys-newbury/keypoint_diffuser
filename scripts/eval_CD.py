@@ -6,15 +6,14 @@ import pytorch3d.io
 import torch
 import torch.nn.parallel
 import torch.utils.data
+from keypoint_diffuser.datasets import get_dataset
+from keypoint_diffuser.models import get_model
+from keypoint_diffuser.options.base_options import BaseOptions
+from keypoint_diffuser.utils import io
+from keypoint_diffuser.utils.cages import deform_with_MVC
+from keypoint_diffuser.utils.nn import load_network
+from keypoint_diffuser.utils.utils import Timer
 from tqdm import tqdm
-
-from keypointdeformer.datasets import get_dataset
-from keypointdeformer.models import get_model
-from keypointdeformer.options.base_options import BaseOptions
-from keypointdeformer.utils import io
-from keypointdeformer.utils.cages import deform_with_MVC
-from keypointdeformer.utils.nn import load_network
-from keypointdeformer.utils.utils import Timer
 
 
 CHECKPOINTS_DIR = "checkpoints"

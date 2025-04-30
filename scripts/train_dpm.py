@@ -1,12 +1,5 @@
-import os
-import sys
-from pathlib import Path
-
-
-kp_path = Path(__file__).resolve().absolute().parent.parent
-sys.path.append(str(kp_path))
-
 import copy
+import os
 import time
 from datetime import datetime
 
@@ -16,6 +9,11 @@ import torch.distributed as dist
 import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
+from keypoint_diffuser.datasets import get_dataset
+from keypoint_diffuser.models.encoder_models.autoencoder_orig import AutoEncoderOrig
+from keypoint_diffuser.options.ae_options import AEOptions
+from keypoint_diffuser.utils.eval_metrics import EMD_CD
+from keypoint_diffuser.utils.nn import load_network, save_network
 from tensorboardX import SummaryWriter
 from torch.nn.parallel import DistributedDataParallel
 from torch.nn.utils import clip_grad_norm_
@@ -23,11 +21,6 @@ from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
 import wandb
-from keypointdeformer.datasets import get_dataset
-from keypointdeformer.models.encoder_models.autoencoder_orig import AutoEncoderOrig
-from keypointdeformer.options.ae_options import AEOptions
-from keypointdeformer.utils.eval_metrics import EMD_CD
-from keypointdeformer.utils.nn import load_network, save_network
 
 
 torch.autograd.set_detect_anomaly(True)

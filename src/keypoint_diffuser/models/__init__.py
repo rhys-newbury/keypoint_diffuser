@@ -1,7 +1,7 @@
 from ..utils import importer
 
 
-MODULE = "keypointdeformer.models"
+MODULE = "keypoint_diffuser.models"
 
 
 def get_option_setter(model_name):
