@@ -35,7 +35,7 @@ spec:
           containers:
             - name: runner
               imagePullPolicy: Always
-              image: mu00120825.eng.monash.edu.au:5021/keypoint_deformer:latest
+              image: mu00120825.eng.monash.edu.au:5021/keypoint_diffuser:latest
               command:
                 # [
                 #   "python",

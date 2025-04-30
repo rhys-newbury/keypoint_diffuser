@@ -10,8 +10,8 @@ import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
 from keypoint_diffuser.datasets import get_dataset
-from keypoint_diffuser.models.encoder_models import get_linear_scheduler
 from keypoint_diffuser.models.encoder_models.autoencoder_orig import AutoEncoderOrig
+from keypoint_diffuser.models.encoder_models.common import get_linear_scheduler
 from keypoint_diffuser.options.ae_options import AEOptions
 from keypoint_diffuser.utils.eval_metrics import EMD_CD
 from keypoint_diffuser.utils.nn import load_network, save_network

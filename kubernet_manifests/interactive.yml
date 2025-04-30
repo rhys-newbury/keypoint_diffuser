@@ -22,7 +22,7 @@ spec:
           containers:
             - name: pytorch-session
               imagePullPolicy: Always
-              image: mu00120825.eng.monash.edu.au:5021/keypoint_deformer:latest
+              image: mu00120825.eng.monash.edu.au:5021/keypoint_diffuser:latest
               # command: ["python", "-u", "resample.py"]
               # args: ["while true; do sleep 30; done;"]
               command: ["/bin/bash", "-c", "--"]

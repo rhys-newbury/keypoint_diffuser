@@ -70,7 +70,6 @@ class EDMPrecond(torch.nn.Module):
             )
 
             # Euler step.
-            # Not sure why i needed repeat here?
             denoised = self(
                 x_hat, t_hat.reshape(1).repeat(batch_size), context=code
             ).to(torch.float64)
