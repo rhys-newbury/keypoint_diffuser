@@ -9,6 +9,7 @@
 "Elucidating the Design Space of Diffusion-Based Generative Models"."""
 
 import torch
+from pytorch3d.loss import chamfer_distance
 
 
 # ----------------------------------------------------------------------------
@@ -52,7 +53,8 @@ class EDMLossCurriculum:
         n = torch.randn_like(y) * sigma
 
         D_yn = net(y + n, sigma, context=code)
-        loss = weight * ((D_yn - y) ** 2)
+        loss, _ = chamfer_distance(D_yn, y)
+        loss = weight * loss
         return loss.mean()
 
 
