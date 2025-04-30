@@ -1,7 +1,7 @@
-# FROM pytorch/pytorch:1.11.0-cuda11.3-cudnn8-devel
 FROM pytorch/pytorch:2.0.0-cuda11.7-cudnn8-devel
 ENV TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6+PTX"
 
+# Install System Dependencies
 RUN apt-get update && \
     apt-get install -y  software-properties-common && \
     add-apt-repository ppa:ubuntu-toolchain-r/test && \
@@ -9,24 +9,26 @@ RUN apt-get update && \
 
 COPY requirements.txt requirements.txt
 
+# Install pip  dependencies
 RUN pip install --upgrade pip packaging && \
     FORCE_CUDA=1 pip install -vv -r requirements.txt && \
     echo 'export PYTHONPATH="/app:${PYTHONPATH}"' >> ~/.bashrc
 
+# Simpler to conda install these packages
 RUN conda install pytorch-cluster pytorch-scatter pytorch-sparse -c pyg -y
 
 WORKDIR /app
 
-COPY keypoint_diffuser/utils/emd_loss /app/keypoint_diffuser/utils/emd_loss
-RUN cd /app/keypoint_diffuser/utils/emd_loss && python3 setup.py install
+# Build EMD_loss
+COPY src/keypoint_diffuser/utils/emd_loss /app/src/keypoint_diffuser/utils/emd_loss
+RUN cd /app/src/keypoint_diffuser/utils/emd_loss && python3 setup.py install
 
 RUN groupadd -g 1000 user && useradd -u 1000 -g 1000 -m user
 
 COPY --chown=user:user . /app
 
+# Install keypoint_diffuser
+RUN cd /app && pip install -e .
 
 WORKDIR app
-
-RUN pip install -e .
-
 USER user
