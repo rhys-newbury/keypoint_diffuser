@@ -7,7 +7,7 @@ points_dir: /mnt/slow/shape-data
 split_file: /mnt/storage/shapenet_split/all.csv
 log_dir: /mnt/slow/keypoints/logs
 
-batch_size: 18
+batch_size: 10
 # mesh_dir: /app/data/shapenet/shape_data
 # points_dir: /app/data/shapenet/shape_data
 # split_file: data/shapenet_split/all.csv

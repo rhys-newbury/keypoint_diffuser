@@ -8,7 +8,7 @@ spec:
   schedulerName: volcano
   queue: default
   tasks:
-    - replicas: 4
+    - replicas: 5
       name: train
       template:
         spec:
@@ -39,7 +39,7 @@ spec:
                   "--jobs_path=/mnt/slow/job_list.yaml"
                 ]
 
-              workingDir: /app
+              workingDir: /app/scripts
 
               env:
                 - name: WANDB_API_KEY

@@ -16,7 +16,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--jobs_path",
     type=str,
-    default="/mnt/slow/job_list.yaml",
+    default="/mnt/slow/job_list3.yaml",
     help="Path to the job list YAML file.",
 )
 args = parser.parse_args()
