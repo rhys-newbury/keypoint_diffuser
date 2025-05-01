@@ -30,11 +30,11 @@ for file in $(ls -t "$BASE_PATH"/net_*.pth 2>/dev/null); do
 
                 while true; do
                     if [[ "$SCRIPT" == "main.py" ]]; then
-                        python -u "$SCRIPT" --n_keypoints="$LATENT_DIM" --ckpt="$file" -c "$CONFIG" -t configs/test.yaml "$@"
+                        python -u "$SCRIPT" --n_keypoints="$LATENT_DIM" --ckpt="$file" -c "$CONFIG" -t ../configs/test.yaml "$@"
                     elif [[ "$SCRIPT" == "train_ae.py" ]]; then
-                        python -u "$SCRIPT" --latent_dim="$LATENT_DIM" --ckpt="$file" -c "$CONFIG" -t configs/test.yaml "$@"
+                        python -u "$SCRIPT" --latent_dim="$LATENT_DIM" --ckpt="$file" -c "$CONFIG" -t ../configs/test.yaml "$@"
                     elif [[ "$SCRIPT" == "train_dpm.py" ]]; then
-                        python -u "$SCRIPT" --latent_dim="$LATENT_DIM" --ckpt="$file" -c "$CONFIG" -t configs/test.yaml "$@"
+                        python -u "$SCRIPT" --latent_dim="$LATENT_DIM" --ckpt="$file" -c "$CONFIG" -t ../configs/test.yaml "$@"
                     else
                         echo "Unknown script: $SCRIPT"
                         exit 1

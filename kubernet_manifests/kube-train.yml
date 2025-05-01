@@ -1,14 +1,14 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: manager-list2
+  name: manager-list
 spec:
   maxRetry: 1
   minAvailable: 1
   schedulerName: volcano
   queue: default
   tasks:
-    - replicas: 5
+    - replicas: 6
       name: train
       template:
         spec:
@@ -36,7 +36,7 @@ spec:
                   "python",
                   "-u",
                   "manager.py",
-                  "--jobs_path=/mnt/slow/job_list.yaml"
+                  "--jobs_path=/mnt/slow/job_list3.yaml"
                 ]
 
               workingDir: /app/scripts
@@ -48,7 +48,7 @@ spec:
                       name: wandb
                       key: api-key
                 - name: WANDB_CACHE_DIR
-                  value: /home/taco
+                  value: /home/user
 
               resources:
                 requests:
