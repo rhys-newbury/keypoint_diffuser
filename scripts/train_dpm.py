@@ -15,7 +15,7 @@ from keypoint_diffuser.models.encoder_models.common import get_linear_scheduler
 from keypoint_diffuser.options.ae_options import AEOptions
 from keypoint_diffuser.utils.eval_metrics import EMD_CD
 from keypoint_diffuser.utils.nn import load_network, save_network
-from keypoint_diffuser.utils.pc_utils import normalize_point_clouds
+from keypoint_diffuser.utils.pc_utils import collate_fn, normalize_point_clouds
 from tensorboardX import SummaryWriter
 from torch.nn.parallel import DistributedDataParallel
 from torch.nn.utils import clip_grad_norm_
@@ -26,8 +26,6 @@ import wandb
 
 torch.autograd.set_detect_anomaly(True)
 RUN = None
-
-from utils import collate_fn
 
 
 CHECKPOINTS_DIR = "checkpoints"
