@@ -71,6 +71,9 @@ class AEConfig:
     sample_mesh: bool = False
     test_pairs_file: str = None
 
+    test_category: str = None
+    eval_on_same: bool = False
+
 
 class AEOptions:
     def __init__(self):

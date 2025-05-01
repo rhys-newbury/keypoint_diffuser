@@ -94,7 +94,10 @@ class Shapes(torch.utils.data.Dataset):
                 ]
             else:
                 data_frame = data_frame.loc[
-                    (data_frame.synsetId == int(self.opt.test_category))
+                    (
+                        (data_frame.synsetId == int(self.opt.test_category))
+                        == self.opt.eval_on_same
+                    )
                     & (data_frame.split == split)
                 ]
         else:

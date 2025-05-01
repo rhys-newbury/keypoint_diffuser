@@ -113,6 +113,9 @@ class BaseOptions:
         parser.add_argument("--mesh_dir", type=str, help="")
         parser.add_argument("--keypoints_dir", type=str, help="")
 
+        parser.add_argument("--test_category", type=str, help="")
+        parser.add_argument("--eval_on_same", type=bool, default=False, help="")
+
         self.initialized = True
         return parser
 
