@@ -1,5 +1,8 @@
 # Package ######################################################################
 
+[project]
+requires-python = ">= 3.8"
+
 # Linters and Test tools #######################################################
 [tool.ruff]
 # https://beta.ruff.rs/docs/settings/
@@ -7,7 +10,7 @@ extend-select = ["C4", "SIM", "TCH"]
 show-fixes = true
 # Same as Black.
 line-length = 100
-# Assume Python 3.8.
+# Assume Python 3.10
 target-version = "py310"
 
 ignore = [

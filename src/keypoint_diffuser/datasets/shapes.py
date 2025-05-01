@@ -65,6 +65,15 @@ class Shapes(torch.utils.data.Dataset):
     def __init__(self, opt, transform=None):
         self.opt = opt
 
+        assert (
+            self.opt.category == "all"
+            and self.opt.test_category is not None
+            and self.opt.test_category in self.CATEGORY2SYNSETOFFSET.values()
+        ) or (
+            self.opt.category in self.CATEGORY2SYNSETOFFSET.values()
+            and self.test_category is None
+        )
+
         self.mesh_dir = opt.mesh_dir
 
         self.dataset = self.load_dataset()
@@ -74,20 +83,57 @@ class Shapes(torch.utils.data.Dataset):
 
     def _load_from_split_file(self, split):
         data_frame = pd.read_csv(self.opt.split_file)
-        # find names from the category and split
-        data_frame = data_frame.loc[
-            (data_frame.synsetId == int(self.opt.category))
-            & (data_frame.split == self.opt.split)
-        ]
-        names = data_frame.modelId.to_numpy()
-        return names
 
-    def _load_from_files(self):
-        files = find_files(
-            os.path.join(self.opt.points_dir, self.opt.category),
-            self.POINT_CLOUD_FILE_EXT,
+        # Convert category name to synset ID if needed
+        if self.opt.category == "all":
+            # Use all categories, but exclude the test category
+            if split == "train":
+                data_frame = data_frame.loc[
+                    (data_frame.synsetId != int(self.opt.test_category))
+                    & (data_frame.split == split)
+                ]
+            else:
+                data_frame = data_frame.loc[
+                    (data_frame.synsetId == int(self.opt.test_category))
+                    & (data_frame.split == split)
+                ]
+        else:
+            # Filter for single category + correct split
+            data_frame = data_frame.loc[
+                (data_frame.synsetId == int(self.opt.category))
+                & (data_frame.split == split)
+            ]
+
+        names, categories = (
+            data_frame.modelId.to_numpy(),
+            data_frame.synsetId.to_numpy(),
         )
-        # extract name from files
+        return names, categories
+
+    def _load_from_files(self, split):
+        if self.opt.category == "all":
+            categories = self.CATEGORY2SYNSETOFFSET.values()
+            test_cat = str(self.opt.test_category)
+
+            if split == "train":
+                categories = [c for c in categories if c != test_cat]
+            else:
+                categories = [test_cat]
+
+            files = []
+            for cat in categories:
+                cat_files = find_files(
+                    os.path.join(self.opt.points_dir, cat),
+                    self.POINT_CLOUD_FILE_EXT,
+                )
+                files.extend(cat_files)
+        else:
+            files = find_files(
+                os.path.join(self.opt.points_dir, self.opt.category),
+                self.POINT_CLOUD_FILE_EXT,
+            )
+
+        # extract model names from file paths
         names = [x.split(os.path.sep)[-2] for x in files]
         names = sorted(names)
         return names
@@ -194,7 +240,7 @@ class Shapes(torch.utils.data.Dataset):
     def load_dataset(self):
         dataset = {}
         if self.opt.data_type == "shapenet":
-            names = self._load_from_split_file(self.opt.split)
+            names, categories = self._load_from_split_file(self.opt.split)
         elif self.opt.data_type == "keypointnet":
             keypoints = self._load_keypointnet()
             names = list(self._load_keypointnet_split(self.opt.split))
@@ -220,7 +266,10 @@ class Shapes(torch.utils.data.Dataset):
             names -= val_split
             names -= test_split
 
-        names = sorted(names)
+        paired = sorted(zip(names, categories, strict=True))
+        names, categories = zip(*paired, strict=True)
+        names = list(names)
+        categories = list(categories)
 
         if self.opt.load_test_pairs:
             names, partners = self._load_test_pairs()
@@ -229,36 +278,50 @@ class Shapes(torch.utils.data.Dataset):
             names = sorted(names)
 
         dataset["name"] = names
+        dataset["category"] = categories
 
         return dataset
 
-    def _get_pointcloud_path(self, name):
+    def _get_pointcloud_path(self, name, category=None):
         return os.path.join(
             self.opt.points_dir,
-            self.opt.category,
+            (str(category).zfill(8) if category is not None else self.opt.category),
             name,
             "models",
             f"new_samples_{random.randint(0, 4)}.npy",
         )
 
-    def _get_mesh_path(self, name):
+    def _get_mesh_path(self, name, category=None):
         return os.path.join(
-            self.opt.mesh_dir, self.opt.category, name, "models", "model_normalized.obj"
+            self.opt.mesh_dir,
+            (str(category).zfill(8) if category is not None else self.opt.category),
+            name,
+            "models",
+            "model_normalized.obj",
         )
 
-    def _get_keypoints_path(self, name):
+    def _get_keypoints_path(self, name, category=None):
         return os.path.join(
-            self.opt.keypoints_dir, self.opt.category, name, "keypoints.txt"
+            self.opt.keypoints_dir,
+            (str(category).zfill(8) if category is not None else self.opt.category),
+            name,
+            "keypoints.txt",
         )
 
-    def _get_seg_points_path(self, name):
+    def _get_seg_points_path(self, name, category=None):
         return os.path.join(
-            self.opt.segmentations_dir, self.opt.category, "points", name + ".pts"
+            self.opt.segmentations_dir,
+            (str(category).zfill(8) if category is not None else self.opt.category),
+            "points",
+            name + ".pts",
         )
 
-    def _get_seg_labels_path(self, name):
+    def _get_seg_labels_path(self, name, category=None):
         return os.path.join(
-            self.opt.segmentations_dir, self.opt.category, "points_label", name + ".seg"
+            self.opt.segmentations_dir,
+            (str(category).zfill(8) if category is not None else self.opt.category),
+            "points_label",
+            name + ".seg",
         )
 
     def _read_keypointnet_keypoints(self, name):
@@ -303,10 +366,15 @@ class Shapes(torch.utils.data.Dataset):
         )
         return point_cloud[indices]
 
-    def get_item_by_name(self, name, is_test, sample_mesh=False, load_mesh=False):
-        pc_path = Path(self._get_mesh_path(name)).parent / "point_resampled_labeled.npy"
+    def get_item_by_name(
+        self, name, category, is_test, sample_mesh=False, load_mesh=False
+    ):
+        pc_path = (
+            Path(self._get_mesh_path(name, category)).parent
+            / "point_resampled_labeled.npy"
+        )
 
-        points = np.load(self._get_pointcloud_path(name))
+        points = np.load(self._get_pointcloud_path(name, category))
         points = torch.from_numpy(points).float()
 
         points[:, :3], center, scale = self.normalize(points[:, :3])
@@ -322,6 +390,7 @@ class Shapes(torch.utils.data.Dataset):
             "label": label,
             "cat": self.opt.category,
             "file": name,
+            "category": category,
         }
         if pc_path.is_file() and is_test:
             pc = np.load(pc_path)
@@ -351,19 +420,25 @@ class Shapes(torch.utils.data.Dataset):
             index_2 = self.opt.fixed_target_index
 
         name = self.dataset["name"][index]
+        cat = self.dataset["category"][index]
         if self.opt.load_cages_test_pairs or self.opt.load_test_pairs:
             name_2 = self.dataset["partners"][index]
         else:
             name_2 = self.dataset["name"][index_2]
+            cat_2 = self.dataset["category"][index_2]
 
         sample_mesh = self.opt.sample_mesh or self.opt.points_dir is None
         is_test = self.opt.phase == "test"
         target_data = self.get_item_by_name(
-            name_2, is_test, load_mesh=self.opt.load_mesh, sample_mesh=sample_mesh
+            name_2,
+            cat_2,
+            is_test,
+            load_mesh=self.opt.load_mesh,
+            sample_mesh=sample_mesh,
         )
 
         source_data = self.get_item_by_name(
-            name, is_test, load_mesh=self.opt.load_mesh, sample_mesh=sample_mesh
+            name, cat, is_test, load_mesh=self.opt.load_mesh, sample_mesh=sample_mesh
         )
 
         result = {"source_" + k: v for k, v in source_data.items()}
