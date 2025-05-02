@@ -71,7 +71,7 @@ class Shapes(torch.utils.data.Dataset):
             and self.opt.test_category in self.CATEGORY2SYNSETOFFSET.values()
         ) or (
             self.opt.category in self.CATEGORY2SYNSETOFFSET.values()
-            and self.test_category is None
+            and self.opt.test_category is None
         )
 
         self.mesh_dir = opt.mesh_dir

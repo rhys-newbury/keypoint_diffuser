@@ -418,7 +418,6 @@ def train(opt, rank, world_size):
         print("Using regular DataLoader (no DistributedSampler).")
         train_sampler = None
         shuffle = True  # Only shuffle when not using DistributedSampler
-
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=opt.batch_size,

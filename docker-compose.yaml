@@ -11,6 +11,7 @@ services:
         - ~/.ssh:/home/taco/.ssh
         - /mnt/wslg:/mnt/wslg
         - /home/taco/shape_data:/app/data/shapenet/shape_data
+        - /media/taco/nfs:/app/data/smplx
 
       network_mode: "host"
       build:
