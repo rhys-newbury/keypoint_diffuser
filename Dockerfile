@@ -11,8 +11,7 @@ COPY requirements.txt requirements.txt
 
 # Install pip  dependencies
 RUN pip install --upgrade pip packaging && \
-    FORCE_CUDA=1 pip install -vv -r requirements.txt && \
-    echo 'export PYTHONPATH="/app:${PYTHONPATH}"' >> ~/.bashrc
+    FORCE_CUDA=1 pip install -vv -r requirements.txt
 
 # Simpler to conda install these packages
 RUN conda install pytorch-cluster pytorch-scatter pytorch-sparse -c pyg -y

@@ -1,6 +1,6 @@
 name: airplane-8kpt
 
-dataset: "smplx"
+dataset: "smplx_test"
 split: train
 
 # mesh_dir: /mnt/storage/
@@ -12,6 +12,6 @@ split: train
 mesh_dir: /app/data/shapenet/shape_data
 points_dir: /app/data/shapenet/shape_data
 split_file: data/shapenet_split/all.csv
-log_dir: /app/data/keypoints/logs
+log_dir: /app/data/smplx/keypoints/logs
 
 batch_size: 18
