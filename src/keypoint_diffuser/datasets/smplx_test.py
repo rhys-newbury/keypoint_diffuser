@@ -1,3 +1,4 @@
+import collections.abc as container_abcs
 import json
 import os
 import random
@@ -140,4 +141,15 @@ class Smplxtest(Dataset):
                     batched[key] = default_collate([item[key] for item in batch])
                 except Exception as e:
                     print(f"Collate error for key '{key}': {e}")
+        return batched
+
+    @staticmethod
+    def uncollate(batched):
+        for k, v in batched.items():
+            if isinstance(v, torch.Tensor):
+                batched[k] = v.cuda()
+            elif isinstance(v, container_abcs.Sequence) and isinstance(
+                v[0], torch.Tensor
+            ):
+                batched[k] = [e.cuda() for e in v]
         return batched

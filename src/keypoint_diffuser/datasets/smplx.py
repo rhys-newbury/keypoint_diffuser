@@ -1,3 +1,4 @@
+import collections.abc as container_abcs
 import os
 import random
 import traceback
@@ -59,49 +60,49 @@ class Smplx(Dataset):
         scale = (max_xyz - min_xyz).max()
         return (points - center) / scale
 
+    def get_sample(self, index):
+        index_2 = random.randint(0, len(self.samples) - 1)
+
+        smplx_path_1 = self.samples[index]
+        smplx_path_2 = self.samples[index_2]
+
+        frame_dir_1 = f"/app/data/smplx/{smplx_path_1}"
+        frame_dir_2 = f"/app/data/smplx/{smplx_path_2}"
+
+        source_pc = self._load_point_cloud(frame_dir_1)
+        target_pc = self._load_point_cloud(frame_dir_2)
+
+        result = {
+            "source_shape": source_pc,
+            "source_smplx_path": smplx_path_1,
+            "target_shape": target_pc,
+            "target_smplx_path": smplx_path_2,
+        }
+
+        if self.transform:
+            transformed, deformed = self.transform({"coord": target_pc.cpu().numpy()})
+            result.update({f"orig_{k}": v.cuda() for k, v in transformed.items()})
+            result.update({f"deformed_{k}": v.cuda() for k, v in deformed.items()})
+
+        return result
+
     @staticmethod
     def modify_commandline_options(parser):
         return parser
 
-    def __len__(self):
-        return len(self.samples)
-
     def __getitem__(self, idx):
         for _ in range(10):
             try:
-                smplx_path = self.samples[idx]
-                frame_dir = f"/app/data/smplx/{smplx_path}"
-                point_cloud = self._load_point_cloud(frame_dir)
-
-                sample = {
-                    "smplx_path": smplx_path,
-                    "target_shape": point_cloud,
-                }
-
-                if self.transform:
-                    transformed, deformed = self.transform(
-                        {"coord": sample["target_shape"].cpu().numpy()}
-                    )  # Apply transform
-                    sample = {
-                        **sample,
-                        **{
-                            f"orig_{key}": value.cuda()
-                            for key, value in transformed.items()
-                        },
-                        **{
-                            f"deformed_{key}": value.cuda()
-                            for key, value in deformed.items()
-                        },
-                    }
-
-                return sample
-
+                return self.get_sample(idx)
             except Exception as e:
                 warnings.warn(
                     f"Error loading sample {idx} ({self.samples[idx]}):\n"
                     + "".join(traceback.format_exception(type(e), e, e.__traceback__))
                 )
                 idx = (idx + 1) % len(self)
+
+    def __len__(self):
+        return len(self.samples)
 
     @staticmethod
     def collate(batch):
@@ -114,4 +115,15 @@ class Smplx(Dataset):
                     batched[key] = default_collate([item[key] for item in batch])
                 except Exception as e:
                     print(f"Collate error for key '{key}': {e}")
+        return batched
+
+    @staticmethod
+    def uncollate(batched):
+        for k, v in batched.items():
+            if isinstance(v, torch.Tensor):
+                batched[k] = v.cuda()
+            elif isinstance(v, container_abcs.Sequence) and isinstance(
+                v[0], torch.Tensor
+            ):
+                batched[k] = [e.cuda() for e in v]
         return batched

@@ -47,6 +47,12 @@ def get_network_data(data: dict[str, Any], key="orig"):
     return d
 
 
+def reparameterize(mu, logvar):
+    std = torch.exp(0.5 * logvar)
+    eps = torch.randn_like(std)
+    return mu + eps * std
+
+
 def test(opt):
     t = transforms.Compose(
         [
@@ -97,8 +103,10 @@ def test(opt):
 
     temporal_dists = []  # [K x T] list of distances
 
-    for data in tqdm(dataloader, desc="Evaluating temporal consistency"):
-        frame_count = len(data["point_clouds"][0])  # Should be 10
+    for idx, data in tqdm(
+        enumerate(dataloader), desc="Evaluating temporal consistency", total=100
+    ):
+        frame_count = 10  # Should be 10
 
         # Load joints for each frame
         joints_per_frame = []
@@ -132,6 +140,8 @@ def test(opt):
         z0, mu, logvar = ae_model.encode(get_network_data(inp))
         keypoints = z0.reshape(10, -1, 3).cpu()  # Shape: [B, K, 3]
 
+        # Step 3: Concatenate
+
         # Associate each keypoint to closest joint at frame 0
         frame0_kp = keypoints[0, ...]  # [K, 3]
         frame0_joints = joints_per_frame[0]  # [J, 3]
@@ -155,6 +165,33 @@ def test(opt):
         per_keypoint_dists = torch.stack(per_keypoint_dists)  # [K, T]
         temporal_dists.append(per_keypoint_dists)
 
+        mean_dist = per_keypoint_dists.mean().item()
+        # if mean_dist < best_result["mean_dist"]:
+
+        result = {
+            "mean_dist": mean_dist,
+            "data": {
+                "keypoints": keypoints.detach().numpy(),
+                "assigned_joints": torch.stack(
+                    [
+                        joints_per_frame[t][assigned_joint_idx]
+                        for t in range(frame_count)
+                    ]
+                ).numpy(),  # [T, K, 3]
+                "target_shape": inp["point_clouds"]
+                .reshape(10, -1, 3)
+                .cpu()
+                .numpy(),  # [T, N, 3]
+                # "reconstructed": recons.cpu().numpy(),  # [T, N, 3]
+            },
+        }
+        np.savez(
+            f"./scripts/result_{idx}.npz",
+            keypoints=result["data"]["keypoints"],
+            assigned_joints=result["data"]["assigned_joints"],
+            target_shape=result["data"]["target_shape"],
+        )
+
     temporal_dists = torch.cat(temporal_dists, dim=0)  # [N*K, T]
 
     mean_per_kp = temporal_dists.mean(dim=1)  # [N*K]
@@ -162,6 +199,9 @@ def test(opt):
 
     mean_mean = mean_per_kp.mean().item()
     mean_std = std_per_kp.mean().item()
+
+    # np.savez(
+    #     "best_result.npz",
 
     wandb.log(
         {

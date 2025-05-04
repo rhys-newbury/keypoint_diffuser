@@ -458,15 +458,14 @@ def train(opt):
                 break
 
             source_shape_t, target_shape_t = get_data(dataset, data)
-            outputs = net(source_shape_t, target_shape=target_shape_t)
+            net(source_shape_t, target_shape=target_shape_t)
 
             current_loss = net.compute_loss(t)
             wandb.log(current_loss, step=t)
             net.optimize(current_loss, t)
 
             if t % opt.save_interval == 0:
-                outputs_save_dir = os.path.join(checkpoints_dir, "outputs", "%07d" % t)
-                save_outputs(outputs_save_dir, data, outputs, save_mesh=False)
+                os.path.join(checkpoints_dir, "outputs", "%07d" % t)
                 save_network(net, checkpoints_dir, network_label="net", epoch_label=t)
 
             iter_time = time.time() - iter_time_start
