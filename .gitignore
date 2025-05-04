@@ -14,3 +14,5 @@ src/keypoint_diffuser/utils/emd_loss/build
 *.log
 data/*
 build/*
+*.gif
+*.npz
