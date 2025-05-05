@@ -4,6 +4,8 @@ import pandas as pd
 import requests
 
 
+DEFAULT_KEYPOINTS = 8
+
 category_mapping = {
     "02691156": "Airplane",
     "02773838": "Bag",
@@ -187,8 +189,7 @@ metrics = {
 
 
 # Extract rows
-# Only keep rows where n_keypoints == 8
-list_view = plot_df[plot_df["n_keypoints"] == 8][
+list_view = plot_df[plot_df["n_keypoints"] == DEFAULT_KEYPOINTS][
     ["category", "type", "n_keypoints", *list(metrics.keys())]
 ]
 
@@ -248,10 +249,12 @@ def generate_latex_table(metric_name, data, maximize=True, scientific=False):
     mapped_categories = [category_mapping.get(c, c) for c in categories]
 
     table = (
-        "\\begin{table*}[h]\n\\centering\n\\begin{adjustbox}{max width=\\textwidth}\n\\begin{tabular}{l|"
-        + "c" * (len(categories))
-        + "|c}\n"
+        "\\begin{table*}[h]\n"
+        "\\centering\n"
+        "\\begin{adjustbox}{max width=\\textwidth}\n"
+        "\\begin{tabular}{l|" + "c" * len(categories) + "|c}\n"
     )
+
     table += "\\toprule\n"
     table += "Type & " + " & ".join(mapped_categories) + " & Average \\\\\n"
     table += "\\midrule\n"

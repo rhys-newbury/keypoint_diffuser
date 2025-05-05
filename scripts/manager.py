@@ -104,9 +104,7 @@ def complete_job(job, success, output):
                         t["wandb_name"] = wandb_name
             break
     save_jobs(jobs)
-    print(
-        f"[{'✓' if success else '✗'}] {job['type'].capitalize()} job {job['id']} {'completed' if success else 'failed'}."
-    )
+    print(f"[{'✓' if success else '✗'}]")
 
 
 def run_command(cmd):

@@ -250,9 +250,8 @@ def generate_latex_table(metric_name, data, maximize=True, scientific=False):
     mapped_categories = [str(c) for c in categories]
 
     table = (
-        "\\begin{table*}[h]\n\\centering\n\\begin{adjustbox}{max width=\\textwidth}\n\\begin{tabular}{l|"
-        + "c" * (len(categories))
-        + "|c}\n"
+        "\\begin{table*}[h]\n\\centering\n\\begin{adjustbox}{max width=\\textwidth}\n"
+        "\\begin{tabular}{l|" + "c" * len(categories) + "|c}\n"
     )
     table += "\\toprule\n"
     table += "Type & " + " & ".join(mapped_categories) + " & Average \\\\\n"

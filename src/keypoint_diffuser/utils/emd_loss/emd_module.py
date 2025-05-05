@@ -27,6 +27,9 @@ from torch import nn
 from torch.autograd import Function
 
 
+MAX_BATCH_SIZE = 512
+
+
 class EMDFunction(Function):
     @staticmethod
     def forward(ctx, xyz1, xyz2, eps, iters):
@@ -36,7 +39,7 @@ class EMDFunction(Function):
         assert n == m
         assert xyz1.size()[0] == xyz2.size()[0]
         assert n % 1024 == 0
-        assert batchsize <= 512
+        assert batchsize <= MAX_BATCH_SIZE
 
         xyz1 = xyz1.contiguous().float().cuda()
         xyz2 = xyz2.contiguous().float().cuda()

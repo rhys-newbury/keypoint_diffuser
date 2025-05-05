@@ -9,6 +9,9 @@ Please cite our work if the code is helpful to you.
 import torch
 
 
+INT_BYTES = 64
+
+
 def right_shift(binary, k=1, axis=-1):
     """Right shift an array of binary values.
 
@@ -126,7 +129,7 @@ def encode(locs, num_dims, num_bits):
             % (orig_shape[-1], num_dims)
         )
 
-    if num_dims * num_bits > 63:
+    if num_dims * num_bits > (INT_BYTES - 1):
         raise ValueError(
             """
       num_dims=%d and num_bits=%d for %d bits total, which can't be encoded
@@ -220,7 +223,7 @@ def decode(hilberts, num_dims, num_bits):
      but with an additional dimension of size num_dims.
     """
 
-    if num_dims * num_bits > 64:
+    if num_dims * num_bits > INT_BYTES:
         raise ValueError(
             """
       num_dims=%d and num_bits=%d bits total, which can't be encoded

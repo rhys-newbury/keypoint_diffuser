@@ -19,6 +19,9 @@ class AEConfig:
     log_dir: str = "./log"
     subdir: str = "test"
     batch_size: int = 48
+    kl_warmup_steps: int = 10000
+    fps_steps: int = 1000
+    max_schedule: int = 100000
     print_options: bool = False
     phase: str = "train"
     iteration: int = None

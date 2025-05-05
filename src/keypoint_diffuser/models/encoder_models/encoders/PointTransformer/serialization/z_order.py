@@ -9,6 +9,9 @@
 import torch
 
 
+BYTES = 8
+
+
 class KeyLUT:
     def __init__(self):
         r256 = torch.arange(256, dtype=torch.int64)
@@ -91,11 +94,11 @@ def xyz2key(
     EX, EY, EZ = _key_lut.encode_lut(x.device)
     x, y, z = x.long(), y.long(), z.long()
 
-    mask = 255 if depth > 8 else (1 << depth) - 1
+    mask = 255 if depth > BYTES else (1 << depth) - 1
     key = EX[x & mask] | EY[y & mask] | EZ[z & mask]
-    if depth > 8:
-        mask = (1 << (depth - 8)) - 1
-        key16 = EX[(x >> 8) & mask] | EY[(y >> 8) & mask] | EZ[(z >> 8) & mask]
+    if depth > BYTES:
+        mask = (1 << (depth - BYTES)) - 1
+        key16 = EX[(x >> BYTES) & mask] | EY[(y >> 8) & mask] | EZ[(z >> 8) & mask]
         key = key16 << 24 | key
 
     if b is not None:

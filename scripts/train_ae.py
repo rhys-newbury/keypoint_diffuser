@@ -506,7 +506,7 @@ def train(opt, rank, world_size):
     lambda_3 = 1
     lambda_4 = 0
 
-    kl_warmup_steps = 10000
+    kl_warmup_steps = opt.kl_warmup_steps
 
     while t <= opt.n_iterations:
         print(t)
@@ -548,7 +548,7 @@ def train(opt, rank, world_size):
                 wandb.log({"diffusion_loss": diffusion_loss}, step=t)
                 wandb.log({"kl_divergence": kl}, step=t)
 
-            if t > 1000 and lambda_0 > 0:
+            if t > opt.fps_steps and lambda_0 > 0:
                 print("turing off FPS loss")
                 lambda_0 = 0
 
@@ -559,7 +559,7 @@ def train(opt, rank, world_size):
             if rank == 0:
                 wandb.log({"fps_loss": fps_loss}, step=t)
 
-            max_schedule = 100000
+            max_schedule = opt.max_schedule
             chamfer_loss, _ = pytorch3d.loss.chamfer_distance(
                 code_, target_shape_t.transpose(2, 1)
             )

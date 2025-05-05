@@ -26,6 +26,10 @@ except ImportError:
 from .serialization import encode
 
 
+INT_BYTES = 64
+DEPTH_BYTES = 16
+
+
 @torch.inference_mode()
 def offset2bincount(offset):
     return torch.diff(
@@ -101,12 +105,12 @@ class Point(Dict):
             depth = int(self.grid_coord.max()).bit_length()
         self["serialized_depth"] = depth
         # Maximum bit length for serialization code is 63 (int64)
-        assert depth * 3 + len(self.offset).bit_length() <= 63
+        assert depth * 3 + len(self.offset).bit_length() <= (INT_BYTES - 1)
         # Here we follow OCNN and set the depth limitation to 16 (48bit) for the point position.
         # Although depth is limited to less than 16, we can encode a 655.36^3 (2^16 * 0.01) meter^3
         # cube with a grid size of 0.01 meter. We consider it is enough for the current stage.
         # We can unlock the limitation by optimizing the z-order encoding function if necessary.
-        assert depth <= 16
+        assert depth <= DEPTH_BYTES
 
         # The serialization codes are arranged as following structures:
         # [Order1 ([n]),
@@ -575,7 +579,7 @@ class Block(PointModule):
             )
         )
         self.drop_path = PointSequential(
-            DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
+            DropPath(drop_path) if drop_path > 0 else nn.Identity()
         )
 
     def forward(self, point: Point):
@@ -963,7 +967,7 @@ class PointTransformerV3(PointModule):
         A data_dict is a dictionary containing properties of a batched point cloud.
         It should contain the following properties for PTv3:
         1. "feat": feature of point cloud
-        2. "grid_coord": discrete coordinate after grid sampling (voxelization) or "coord" + "grid_size"
+        2. "grid_coord": discrete coordinate after grid sampling (voxelization)"
         3. "offset" or "batch": https://github.com/Pointcept/Pointcept?tab=readme-ov-file#offset
         """
         point = Point(data_dict)

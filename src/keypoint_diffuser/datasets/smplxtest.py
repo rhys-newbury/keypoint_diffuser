@@ -125,7 +125,7 @@ class Smplxtest(Dataset):
 
             except Exception as e:
                 warnings.warn(
-                    f"Error loading sample {idx} ({self.samples['trajectories'][f'trajectory_{idx}']}):\n"
+                    f"Error loading sample {idx}:\n"
                     + "".join(traceback.format_exception(type(e), e, e.__traceback__))
                 )
                 idx = (idx + 1) % len(self)
