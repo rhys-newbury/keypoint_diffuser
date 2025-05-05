@@ -1,5 +1,6 @@
 import os
 import pickle
+from enum import Enum
 from typing import Any
 
 import numpy as np
@@ -8,8 +9,11 @@ import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
 from keypoint_diffuser.datasets import get_dataset
+from keypoint_diffuser.models import get_model
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.options.ae_options import AEOptions
+from keypoint_diffuser.options.base_options import BaseOptions
+from keypoint_diffuser.utils.nn import load_network
 from tqdm import tqdm
 
 import wandb
@@ -33,6 +37,11 @@ CHECKPOINTS_DIR = "checkpoints"
 CHECKPOINT_EXT = ".pth"
 
 
+class Algos(Enum):
+    Ours = 0
+    KPD = 1
+
+
 def get_network_data(data: dict[str, Any], key="orig"):
     opp = "deformed" if key == "orig" else "orig"
 
@@ -51,6 +60,15 @@ def reparameterize(mu, logvar):
     std = torch.exp(0.5 * logvar)
     eps = torch.randn_like(std)
     return mu + eps * std
+
+
+def get_data(dataset, data):
+    data = dataset.uncollate(data)
+    source_shape = data["point_clouds"]
+
+    source_shape_t = torch.cat(source_shape).transpose(1, 2)
+
+    return source_shape_t, source_shape_t
 
 
 def test(opt):
@@ -95,11 +113,18 @@ def test(opt):
     if not ckpt.startswith(os.path.sep):
         ckpt = os.path.join(checkpoints_dir, ckpt + CHECKPOINT_EXT)
 
-    ckpt = torch.load(ckpt)
+    if Algos.Ours == CURRENT_EVAL:
+        ckpt = torch.load(ckpt)
 
-    ae_model = AutoEncoder(opt).cuda()
-    ae_model.load_state_dict(ckpt["states"])
-    ae_model.eval()
+        ae_model = AutoEncoder(opt).cuda()
+        ae_model.load_state_dict(ckpt["states"])
+        ae_model.eval()
+    else:
+        net = get_model(opt.model)(opt).cuda()
+        ckpt = opt.ckpt
+        if not ckpt.startswith(os.path.sep):
+            ckpt = os.path.join(checkpoints_dir, ckpt + CHECKPOINT_EXT)
+        load_network(net, ckpt)
 
     temporal_dists = []  # [K x T] list of distances
 
@@ -119,26 +144,35 @@ def test(opt):
 
         # Process entire sequence through encoder
 
-        skip_keys = {"smplx_path"}  # or any set of keys you want to skip
+        if Algos.Ours == CURRENT_EVAL:
+            skip_keys = {"smplx_path"}  # or any set of keys you want to skip
 
-        # Filter out keys you want to include
-        include_keys = [k for k in data if k not in skip_keys]
+            # Filter out keys you want to include
+            include_keys = [k for k in data if k not in skip_keys]
 
-        list_of_dicts = []
-        for values in zip(*(data[k] for k in include_keys), strict=True):
-            item = {}
-            for k, v in zip(include_keys, values, strict=True):
-                if isinstance(v, torch.Tensor):
-                    if v.dim() > 0 and v.size(0) == 1:
-                        v = v.squeeze(0)
-                    v = v.cuda()
-                item[k] = v
-            list_of_dicts.append(item)
+            list_of_dicts = []
+            for values in zip(*(data[k] for k in include_keys), strict=True):
+                item = {}
+                for k, v in zip(include_keys, values, strict=True):
+                    if isinstance(v, torch.Tensor):
+                        if v.dim() > 0 and v.size(0) == 1:
+                            v = v.squeeze(0)
+                        v = v.cuda()
+                    item[k] = v
+                list_of_dicts.append(item)
 
-        inp = collate_fn(list_of_dicts)
+            inp = collate_fn(list_of_dicts)
 
-        z0, mu, logvar = ae_model.encode(get_network_data(inp))
-        keypoints = z0.reshape(10, -1, 3).cpu()  # Shape: [B, K, 3]
+            z0, mu, logvar = ae_model.encode(get_network_data(inp))
+            pc = inp["point_clouds"]
+            keypoints = z0.reshape(10, -1, 3).cpu()  # Shape: [B, K, 3]
+        elif CURRENT_EVAL == Algos.KPD:
+            data = dataset.uncollate(data)
+            pc = torch.cat(data["point_clouds"])
+
+            source_shape_t, target_shape_t = get_data(dataset, data)
+            outputs = net(source_shape_t, target_shape=target_shape_t)
+            keypoints = outputs["target_keypoints"].transpose(1, 2).cpu()
 
         # Step 3: Concatenate
 
@@ -178,10 +212,7 @@ def test(opt):
                         for t in range(frame_count)
                     ]
                 ).numpy(),  # [T, K, 3]
-                "target_shape": inp["point_clouds"]
-                .reshape(10, -1, 3)
-                .cpu()
-                .numpy(),  # [T, N, 3]
+                "target_shape": pc.reshape(10, -1, 3).cpu().numpy(),  # [T, N, 3]
                 # "reconstructed": recons.cpu().numpy(),  # [T, N, 3]
             },
         }
@@ -214,7 +245,13 @@ def test(opt):
 
 
 if __name__ == "__main__":
-    parser = AEOptions()
+    CURRENT_EVAL = Algos.Ours
+
+    if CURRENT_EVAL == Algos.KPD:
+        parser = BaseOptions()
+    elif Algos.Ours == CURRENT_EVAL:
+        parser = AEOptions()
+
     opt = parser.parse()
 
     seed = opt.seed
@@ -228,7 +265,7 @@ if __name__ == "__main__":
             {
                 "ckpt": opt.ckpt,
                 "n_keypoints": opt.latent_dim,
-                "type": "ours",
+                "type": CURRENT_EVAL.name,
                 "category": opt.category,
             }
         )

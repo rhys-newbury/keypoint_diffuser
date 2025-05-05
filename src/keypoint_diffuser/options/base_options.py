@@ -92,7 +92,7 @@ class BaseOptions:
         parser.add_argument("--seed", type=int, default=0, help="")
         parser.add_argument("--n_workers", type=int, default=8, help="")
         parser.add_argument("--iteration", type=int, default=None, help="")
-        parser.add_argument("--n_iterations", type=int, default=2000, help="")
+        parser.add_argument("--n_iterations", type=int, default=200000, help="")
         parser.add_argument("--log_interval", type=int, default=10, help="")
         parser.add_argument("--save_interval", type=int, default=100, help="")
         # network options
