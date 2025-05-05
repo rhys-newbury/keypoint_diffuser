@@ -1,3 +1,4 @@
+import csv
 import os
 import pickle
 from enum import Enum
@@ -135,12 +136,19 @@ def test(opt):
 
         # Load joints for each frame
         joints_per_frame = []
+        vertices_per_frame = []
+        faces_per_frame = []
         for _i in range(frame_count):
             pkl_path = f"/app/data/smplx/{data['smplx_path'][_i][0]}"
             with open(pkl_path, "rb") as f:
                 pkl_data = pickle.load(f)
             joints = torch.tensor(pkl_data["joints"])  # Shape: [J, 3]
+            vertices = torch.tensor(pkl_data["vertices"])
+            faces = pkl_data["body_model.faces"]
+
             joints_per_frame.append(joints)
+            vertices_per_frame.append(vertices)
+            faces_per_frame.append(faces)
 
         # Process entire sequence through encoder
 
@@ -213,39 +221,89 @@ def test(opt):
                     ]
                 ).numpy(),  # [T, K, 3]
                 "target_shape": pc.reshape(10, -1, 3).cpu().numpy(),  # [T, N, 3]
+                "vertices": torch.stack(vertices_per_frame),
+                "faces_per_frame": faces_per_frame,
                 # "reconstructed": recons.cpu().numpy(),  # [T, N, 3]
             },
         }
         np.savez(
-            f"./scripts/result_{idx}.npz",
+            f"./scripts/{CURRENT_EVAL.name}_{idx}.npz",
+            mean_dist=result["mean_dist"],
             keypoints=result["data"]["keypoints"],
             assigned_joints=result["data"]["assigned_joints"],
             target_shape=result["data"]["target_shape"],
+            vertices=result["data"]["vertices"],
+            faces_per_frame=result["data"]["faces_per_frame"],
         )
 
-    temporal_dists = torch.cat(temporal_dists, dim=0)  # [N*K, T]
+    len(temporal_dists)  # number of sequences
+    K = temporal_dists[0].shape[0]
+    T = temporal_dists[0].shape[1]
 
-    mean_per_kp = temporal_dists.mean(dim=1)  # [N*K]
-    std_per_kp = temporal_dists.std(dim=1)  # [N*K]
+    temporal_dists = torch.stack(temporal_dists, dim=0)  # [N, K, T]
 
-    mean_mean = mean_per_kp.mean().item()
-    mean_std = std_per_kp.mean().item()
+    # Compute mean and std over time
+    mean_over_time = temporal_dists.mean(dim=2)  # [N, K]
+    std_over_time = temporal_dists.std(dim=2)  # [N, K]
+
+    # Now average over samples → per-keypoint metrics
+    mean_per_kp = mean_over_time.mean(dim=0)  # [K]
+    std_per_kp = std_over_time.mean(dim=0)  # [K]
 
     # np.savez(
     #     "best_result.npz",
 
+    for i, (mean_i, std_i) in enumerate(zip(mean_per_kp, std_per_kp, strict=True)):
+        wandb.log(
+            {
+                f"temporal_consistency/per_kp/mean_distance/kp_{i}": mean_i.item(),
+                f"temporal_consistency/per_kp/std_distance/kp_{i}": std_i.item(),
+            }
+        )
+
+    mean_per_kp_per_frame = temporal_dists.mean(dim=0)  # [K, T]
+
+    K, T = mean_per_kp_per_frame.shape
+
     wandb.log(
         {
-            "temporal_consistency_mean_distance": mean_mean,
-            "temporal_consistency_std_distance": mean_std,
+            "temporal_consistency/keypoint_distance_over_time": wandb.plot.line_series(
+                xs=list(range(T)),
+                ys=[mean_per_kp_per_frame[k].detach().cpu().numpy() for k in range(K)],
+                keys=[f"KPT {k}" for k in range(K)],
+                title="Keypoint-Joint Distance Over Time",
+                xname="Frame Index",
+            )
         }
     )
 
-    print(f"Temporal Consistency - Mean Distance: {mean_mean:.6f}, Std: {mean_std:.6f}")
+    # Compute mean and std over sequences
+    mean_per_kp_per_frame = temporal_dists.mean(dim=0)  # [K, T]
+    temporal_dists.std(dim=0)  # [K, T]
+
+    # Average over sequences and keypoints: [T]
+    mean_per_frame = temporal_dists.mean(dim=(0, 1))  # [T]
+    std_per_frame = temporal_dists.std(dim=(0, 1))  # [T]
+
+    # Output path
+    output_dir = "./results"
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(
+        output_dir, f"temporal_consistency_summary_{CURRENT_EVAL.name}.csv"
+    )
+
+    # Write CSV: Frame, Mean, Std
+    with open(output_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Frame", "Mean", "Std"])
+        for t in range(mean_per_frame.shape[0]):
+            writer.writerow([t, mean_per_frame[t].item(), std_per_frame[t].item()])
+
+    print(f"Saved simplified mean/std CSV to {output_path}")
 
 
 if __name__ == "__main__":
-    CURRENT_EVAL = Algos.Ours
+    CURRENT_EVAL = Algos.KPD
 
     if CURRENT_EVAL == Algos.KPD:
         parser = BaseOptions()

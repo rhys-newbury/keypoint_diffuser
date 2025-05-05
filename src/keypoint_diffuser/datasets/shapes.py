@@ -86,13 +86,14 @@ class Shapes(torch.utils.data.Dataset):
 
         # Convert category name to synset ID if needed
         if self.opt.category == "all":
-            # Use all categories, but exclude the test category
             if split == "train":
+                # Use all categories, excluding test category
                 data_frame = data_frame.loc[
                     (data_frame.synsetId != int(self.opt.test_category))
                     & (data_frame.split == split)
                 ]
             else:
+                # Use test category or others depending on eval_on_same
                 data_frame = data_frame.loc[
                     (
                         (data_frame.synsetId == int(self.opt.test_category))
@@ -100,8 +101,25 @@ class Shapes(torch.utils.data.Dataset):
                     )
                     & (data_frame.split == split)
                 ]
+
+                # Subsample for eval_on_same=False to match test_category size
+                if not self.opt.eval_on_same:
+                    test_cat_size = len(
+                        pd.read_csv(self.opt.split_file).loc[
+                            (
+                                pd.read_csv(self.opt.split_file).synsetId
+                                == int(self.opt.test_category)
+                            )
+                            & (pd.read_csv(self.opt.split_file).split == split)
+                        ]
+                    )
+                    if test_cat_size > 0 and len(data_frame) > test_cat_size:
+                        data_frame = data_frame.sample(
+                            n=test_cat_size, random_state=42
+                        ).reset_index(drop=True)
+
         else:
-            # Filter for single category + correct split
+            # Single-category mode
             data_frame = data_frame.loc[
                 (data_frame.synsetId == int(self.opt.category))
                 & (data_frame.split == split)
