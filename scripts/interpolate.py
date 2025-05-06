@@ -175,24 +175,24 @@ def interpolate(opt):
 
     o3d.io.write_point_cloud("interp_pca_airplane_7.ply", pcd2)
 
-    data_ = ae_model.encode(get_network_data(data))
-    z0_a = data_[0][0, ...].detach().cpu().numpy()
-    z0_b = data_[0][1, ...].detach().cpu().numpy()
+    encoded = ae_model.encode(get_network_data(data))
+    keypoints_a = encoded[0][0].detach().cpu().numpy().reshape(8, 3)
+    keypoints_b = encoded[0][1].detach().cpu().numpy().reshape(8, 3)
 
-    # Step 4: Project to PCA space and interpolate
-    z0_a_pca = pca.transform([z0_a])[0]
-    z0_b_pca = pca.transform([z0_b])[0]
-
+    # Step 3: Interpolate directly in keypoint space
     alphas = np.linspace(0, 1, num=6)
-    interp_pca = np.array([(1 - a) * z0_a_pca + a * z0_b_pca for a in alphas])
-    interp_z0 = pca.inverse_transform(interp_pca)  # [6, 3d]
+    interp_keypoints = np.array(
+        [(1 - a) * keypoints_a + a * keypoints_b for a in alphas]
+    )  # [6, 8, 3]
 
-    # Step 5: Use mean z_aux for all
-    z_aux_tensor = mean_z_aux.repeat(len(interp_z0), 1).cuda()
+    # Step 4: Flatten and convert to tensor
+    interp_keypoints_tensor = (
+        torch.tensor(interp_keypoints.reshape(6, -1)).float().cuda()
+    )
 
-    # Step 6: Decode
-    z0_tensor = torch.tensor(interp_z0).float().cuda()
-    z_full = torch.cat([z0_tensor, z_aux_tensor], dim=1)
+    # Step 5: Concatenate mean z_aux
+    z_aux_tensor = mean_z_aux.repeat(len(interp_keypoints_tensor), 1).cuda()
+    z_full = torch.cat([interp_keypoints_tensor, z_aux_tensor], dim=1)
 
     recons_interps = []
 
