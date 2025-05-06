@@ -64,7 +64,6 @@ class Shapes(torch.utils.data.Dataset):
 
     def __init__(self, opt, transform=None):
         self.opt = opt
-
         assert (
             self.opt.category == "all"
             and self.opt.test_category is not None

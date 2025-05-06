@@ -1,14 +1,14 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: manager-list
+  name: manager-list2
 spec:
   maxRetry: 1
   minAvailable: 1
   schedulerName: volcano
   queue: default
   tasks:
-    - replicas: 6
+    - replicas: 3
       name: train
       template:
         spec:

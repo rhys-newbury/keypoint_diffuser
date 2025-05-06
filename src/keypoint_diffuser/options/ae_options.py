@@ -77,6 +77,12 @@ class AEConfig:
     test_category: str = None
     eval_on_same: bool = False
 
+    lambda_0: int = 1
+    lambda_1: int = 1
+    lambda_2: int = 1
+    lambda_3: int = 1
+    lambda_4: int = 1
+
 
 class AEOptions:
     def __init__(self):

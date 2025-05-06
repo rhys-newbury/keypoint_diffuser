@@ -21,7 +21,7 @@ from keypoint_diffuser.models.encoder_models.common import get_linear_scheduler
 from keypoint_diffuser.options.ae_options import AEOptions
 from keypoint_diffuser.utils.eval_metrics import EMD_CD
 from keypoint_diffuser.utils.nn import load_network, save_network
-from keypoint_diffuser.utils.utils import Timer
+from keypoint_diffuser.utils.utils import Timer, reparameterize
 from tensorboardX import SummaryWriter
 from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
@@ -146,36 +146,6 @@ def visualize_point_cloud(
         )
 
     return np.asarray(pcd.points)
-
-
-def visualize_point_clouds(
-    original, deformed, kp_orig, kp_transformed, kp_deformed, save_dir="./"
-):
-    """
-    Visualizes the first point cloud in the batch before and after deformation.
-
-    Args:
-        original: (B, N, 3) tensor of original point cloud.
-        deformed: (B, N, 3) tensor of deformed point cloud.
-    """
-    original_np = original[0].cpu().numpy()  # Extract first sample, convert to NumPy
-    deformed_np = deformed[0].cpu().numpy()  # Extract first sample, convert to NumPy
-    kp_orig_np = kp_orig[0].cpu().numpy()  # Extract first sample's keypoints
-    kp_transformed_np = kp_transformed[0].cpu().numpy()  # Transformed keypoints
-    kp_deformed_np = kp_deformed[0].cpu().numpy()  # Keypoints from deformed shape
-
-    # Save NumPy arrays
-    np.save(f"{save_dir}/original_point_cloud.npy", original_np)
-    np.save(f"{save_dir}/deformed_point_cloud.npy", deformed_np)
-    np.save(f"{save_dir}/kp_orig.npy", kp_orig_np)
-    np.save(f"{save_dir}/kp_transformed.npy", kp_transformed_np)
-    np.save(f"{save_dir}/kp_deformed.npy", kp_deformed_np)
-
-
-def reparameterize(mu, logvar):
-    std = torch.exp(0.5 * logvar)
-    eps = torch.randn_like(std)
-    return mu + eps * std
 
 
 def test(opt):
@@ -500,11 +470,11 @@ def train(opt, rank, world_size):
 
     epoch = 0
 
-    lambda_0 = 1
-    lambda_1 = 1
-    lambda_2 = 1
-    lambda_3 = 1
-    lambda_4 = 0
+    lambda_0 = opt.lambda_0
+    lambda_1 = opt.lambda_1
+    lambda_2 = opt.lambda_2
+    lambda_3 = opt.lambda_3
+    lambda_4 = opt.lambda_4
 
     kl_warmup_steps = opt.kl_warmup_steps
 
@@ -541,7 +511,7 @@ def train(opt, rank, world_size):
             q = Normal(mu, torch.exp(0.5 * logvar))
             p = Normal(torch.zeros_like(mu), torch.ones_like(logvar))
 
-            lambda_4 = min(1.0, t / kl_warmup_steps)
+            lambda_4 = 0 if opt.lambda_4 == 0 else min(1.0, t / kl_warmup_steps)
             kl = kl_divergence(q, p).sum(dim=1).mean()
 
             if rank == 0:

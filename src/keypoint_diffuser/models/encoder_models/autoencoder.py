@@ -3,6 +3,7 @@ from torch import nn
 from torch.nn import Module
 
 from keypoint_diffuser.utils.loss import EDMLossCurriculum
+from keypoint_diffuser.utils.utils import reparameterize
 
 from .diffusion import DiffusionPoint, PointwiseNet, PointwiseNetOld, VarianceSchedule
 from .encoders.point_transformer import PointTransformerv2
@@ -79,15 +80,10 @@ class AutoEncoder(Module):
             num_points, code, flexibility=flexibility, ret_traj=ret_traj
         )
 
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mu + eps * std
-
     def get_loss(self, x, step):
         z0, mu, logvar = self.encode(x)
 
-        z_aux = self.reparameterize(mu, logvar)
+        z_aux = reparameterize(mu, logvar)
         code = torch.cat([z0, z_aux], dim=1)
 
         t = x["target_shape"].view(-1, 5000, 3).cuda()

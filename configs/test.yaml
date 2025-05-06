@@ -8,6 +8,7 @@ split: test
 # ckpt: /app/data/keypoints/logs/likely-lion-32/checkpoints/net_5400.pth
 
 n_workers: 8
-batch_size: 8
+batch_size: 10
 
 load_mesh: True
+# category: 1

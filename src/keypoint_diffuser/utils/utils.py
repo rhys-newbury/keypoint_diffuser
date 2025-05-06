@@ -123,3 +123,9 @@ class Timer:
         print(f"{name_string}{msg}: {value:.4f}")
         if not self.avg:
             self.total = 0.0
+
+
+def reparameterize(mu, logvar):
+    std = torch.exp(0.5 * logvar)
+    eps = torch.randn_like(std)
+    return mu + eps * std

@@ -11,7 +11,7 @@ A lot of this code is built upon the following repos:
 - [DPM](https://github.com/luost26/diffusion-point-cloud)
 - [Point Transformer v3](https://github.com/Pointcept/PointTransformerV3)
 - [EMDLoss](https://github.com/ZirongLiu/EMDLoss-for-large-scale-point-clouds)
-
+- [EDM](https://github.com/NVlabs/edm)
 
 ## Training
 Download ShapeNet from HuggingFace
