@@ -15,6 +15,8 @@ wandb
 tensorboard
 matplotlib==3.5.0
 git+https://github.com/facebookresearch/pytorch3d.git@stable
+git+https://github.com/mmatl/pyopengl.git
+pyrender
 flash-attn==2.3.2
 timm
 spconv-cu116
