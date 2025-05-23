@@ -6,8 +6,8 @@ from keypoint_diffuser.utils.loss import EDMLossCurriculum
 from keypoint_diffuser.utils.utils import reparameterize
 
 from .diffusion import DiffusionPoint, PointwiseNet, PointwiseNetOld, VarianceSchedule
+from .edm_model import EDMPrecond
 from .encoders.point_transformer import PointTransformerv2
-from .vp_model import EDMPrecond
 
 
 class AutoEncoder(Module):

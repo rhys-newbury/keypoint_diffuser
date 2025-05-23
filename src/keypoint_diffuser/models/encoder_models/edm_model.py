@@ -19,7 +19,6 @@ class EDMPrecond(torch.nn.Module):
     def edm_sampler(
         self,
         code,
-        class_labels=None,
         randn_like=torch.randn_like,
         num_steps=50,
         sigma_min=0.002,

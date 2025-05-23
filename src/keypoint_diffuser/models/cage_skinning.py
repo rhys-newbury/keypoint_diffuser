@@ -130,6 +130,84 @@ class CageSkinning(nn.Module):
             cage = cage + step * vector * do_update[:, None]
         return cage
 
+    def decode(self, source_shape, target_keypoints):
+        """
+        source_shape: (B, 3, N)
+        target_keypoints: (B, K, 3)  # external input keypoints
+        """
+        B, _, _ = source_shape.shape
+
+        source_keypoints = self.keypoint_predictor(source_shape)
+
+        # Optional: clamp if needed
+        source_keypoints = torch.clamp(source_keypoints, -1.0, 1.0)
+        target_keypoints = torch.clamp(target_keypoints, -1.0, 1.0)
+
+        cage = self.template_vertices
+        if not self.opt.no_optimize_cage:
+            cage = self.optimize_cage(cage, source_shape)
+
+        outputs = {
+            "cage": cage.transpose(1, 2),
+            "cage_face": self.template_faces,
+            "source_keypoints": source_keypoints,
+            "target_keypoints": target_keypoints,
+            "source_init_keypoints": source_keypoints,  # optional if needed
+            "target_init_keypoints": target_keypoints,
+        }
+
+        self.influence = self.influence_param[None]
+        self.influence_offset = self.influence_predictor(source_shape)
+        self.influence_offset = rearrange(
+            self.influence_offset,
+            "b (k c) -> b k c",
+            k=self.influence.shape[1],
+            c=self.influence.shape[2],
+        )
+        self.influence = self.influence + self.influence_offset
+
+        distance = torch.sum(
+            (source_keypoints[..., None] - cage[:, :, None]) ** 2, dim=1
+        )
+        n_influence = int(
+            (distance.shape[2] / distance.shape[1]) * self.opt.n_influence_ratio
+        )
+        n_influence = max(5, n_influence)
+        threshold = torch.topk(distance, n_influence, largest=False)[0][:, :, -1]
+        threshold = threshold[..., None]
+        keep = distance <= threshold
+        influence = self.influence * keep
+
+        base_cage = cage
+        keypoints_offset = target_keypoints - source_keypoints  # <-- now from input
+        cage_offset = torch.sum(keypoints_offset[..., None] * influence[:, None], dim=2)
+        new_cage = base_cage + cage_offset
+
+        cage = cage.transpose(1, 2)
+        new_cage = new_cage.transpose(1, 2)
+        deformed_shapes, weights, _ = deform_with_MVC(
+            cage,
+            new_cage,
+            self.template_faces.expand(B, -1, -1),
+            source_shape.transpose(1, 2),
+            verbose=True,
+        )
+
+        self.deformed_shapes = deformed_shapes
+
+        outputs.update(
+            {
+                "cage": cage,
+                "cage_face": self.template_faces,
+                "new_cage": new_cage,
+                "deformed": self.deformed_shapes,
+                "weight": weights,
+                "influence": influence,
+            }
+        )
+
+        return outputs
+
     def forward(self, source_shape, target_shape):
         """
         source_shape (B,3,N)
