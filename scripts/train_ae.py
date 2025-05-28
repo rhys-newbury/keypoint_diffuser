@@ -330,14 +330,21 @@ def sample_farthest_points(points, num_samples, return_index=False):
 
 
 def get_network_data(data: dict[str, Any], key="orig"):
-    opp = "deformed" if key == "orig" else "orig"
+    # key is the subset 
+    # original keys were (orig, deformed)
+    # add new with (orig, deformed, partial_orig, partial_deformed)
+    opplist = ("orig", "deformed", "partial_orig", "partial_deformed")
+    opp = tuple(o for o in opplist if o != key)
 
     d = {}
     for k, v in data.items():
+        # skips if it belongs to another subset
         if k.startswith(opp):
             continue
+        # subset specific data, keep and remove subset prefix str
         elif k.startswith(key):
             d[k[len(key) + 1 :]] = v
+        # shared data, keep
         else:
             d[k] = v
     return d
@@ -496,6 +503,7 @@ def train(opt, rank, world_size):
                 .cuda()
             )
 
+            # diffusion
             module = (
                 net.module if torch.cuda.device_count() > 1 and world_size > 1 else net
             )
@@ -504,10 +512,12 @@ def train(opt, rank, world_size):
                 get_network_data(data), step=t
             )
 
+            # code is z0 (entire latent including kp and aux), extract kp only?
             code_ = code[:, : opt.latent_dim * 3].reshape(
                 data["orig_offset"].shape[0], -1, 3
             )
 
+            # kl divergence
             q = Normal(mu, torch.exp(0.5 * logvar))
             p = Normal(torch.zeros_like(mu), torch.ones_like(logvar))
 
@@ -518,6 +528,7 @@ def train(opt, rank, world_size):
                 wandb.log({"diffusion_loss": diffusion_loss}, step=t)
                 wandb.log({"kl_divergence": kl}, step=t)
 
+            # fps
             if t > opt.fps_steps and lambda_0 > 0:
                 print("turing off FPS loss")
                 lambda_0 = 0
@@ -529,10 +540,13 @@ def train(opt, rank, world_size):
             if rank == 0:
                 wandb.log({"fps_loss": fps_loss}, step=t)
 
+            # chamfer loss
             max_schedule = opt.max_schedule
             chamfer_loss, _ = pytorch3d.loss.chamfer_distance(
                 code_, target_shape_t.transpose(2, 1)
             )
+            
+            # deformation consistency mse
             data["deformed_shape"].view(data["orig_offset"].shape[0], -1, 3)
 
             deformed_matrix = data["deformed_transformation"].view(
@@ -545,11 +559,34 @@ def train(opt, rank, world_size):
             kp_transformed = torch.bmm(kp_orig, deformed_matrix.transpose(1, 2))
             mse_loss = torch.mean((kp_transformed - kp_deformed) ** 2)
 
+            # TODO: partial view consistency with orig
+            # this is originally deformed_shape, partial_orig does not have a shape key, only the deformed version does, need to check where that key comes from in the transform functions
+            data["target_partial_shape"].view(data["orig_offset"].shape[0], -1, 3)
+            # get keypoint predictions from partial pc
+            # how to actually get kp, like the orig or like the deformed?
+            partial_code, _, _ = net(get_network_data(data, "partial_orig"))
+            kp_partial = partial_code.reshape(code.shape[0], -1, 3)
+            partial_mse_loss = torch.mean((kp_partial - kp_deformed) ** 2)
+            
+            # TODO: partial view consistency with partial deformed?
+            data["partial_deformed_shape"].view(data["partial_orig_offset"].shape[0], -1, 3)
+
+            partial_deformed_matrix = data["partial_deformed_transformation"].view(
+                data["partial_orig_offset"].shape[0], -1, 3
+            )
+
+            partial_deformed_code, _, _ = net(get_network_data(data, "partial_deformed"))
+            kp_partial_deformed = partial_deformed_code.reshape(code.shape[0], -1, 3)
+            kp_partial_transformed = torch.bmm(kp_partial, partial_deformed_matrix.transpose(1, 2))
+            partial_deformed_mse_loss = torch.mean((kp_partial_transformed - kp_partial_deformed) ** 2)
+            
+            total_mse_loss = mse_loss + partial_mse_loss + partial_deformed_mse_loss
+
             loss_ = (
                 lambda_0 * fps_loss
                 + lambda_1 * diffusion_loss
                 + lambda_2 * chamfer_loss
-                + lambda_3 * mse_loss
+                + lambda_3 * total_mse_loss
                 + lambda_4 * kl
             )
 

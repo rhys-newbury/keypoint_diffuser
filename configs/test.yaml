@@ -6,9 +6,13 @@ split: test
 # ckpt: /app/data/keypoints/logs/airplane-8kpt/checkpoints/net_final.pth
 # ckpt: /app/data/keypoints/logs/autumn-waterfall-200/checkpoints/net_final.pth
 # ckpt: /app/data/keypoints/logs/likely-lion-32/checkpoints/net_5400.pth
+# ckpt: /home/worker/keypoint_diffuser/logs/smart-gorge-14/checkpoints/net_final.pth  # default
+# ckpt: /home/worker/keypoint_diffuser/logs/peach-dew-16/checkpoints/net_final.pth  # myopia
+ckpt: /home/worker/keypoint_diffuser/logs/golden-flower-18/checkpoints/net_final.pth
 
 n_workers: 8
 batch_size: 10
 
 load_mesh: True
+test_partial_samples: True
 # category: 1

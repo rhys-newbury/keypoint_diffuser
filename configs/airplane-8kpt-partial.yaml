@@ -1,0 +1,26 @@
+name: airplane-8kpt-partial
+
+category: 02691156
+split: train
+dataset: shapespartial
+
+# mesh_dir: /mnt/storage/
+# points_dir: /mnt/storage/
+# split_file: /mnt/storage/shapenet_split/all.csv
+# log_dir: /mnt/slow/keypoints/logs
+
+
+mesh_dir: /mnt/shape-data/
+# points_dir: /mnt/shape-data/
+points_dir: /mnt/slow/shape_data_eric/
+split_file: data/shapenet_split/all.csv
+log_dir: logs
+
+batch_size: 18
+n_iterations: 20000
+# n_workers: 6
+save_interval: 1000
+
+# print_options: True
+
+partial_view_mode: default

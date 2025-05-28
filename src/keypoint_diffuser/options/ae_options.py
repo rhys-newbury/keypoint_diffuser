@@ -13,6 +13,8 @@ class AEConfig:
     name: str
     category: str
     dataset: str = "shapes"
+    partial_view_mode: str = None
+    test_partial_samples: str = False
     num_point: int = 2048
     points_dir: str = None
     dim: int = 3
@@ -163,6 +165,7 @@ class AEOptions:
         for k, v in sorted(vars(opt).items()):
             default = self.parser.get_default(k)
             comment = f"\t[default: {default}]" if v != default else ""
+            v = v if v is not None else ""
             message += f"{k:>25}: {v:<30}{comment}\n"
         message += "----------------- End -------------------"
         print(message)

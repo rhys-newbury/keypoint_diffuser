@@ -77,7 +77,7 @@ def normalize_to_box(inp):
         inp = inp - centroid
         in_shape = [*list(inp.shape[:axis]), P * D]
         furthest_distance = torch.max(
-            torch.abs(inp).view(in_shape), dim=axis, keepdim=True
+            torch.abs(inp).reshape(in_shape), dim=axis, keepdim=True
         )[0]
         furthest_distance = furthest_distance.unsqueeze(-1)
         inp = inp / furthest_distance
