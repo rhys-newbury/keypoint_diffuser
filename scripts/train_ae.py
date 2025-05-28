@@ -559,34 +559,35 @@ def train(opt, rank, world_size):
             kp_transformed = torch.bmm(kp_orig, deformed_matrix.transpose(1, 2))
             mse_loss = torch.mean((kp_transformed - kp_deformed) ** 2)
 
-            # TODO: partial view consistency with orig
-            # this is originally deformed_shape, partial_orig does not have a shape key, only the deformed version does, need to check where that key comes from in the transform functions
-            data["target_partial_shape"].view(data["orig_offset"].shape[0], -1, 3)
-            # get keypoint predictions from partial pc
-            # how to actually get kp, like the orig or like the deformed?
-            partial_code, _, _ = net(get_network_data(data, "partial_orig"))
-            kp_partial = partial_code.reshape(code.shape[0], -1, 3)
-            partial_mse_loss = torch.mean((kp_partial - kp_deformed) ** 2)
-            
-            # TODO: partial view consistency with partial deformed?
-            data["partial_deformed_shape"].view(data["partial_orig_offset"].shape[0], -1, 3)
+            if opt.partial_view_mode is not None:
+                # TODO: partial view consistency with orig
+                # this is originally deformed_shape, partial_orig does not have a shape key, only the deformed version does, need to check where that key comes from in the transform functions
+                data["target_partial_shape"].view(data["orig_offset"].shape[0], -1, 3)
+                # get keypoint predictions from partial pc
+                # how to actually get kp, like the orig or like the deformed?
+                partial_code, _, _ = net(get_network_data(data, "partial_orig"))
+                kp_partial = partial_code.reshape(code.shape[0], -1, 3)
+                partial_mse_loss = torch.mean((kp_partial - kp_deformed) ** 2)
+                
+                # TODO: partial view consistency with partial deformed?
+                data["partial_deformed_shape"].view(data["partial_orig_offset"].shape[0], -1, 3)
 
-            partial_deformed_matrix = data["partial_deformed_transformation"].view(
-                data["partial_orig_offset"].shape[0], -1, 3
-            )
+                partial_deformed_matrix = data["partial_deformed_transformation"].view(
+                    data["partial_orig_offset"].shape[0], -1, 3
+                )
 
-            partial_deformed_code, _, _ = net(get_network_data(data, "partial_deformed"))
-            kp_partial_deformed = partial_deformed_code.reshape(code.shape[0], -1, 3)
-            kp_partial_transformed = torch.bmm(kp_partial, partial_deformed_matrix.transpose(1, 2))
-            partial_deformed_mse_loss = torch.mean((kp_partial_transformed - kp_partial_deformed) ** 2)
-            
-            total_mse_loss = mse_loss + partial_mse_loss + partial_deformed_mse_loss
+                partial_deformed_code, _, _ = net(get_network_data(data, "partial_deformed"))
+                kp_partial_deformed = partial_deformed_code.reshape(code.shape[0], -1, 3)
+                kp_partial_transformed = torch.bmm(kp_partial, partial_deformed_matrix.transpose(1, 2))
+                partial_deformed_mse_loss = torch.mean((kp_partial_transformed - kp_partial_deformed) ** 2)
+                
+                mse_loss = mse_loss + partial_mse_loss + partial_deformed_mse_loss
 
             loss_ = (
                 lambda_0 * fps_loss
                 + lambda_1 * diffusion_loss
                 + lambda_2 * chamfer_loss
-                + lambda_3 * total_mse_loss
+                + lambda_3 * mse_loss
                 + lambda_4 * kl
             )
 
