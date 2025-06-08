@@ -104,6 +104,7 @@ def visualize_point_cloud(
     pcd.points = o3d.utility.Vector3dVector(points_np)
     pcd.colors = o3d.utility.Vector3dVector(colors)
 
+    # try to align the two point clouds with ICP
     if icp:
         threshold = 0.2  # Distance threshold for ICP
         np.eye(4)  # Initial transformation (identity matrix)
@@ -137,7 +138,6 @@ def visualize_point_cloud(
             sphere.translate(keypoint)
             sphere.paint_uniform_color([0, 0, 1])  # Blue color
             keypoint_spheres.append(sphere)
-            break
 
         # Visualize
         o3d.visualization.draw_geometries(
@@ -146,6 +146,70 @@ def visualize_point_cloud(
         )
 
     return np.asarray(pcd.points)
+
+def visualize_reconstructed_point_cloud(
+    recon_shape, keypoints, orig_shape, visual=False, icp=True
+):
+    """
+    Visualize input point cloud, the encoded keypoints and reconstructed point cloud
+
+    Args:
+    - points (torch.Tensor): Shape [N, 3], point cloud data.
+    - keypoints (torch.Tensor): Shape [M, 3], point cloud data, which are bigger and blue
+    """
+    # Convert tensors to NumPy arrays
+    recon_shape_np = recon_shape.cpu().numpy()  # Shape: [N, 3]
+    orig_shape = orig_shape.cpu().numpy()
+    keypoints_np = keypoints.cpu().numpy().T  # Shape: [M, 3]
+
+    # Create Open3D point cloud
+    orig_pcd = o3d.geometry.PointCloud()
+    orig_pcd.points = o3d.utility.Vector3dVector(orig_shape)
+    orig_pcd.paint_uniform_color([1, 0, 1])
+
+    recon_pcd = o3d.geometry.PointCloud()
+    recon_pcd.points = o3d.utility.Vector3dVector(recon_shape_np)
+
+    # try to align the two point clouds with ICP
+    if icp:
+        threshold = 0.2  # Distance threshold for ICP
+        np.eye(4)  # Initial transformation (identity matrix)
+
+        theta = 0  # 90 degrees in radians
+        initial_rotation_y = np.array(
+            [
+                [np.cos(theta), 0, np.sin(theta), 0],
+                [0, 1, 0, 0],
+                [-np.sin(theta), 0, np.cos(theta), 0],
+                [0, 0, 0, 1],
+            ]
+        )
+        reg_icp = o3d.pipelines.registration.registration_icp(
+            recon_pcd,
+            orig_pcd,
+            threshold,
+            initial_rotation_y,
+            o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+        )
+
+        recon_pcd.transform(reg_icp.transformation)
+
+    if visual:
+        keypoint_spheres = []
+        for keypoint in keypoints_np.T:
+            sphere = o3d.geometry.TriangleMesh.create_sphere(
+                radius=0.05
+            )  # Adjust radius as needed
+
+            sphere.translate(keypoint)
+            sphere.paint_uniform_color([0, 0, 1])  # Blue color
+            keypoint_spheres.append(sphere)
+
+        # Visualize
+        o3d.visualization.draw_geometries(
+            [recon_pcd, orig_pcd, *keypoint_spheres],
+            window_name="Point Cloud with Labels and Keypoints",
+        )
 
 
 def test(opt):
@@ -230,8 +294,6 @@ def test(opt):
             all_ref.append(target_shape_t.detach().cpu())
             all_recons.append(recons.detach().cpu())
 
-            # print(target_shape_t.shape, recons.shape, z0.shape)
-
             # from point_resampled_labeled.npy
             target_sampled_points = data["target_sampled_points"].view(
                 data["orig_offset"].shape[0], -1, 4
@@ -246,14 +308,23 @@ def test(opt):
                 seg_labels = target_sampled_points[i, :, -1].int().cuda()
                 seg_points = target_sampled_points[i, :, :3]
 
+                # visualise the input point cloud and the original point cloud with labelled parts
                 seg_points = visualize_point_cloud(
-                    seg_points,
-                    seg_labels,
-                    kp,
-                    points,
+                    seg_points,     # from point_resampled_labeled.npy
+                    seg_labels,     # labels for the seg_points
+                    kp,     # keypoints from the latent z0
+                    points,     # input point cloud
                     visual=True,
                     # visual=False,
                 )
+
+                # visualise the input point cloud with keypoints, and the reconstructed point cloud
+                visualize_reconstructed_point_cloud(
+                    recons[i],
+                    kp,
+                    points,
+                    visual=False,
+                    )
 
                 distances = torch.cdist(kp.double(), torch.tensor(seg_points).cuda())
                 threshold = 0.05
@@ -513,7 +584,7 @@ def train(opt, rank, world_size):
             )
             
             partial_target_shape_t = (
-                data["partial_target_shape"]
+                data["target_partial_shape"]
                 .view(data["partial_orig_offset"].shape[0], -1, 3)
                 .transpose(1, 2)
                 .cuda()
@@ -534,9 +605,31 @@ def train(opt, rank, world_size):
             )
             
             # diffusion loss (partial point cloud)
-            partial_diffusion_loss, partial_code, partial_mu, partial_logvar = module.get_loss(
-                get_network_data(data, "partial_orig"), step=t
-            )
+            # autoencoder loss encodes the input point cloud to get the latents, then uses point cloud as reconstruction target
+            # should have different keypoints source and target point cloud, i.e.:
+            # get the partial keypoints, but with the full point cloud as the reconstruction target
+            
+            # extracted from the autoencoder get_loss method: ##############################################
+            # partial_diffusion_loss, partial_code, partial_mu, partial_logvar = module.get_loss(
+            #     get_network_data(data, "partial_orig"), step=t
+            # )
+            
+            orig_data = get_network_data(data)
+            partial_data = get_network_data(data, "partial_orig")
+
+            z0, partial_mu, partial_logvar = module.encode(partial_data)
+            z_aux = reparameterize(partial_mu, partial_logvar)
+            partial_code = torch.cat([z0, z_aux], dim=1)
+
+            orig_ts = orig_data["target_shape"].view(-1, 5000, 3).cuda()
+            if module.use_edm:
+                partial_diffusion_loss = module.loss(
+                    net=module.diffusion, data=orig_ts, code=partial_code.detach(), step=t
+                ).mean()
+            else:
+                partial_diffusion_loss = module.diffusion.get_loss(orig_ts.transpose(1, 2), partial_code)
+
+            ################################################################################################
 
             partial_code_ = partial_code[:, : opt.latent_dim * 3].reshape(
                 data["partial_orig_offset"].shape[0], -1, 3
