@@ -303,20 +303,20 @@ class ShapesPartial(torch.utils.data.Dataset):
         return dataset
 
     def _get_pointcloud_path(self, name, category=None):
-        if self.opt.test_partial_samples:
-            if "default" in self.opt.partial_view_mode:
-                s = f"partial_samples_{random.randint(0, 4)}.npy" 
-            else:
-                s = f"partial_samples_{self.opt.partial_view_mode}_{random.randint(0, 4)}.npy"
-        else:
-            s = f"new_samples_{random.randint(0, 4)}.npy" 
+        # if self.opt.test_partial_samples:
+        #     if "default" in self.opt.partial_view_mode:
+        #         s = f"partial_samples_{random.randint(0, 4)}.npy" 
+        #     else:
+        #         s = f"partial_samples_{self.opt.partial_view_mode}_{random.randint(0, 4)}.npy"
+        # else:
+        #     s = f"new_samples_{random.randint(0, 4)}.npy"
             
         return os.path.join(
             self.opt.points_dir,
             (str(category).zfill(8) if category is not None else self.opt.category),
             name,
             "models",
-            s,
+            f"new_samples_{random.randint(0, 4)}.npy",
         )
 
     def _get_partial_pointcloud_path(self, name, category=None):

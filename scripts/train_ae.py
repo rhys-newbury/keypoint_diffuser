@@ -148,7 +148,7 @@ def visualize_point_cloud(
     return np.asarray(pcd.points)
 
 def visualize_reconstructed_point_cloud(
-    recon_shape, keypoints, orig_shape, visual=False, icp=True
+    recon_shape, keypoints, orig_shape, visual=False, icp=False
 ):
     """
     Visualize input point cloud, the encoded keypoints and reconstructed point cloud
@@ -171,6 +171,7 @@ def visualize_reconstructed_point_cloud(
     recon_pcd.points = o3d.utility.Vector3dVector(recon_shape_np)
 
     # try to align the two point clouds with ICP
+    # for reconstructions the two point clouds should be in the same frame, default to false
     if icp:
         threshold = 0.2  # Distance threshold for ICP
         np.eye(4)  # Initial transformation (identity matrix)
@@ -274,7 +275,24 @@ def test(opt):
             dataloader, desc="Processing data", unit="batch", total=total_batches
         ):
             # import pdb; pdb.set_trace()
-            target_shape_t = (
+            # get input point cloud
+            if not opt.test_partial_samples:
+                target_shape_t = (
+                    data["target_shape"]
+                    .view(data["orig_offset"].shape[0], -1, 3)
+                    .transpose(1, 2)
+                    .cuda()
+                )
+            else:
+                target_shape_t = (
+                    data["target_partial_shape"]
+                    .view(data["partial_orig_offset"].shape[0], -1, 3)
+                    .transpose(1, 2)
+                    .cuda()
+                )
+
+            # get reference point cloud (original full points regardless of input type)
+            ref_shape_t = (
                 data["target_shape"]
                 .view(data["orig_offset"].shape[0], -1, 3)
                 .transpose(1, 2)
@@ -291,7 +309,7 @@ def test(opt):
             # decode for the reconstructed point cloud
             recons = ae_model.decode(z_full, 5000).detach()
 
-            all_ref.append(target_shape_t.detach().cpu())
+            all_ref.append(ref_shape_t.detach().cpu())
             all_recons.append(recons.detach().cpu())
 
             # from point_resampled_labeled.npy
@@ -314,8 +332,7 @@ def test(opt):
                     seg_labels,     # labels for the seg_points
                     kp,     # keypoints from the latent z0
                     points,     # input point cloud
-                    visual=True,
-                    # visual=False,
+                    # visual=True,
                 )
 
                 # visualise the input point cloud with keypoints, and the reconstructed point cloud
@@ -323,7 +340,7 @@ def test(opt):
                     recons[i],
                     kp,
                     points,
-                    visual=False,
+                    # visual=True,
                     )
 
                 distances = torch.cdist(kp.double(), torch.tensor(seg_points).cuda())
@@ -638,13 +655,13 @@ def train(opt, rank, world_size):
             # kl divergence (full point cloud)
             q = Normal(mu, torch.exp(0.5 * logvar))
             p = Normal(torch.zeros_like(mu), torch.ones_like(logvar))
-            lambda_4 = 0 if opt.lambda_4 == 0 else min(1.0, t / kl_warmup_steps)
-            kl = kl_divergence(q, p).sum(dim=1).mean()
-            
+
             # kl divergence (partial point cloud)
             partial_q = Normal(partial_mu, torch.exp(0.5 * logvar))
             partial_p = Normal(torch.zeros_like(partial_mu), torch.ones_like(partial_logvar))
 
+            lambda_4 = 0 if opt.lambda_4 == 0 else min(1.0, t / kl_warmup_steps)
+            kl = kl_divergence(q, p).sum(dim=1).mean()
             partial_kl = kl_divergence(partial_q, partial_p).sum(dim=1).mean()
 
             if rank == 0:
