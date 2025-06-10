@@ -14,7 +14,7 @@ class AEConfig:
     category: str
     dataset: str = "shapes"
     partial_view_mode: str = None
-    test_partial_samples: str = False
+    test_partial_samples: bool = False
     num_point: int = 2048
     points_dir: str = None
     dim: int = 3
