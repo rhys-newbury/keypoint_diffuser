@@ -14,46 +14,100 @@ import pyrender
 import yaml
 import argparse
 
-def look_at(eye, center, up=np.array([0, 0, 1])):
+def create_axis_pointcloud(pose=np.eye(4), length=0.1, step=0.01):
+    """
+    Create an Open3D axis-aligned RGB pointcloud centered at the origin, transformed by a pose.
+    - pose: 4x4 numpy array (camera or object pose)
+    - length: length of each axis (in meters)
+    - step: resolution (distance between points)
+    """
+    pts = []
+    colors = []
+
+    # X-axis (red)
+    x = np.linspace(0, length, int(length / step))
+    for i in x:
+        pts.append([i, 0, 0])
+        colors.append([1, 0, 0])
+
+    # Y-axis (green)
+    y = np.linspace(0, length, int(length / step))
+    for i in y:
+        pts.append([0, i, 0])
+        colors.append([0, 1, 0])
+
+    # Z-axis (blue)
+    z = np.linspace(0, length, int(length / step))
+    for i in z:
+        pts.append([0, 0, i])
+        colors.append([0, 0, 1])
+
+    # Convert to Nx3 arrays
+    pts = np.array(pts)
+    colors = np.array(colors)
+
+    # Apply pose transformation
+    pts_h = np.hstack([pts, np.ones((pts.shape[0], 1))])  # (N, 4)
+    transformed = (pose @ pts_h.T).T[:, :3]  # drop homogeneous coordinate
+
+    # Create point cloud
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(transformed)
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    return pcd
+
+def look_at(eye, center, up=np.array([0, 1, 0])):
     """
     Create a 4x4 view matrix looking from eye to center.
+    Using the OpenGL convention where the camera looks down the negative z-axis.
     """
-    forward = center - eye
-    forward /= np.linalg.norm(forward)
-    right = np.cross(up, forward)
+    backward = eye - center  # center to eye
+    backward /= np.linalg.norm(backward)
+    right = np.cross(up, backward)
     right /= np.linalg.norm(right)
-    up = np.cross(forward, right)
+    up = np.cross(backward, right)
+    
+    # special pyrender/opengl camera coordinates convention: eye is looking down the negative z-axis
     rotation_matrix = np.array([
-        [right[0], up[0], forward[0], 0],
-        [right[1], up[1], forward[1], 0],
-        [right[2], up[2], forward[2], 0],
+        [right[0], up[0], backward[0], 0],
+        [right[1], up[1], backward[1], 0],
+        [right[2], up[2], backward[2], 0],
         [0, 0, 0, 1]
     ])
     # 5. Construct the translation part of the matrix
     translation_matrix = np.array([
-        [1, 0, 0, -eye[0]],
-        [0, 1, 0, -eye[1]],
-        [0, 0, 1, -eye[2]],
+        [1, 0, 0, eye[0]],
+        [0, 1, 0, eye[1]],
+        [0, 0, 1, eye[2]],
         [0, 0, 0, 1]
     ])
+    
+    # axis that is slightly offset from the camera, for visualising camera position as points
+    vis_translation_matrix = np.array([
+        [1, 0, 0, eye[0]],
+        [0, 1, 0, eye[1]],
+        [0, 0, 1, eye[2]],
+        [0, 0, 0, 1]
+    ])
+    vis_translation_matrix[:-1, -1] -= .1*backward
+    
     # 6. Combine rotation and translation
     # Note: In OpenGL-style, translation is applied after rotation
+    # this way the translation is applied in the world frame
     model_view_matrix = translation_matrix @ rotation_matrix
-    return model_view_matrix
+    vis_model_view_matrix = (vis_translation_matrix) @ rotation_matrix
+    return model_view_matrix, vis_model_view_matrix
 
 def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, start_image_size=512, radius=2.0, max_image_size=2048, max_viewpoint_retries=10):
     """
     Sample at least `num_samples` visible points from a single random view.
     If not enough points are captured, try new views up to `max_viewpoint_retries`.
     """
-    # Center and scale the mesh
-    mesh_center = mesh.bounds.mean(axis=0)
-    mesh.apply_translation(-mesh_center)
-    bbox_size = mesh.bounds[1] - mesh.bounds[0]
-    scale = 2.0 / np.max(bbox_size)
-    mesh.apply_scale(scale)
+
     for attempt in range(max_viewpoint_retries):
         # Generate a random viewpoint
+        # sample from half spherical surface
         phi = np.random.uniform(0, 2 * np.pi)
         theta = np.random.uniform(0, np.pi)
         x = radius * np.sin(theta) * np.cos(phi)
@@ -66,10 +120,21 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
         mesh_pyrender = pyrender.Mesh.from_trimesh(mesh, smooth=False)
         scene.add(mesh_pyrender)
         camera = pyrender.PerspectiveCamera(yfov=np.radians(fov_degrees))
-        camera_pose = look_at(eye=viewpoint, center=np.array([0, 0, 0]), up=np.array([0, 0, 1]))
+        camera_pose, axis_pose = look_at(eye=viewpoint, center=np.array([0, 0, 0]), up=np.array([0, 1, 0]))
+        
         light = pyrender.DirectionalLight(color=np.ones(3), intensity=3.0)
         scene.add(light, pose=camera_pose)  # Add light from same direction as the camera
         scene.add(camera, pose=camera_pose)
+        
+        # visualise the pyrender scene with additional axes for camera and origin
+        # axis_mesh = pyrender.Mesh.from_trimesh(trimesh.creation.axis(axis_length=2, origin_size=0.001), smooth=False)
+        # scene.add(axis_mesh, pose=axis_pose)
+        
+        # oaxis = trimesh.creation.axis(axis_length=2)
+        # oaxis.visual.face_colors = np.array([255, 255, 0, 255])  # yellow
+        # origin_mesh = pyrender.Mesh.from_trimesh(oaxis, smooth=False)
+        # scene.add(origin_mesh, pose=np.eye(4))  # Add origin axis for reference
+        
         image_size = start_image_size
         while image_size <= max_image_size:
             # Render images in the scene
@@ -91,8 +156,38 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
             y = (j[valid] - cy) * z[valid] / fy
             visible_points = np.vstack((x, y, z[valid])).T
             visible_points_hom = np.hstack((visible_points, np.ones((visible_points.shape[0], 1))))
-            visible_points_world = (np.linalg.inv(camera_pose) @ visible_points_hom.T).T[:, :3]
-            visible_points_world += mesh_center
+            
+            # camera matrices for transforms
+            camera_R_hom = np.eye(4)
+            camera_R_hom[:3, :3] = camera_pose[:3, :3]
+            camera_t_hom = camera_pose[:, 3].reshape(4, 1)
+            
+            cam_inv = np.linalg.inv(camera_pose)
+            cam_inv_R_hom = np.eye(4)
+            cam_inv_R_hom[:3, :3] = cam_inv[:3, :3]
+            cam_inv_t_hom = cam_inv[:, 3].reshape(4, 1)
+            
+            # since the points were obtained from pinhole camera conventions, 
+            # need to apply the rotation to the camera pose, 
+            # then apply inverse to get the points into the world frame
+            
+            # rotation matrix for conversion between pyrender/opengl and pinhole camera conventions
+            cam_conv_R = np.array([
+                    [1,  0,  0, 0],
+                    [0, -1,  0, 0],
+                    [0,  0, -1, 0],
+                    [0,  0,  0, 1]
+                ])
+            
+            # get the inverse transform in pinhole camera conventions
+            pinhole_T = cam_conv_R @ np.linalg.inv(camera_pose)
+            pinhole_R_hom = np.eye(4)
+            pinhole_R_hom[:3, :3] = pinhole_T[:3, :3]
+            pinhole_t_hom = pinhole_T[:, 3].reshape(4, 1)
+            
+            # not too sure why the rotation is applied as original non-inverse form, but it works
+            visible_points_world = camera_R_hom @ ((visible_points_hom @ cam_conv_R).T + pinhole_t_hom)
+            visible_points_world = visible_points_world.T[:, :3]  # Drop homogeneous coordinate
             
             # Check if we have enough points
             if visible_points_world.shape[0] >= num_samples:
@@ -100,7 +195,7 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
                 if visible_points_world.shape[0] > num_samples:
                     indices = np.random.choice(visible_points_world.shape[0], num_samples, replace=False)
                     visible_points_world = visible_points_world[indices]
-                return visible_points_world
+                return visible_points_world, camera_pose
             image_size *= 2  # Increase resolution
         print(f"Attempt {attempt+1}: Max resolution reached, trying new viewpoint...")
     raise RuntimeError(f"Failed to sample {num_samples} points from any viewpoint after {max_viewpoint_retries} tries.")
@@ -166,18 +261,17 @@ def process_file(i, data_root_dir, save_root_dir, mode="default"):
         print(i)
     sampled_points = None
     
-    # Sample 5 total partial meshes
     for n in range(5):
-        save_path = save_root_dir / i
-        if (save_path / f"partial_samples_{mode}_{n}.npy").is_file():
-            continue
-        # print(file_path)
-        # Load arguments form yaml file
+        save_path = save_root_dir / i / "models"
+        
+        partial_pc_path = save_path / f"partial_samples_{mode}_{n}.npy"
+
+        # Load partial point cloud sampling options from yaml file
         with open(data_root_dir / "resample.yaml", 'r') as stream:
             args = yaml.safe_load(stream)[mode]
             
-        # Sample the mesh
-        sampled_points = sample_visible_points_from_single_view(simplified_trimesh,
+        # Sample the mesh for partial point clouds
+        sampled_points, camera_pose = sample_visible_points_from_single_view(simplified_trimesh,
                                                                 num_samples=args['num_samples'],
                                                                 fov_degrees=args['fov_degrees'],
                                                                 start_image_size=args['start_image_size'],
@@ -185,109 +279,51 @@ def process_file(i, data_root_dir, save_root_dir, mode="default"):
                                                                 max_image_size=args['max_image_size'],
                                                                 max_viewpoint_retries=args['max_viewpoint_retries'])
         
-        # Visualise with open3d
+        # Visualise with open3d all the point clouds together ##########################
+        # # visualise the full point cloud (sampled separately)
+        # og_full_pc_path = partial_pc_path.parent / f"new_samples_{n}.npy"
+        # full_pcd = o3d.geometry.PointCloud()
+        # full_pcd.points = o3d.utility.Vector3dVector(np.load(og_full_pc_path))
+        # full_pcd.paint_uniform_color([0, 1, 0])  # Green for full point cloud
+        
+        # # visualise the sampled partial point cloud
         # pcd = o3d.geometry.PointCloud()
         # pcd.points = o3d.utility.Vector3dVector(sampled_points)
-        # o3d.visualization.draw_geometries([pcd])
-        # input()
+        # pcd.paint_uniform_color([1, 0, 0])  # Red for sampled point cloud
         
+        # o3d.visualization.draw_geometries([pcd, full_pcd])
+        #################################################################################
+        # # visualise the camera pose and origin axes as point clouds
+        # axis_pcd = create_axis_pointcloud(pose=camera_pose, length=1, step=0.01)
+        # origin_pcd = create_axis_pointcloud(pose=np.eye(4), length=.2, step=0.01)
+        # o3d.visualization.draw_geometries([pcd, full_pcd, axis_pcd, origin_pcd])
+        #################################################################################
         
-        # num_samples = 1000  # Desired number of points to sample
-        # sampled_points = np.empty((0, 3))  # Initialize empty array to store points
-        # while len(sampled_points) < num_samples:
-        #     # print(len(sampled_points))
-        #     new_points = trimesh.sample.volume_mesh(simplified_trimesh, count=1000)  # Always sample 1000 points
-        #     sampled_points = np.vstack((sampled_points, new_points))
-        # # If we end up with more points than needed, trim the array
-        # sampled_points = sampled_points[:num_samples]
+        print(f"Saving to: {save_path / f'partial_samples_{mode}_{n}.npy'}')")
         
-        # print(f"Saving to: {save_path / f'partial_samples_{mode}_{n}.npy'}')")
-        
+        # save the points
         save_path.mkdir(parents=True, exist_ok=True)
-        
-        if (save_path / f"partial_samples_{mode}_{n}.npy").is_file():
-            continue
-        
         np.save(save_path / f"partial_samples_{mode}_{n}.npy", sampled_points)
-    
-    # if sampled_points is None:
-    #     sampled_points = np.load(output_path.parent / f"new_samples_{n}.npy")
-    # name =  i.split("/")[2]
-    # # print(name)
-    # if not Path(_get_seg_points_path(folder,name)).is_file():
-    #     # print(_get_seg_points_path(folder,name))
-    #     return
-    # if not Path(_get_seg_labels_path(folder,name)).is_file():
-    #     # print(_get_seg_labels_path(folder,name))
-    #     return
-    # seg_points = np.loadtxt(_get_seg_points_path(folder,name)).astype(np.float32)
-    # seg_labels = np.loadtxt(_get_seg_labels_path(folder,name)).astype(np.int32)
-    # max_label = seg_labels.max() + 1  # Avoid division by 0
-    # global seg_labels_
-    # if seg_labels_ is None:
-    #     seg_labels_= seg_labels
-    # else:
-    #     seg_labels_ = np.concatenate((seg_labels_, seg_labels))
-    # # print(_get_seg_labels_path(folder,name), max_label)
-    # print(np.unique(seg_labels_, return_counts=True))
-    # import pdb; pdb.set_trace()
-    # return
-    # colors = plt.cm.get_cmap("tab10", max_label)(seg_labels / max_label)[:, :3]  # RGB from colormap
-    # pcd = o3d.geometry.PointCloud()
-    # pcd.points = o3d.utility.Vector3dVector(seg_points)
-    # pcd.colors = o3d.utility.Vector3dVector(colors)
-    # # Convert sampled points to Open3D point cloud
-    # point_cloud = o3d.geometry.PointCloud()
-    # point_cloud.points = o3d.utility.Vector3dVector(sampled_points)
-    # threshold = 0.2  # Distance threshold for ICP
-    # transformation_init = np.eye(4)  # Initial transformation (identity matrix)
-    # theta = np.pi / 2  # 90 degrees in radians
-    # initial_rotation_y = np.array([
-    #     [np.cos(theta), 0, np.sin(theta), 0],
-    #     [0, 1, 0, 0],
-    #     [-np.sin(theta), 0, np.cos(theta), 0],
-    #     [0, 0, 0, 1]
-    # ])
-    # # print("Running ICP...")
-    # reg_icp = o3d.pipelines.registration.registration_icp(
-    #     pcd, point_cloud, threshold, initial_rotation_y,
-    #     o3d.pipelines.registration.TransformationEstimationPointToPoint()
-    # )
-    # pcd.transform(reg_icp.transformation)
-    # sampled_labels = generate_labels_for_sampled_points(sampled_points, np.asarray(pcd.points), seg_labels)
-    # # import pdb; pdb.set_trace()
-    # colors = plt.cm.get_cmap("tab10", seg_labels.max() + 1)(sampled_labels / (seg_labels.max() + 1))[:, :3]
-    # point_cloud.colors = o3d.utility.Vector3dVector(colors)
-    # output = np.vstack([
-    #     np.hstack([np.asarray(point_cloud.points), sampled_labels.reshape(-1, 1)]),
-    #     np.hstack([np.asarray(pcd.points), seg_labels.reshape(-1, 1)])
-    # ])
-    # # Save as 'lamp_<idx>.npy'
-    # print(output_path.parent / f"lamp_{name}.npy")
-    # np.save(output_path.parent / f"lamp_{name}.npy", output)
-    # import pdb; pdb.set_trace()
-    # output = np.vstack([np.hstack([np.asarray(point_cloud.points), sampled_labels.reshape(5000,1)]), np.hstack([np.asarray(pcd.points), seg_labels.reshape(-1, 1)])])
-    # np.save(output_path.parent / "point_resampled_labeled.npy", output)
 
-# folders = {"02691156", "02773838", "02954340", "02958343", "03001627", "03261776", "03467517", "03624134", "03636649", "03642806", "03790512", "03797390", "03948459", "04099429", "04225987", "04379243"}
-folders = {"02691156"}
-# folders =   {"02691156", "02954340", "02958343", "03001627", "03467517", "03624134", "03642806", "03790512", "03797390", "04225987", "04379243", "03948459", "02773838", "04099429", "03261776", "03636649"}
+# folders = {"02691156"}
+folders = {"02691156", "03636649", "03467517", "02954340", "02958343"}    # airplane, lamp, guitar, cap, car
+# folders =   {"03636649", "03467517", "02954340", "02958343"}  # lamp, guitar, cap, car
 if __name__ == "__main__":
-    folders_to_run = []
-    for l in open("/mnt/shape_data/list.txt"):
-        if l.strip().split("/")[1] in folders:
-            folders_to_run.append(l.strip())
-    print(len(folders_to_run))
-    shuffle(folders_to_run)
-    
     parser = argparse.ArgumentParser()
-    parser.add_argument("--src_dir", type=str, default="/mnt/shape_data", help="Root directory for the source mesh.")
-    parser.add_argument("--dst_dir", type=str, default="/mnt/smb/shape_data_eric", help="Root directory for saving the resampled point clouds.")
+    parser.add_argument("--src_dir", type=str, default="data/shape_data_eric", help="Root directory for the source mesh.")
+    parser.add_argument("--dst_dir", type=str, default="data/shape_data_eric", help="Root directory for saving the resampled point clouds.")
     parser.add_argument("--view_mode", type=str, default="default", help="View mode to resample the data. See resample.yaml for options.")
     args = parser.parse_args()
     
     data_root_dir = Path(args.src_dir)
     save_root_dir = Path(args.dst_dir)
+    
+    folders_to_run = []
+    for l in open(data_root_dir / "list.txt"):
+        if l.strip().split("/")[1] in folders:
+            folders_to_run.append(l.strip())
+    print(len(folders_to_run))
+    shuffle(folders_to_run)
     
     for idx, i in tqdm(enumerate(folders_to_run), total=len(folders_to_run)):
         process_file(i, data_root_dir, save_root_dir, args.view_mode)
