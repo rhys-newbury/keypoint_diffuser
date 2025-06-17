@@ -148,7 +148,7 @@ def visualize_point_cloud(
     return np.asarray(pcd.points)
 
 def visualize_reconstructed_point_cloud(
-    recon_shape, keypoints, orig_shape, visual=False, icp=False
+    recon_shape, ref_shape, keypoints, orig_shape, visual=False, icp=False
 ):
     """
     Visualize input point cloud, the encoded keypoints and reconstructed point cloud
@@ -159,41 +159,47 @@ def visualize_reconstructed_point_cloud(
     """
     # Convert tensors to NumPy arrays
     recon_shape_np = recon_shape.cpu().numpy()  # Shape: [N, 3]
+    ref_shape_np = ref_shape.cpu().numpy()  # Shape: [N, 3]
     orig_shape = orig_shape.cpu().numpy()
     keypoints_np = keypoints.cpu().numpy().T  # Shape: [M, 3]
 
     # Create Open3D point cloud
     orig_pcd = o3d.geometry.PointCloud()
     orig_pcd.points = o3d.utility.Vector3dVector(orig_shape)
-    orig_pcd.paint_uniform_color([1, 0, 1])
+    orig_pcd.paint_uniform_color([1, 0, 0])
 
     recon_pcd = o3d.geometry.PointCloud()
     recon_pcd.points = o3d.utility.Vector3dVector(recon_shape_np)
+    recon_pcd.paint_uniform_color([0, 1, 0])
 
+    ref_pcd = o3d.geometry.PointCloud()
+    ref_pcd.points = o3d.utility.Vector3dVector(ref_shape_np)
+    ref_pcd.paint_uniform_color([0, 0, 1])
+    
     # try to align the two point clouds with ICP
     # for reconstructions the two point clouds should be in the same frame, default to false
-    if icp:
-        threshold = 0.2  # Distance threshold for ICP
-        np.eye(4)  # Initial transformation (identity matrix)
+    # if icp:
+    #     threshold = 0.2  # Distance threshold for ICP
+    #     np.eye(4)  # Initial transformation (identity matrix)
 
-        theta = 0  # 90 degrees in radians
-        initial_rotation_y = np.array(
-            [
-                [np.cos(theta), 0, np.sin(theta), 0],
-                [0, 1, 0, 0],
-                [-np.sin(theta), 0, np.cos(theta), 0],
-                [0, 0, 0, 1],
-            ]
-        )
-        reg_icp = o3d.pipelines.registration.registration_icp(
-            recon_pcd,
-            orig_pcd,
-            threshold,
-            initial_rotation_y,
-            o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-        )
+    #     theta = 0  # 90 degrees in radians
+    #     initial_rotation_y = np.array(
+    #         [
+    #             [np.cos(theta), 0, np.sin(theta), 0],
+    #             [0, 1, 0, 0],
+    #             [-np.sin(theta), 0, np.cos(theta), 0],
+    #             [0, 0, 0, 1],
+    #         ]
+    #     )
+    #     reg_icp = o3d.pipelines.registration.registration_icp(
+    #         ref_pcd,
+    #         orig_pcd,
+    #         threshold,
+    #         initial_rotation_y,
+    #         o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+    #     )
 
-        recon_pcd.transform(reg_icp.transformation)
+    #     ref_pcd.transform(reg_icp.transformation)
 
     if visual:
         keypoint_spheres = []
@@ -203,13 +209,13 @@ def visualize_reconstructed_point_cloud(
             )  # Adjust radius as needed
 
             sphere.translate(keypoint)
-            sphere.paint_uniform_color([0, 0, 1])  # Blue color
+            sphere.paint_uniform_color([1, 0, 1])  # Pink color
             keypoint_spheres.append(sphere)
 
         # Visualize
         o3d.visualization.draw_geometries(
-            [recon_pcd, orig_pcd, *keypoint_spheres],
-            window_name="Point Cloud with Labels and Keypoints",
+            [recon_pcd, orig_pcd, ref_pcd, *keypoint_spheres],
+            window_name="R: Input point cloud; G: Reconstructed point cloud; B: Reference point cloud; Keypoints in pink",
         )
 
 
@@ -286,7 +292,7 @@ def test(opt):
             else:
                 target_shape_t = (
                     data["target_partial_shape"]
-                    .view(data["partial_orig_offset"].shape[0], -1, 3)
+                    .view(data["orig_offset"].shape[0], -1, 3)
                     .transpose(1, 2)
                     .cuda()
                 )
@@ -322,6 +328,8 @@ def test(opt):
 
                 # from new_samples.npy / partial_samples.npy
                 points = target_shape_t[i, ...].T
+                ref_points = ref_shape_t[i, ...].T
+                recon_points = recons[i, ...]
 
                 seg_labels = target_sampled_points[i, :, -1].int().cuda()
                 seg_points = target_sampled_points[i, :, :3]
@@ -335,12 +343,13 @@ def test(opt):
                     # visual=True,
                 )
 
-                # visualise the input point cloud with keypoints, and the reconstructed point cloud
+                # visualise the input point cloud with keypoints, the reconstructed point cloud, and the ref point cloud
                 visualize_reconstructed_point_cloud(
-                    recons[i],
+                    recon_points,
+                    ref_points, 
                     kp,
                     points,
-                    # visual=True,
+                    visual=True,
                     )
 
                 distances = torch.cdist(kp.double(), torch.tensor(seg_points).cuda())
