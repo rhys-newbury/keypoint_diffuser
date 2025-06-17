@@ -302,15 +302,7 @@ class ShapesPartial(torch.utils.data.Dataset):
 
         return dataset
 
-    def _get_pointcloud_path(self, name, category=None):
-        # if self.opt.test_partial_samples:
-        #     if "default" in self.opt.partial_view_mode:
-        #         s = f"partial_samples_{random.randint(0, 4)}.npy" 
-        #     else:
-        #         s = f"partial_samples_{self.opt.partial_view_mode}_{random.randint(0, 4)}.npy"
-        # else:
-        #     s = f"new_samples_{random.randint(0, 4)}.npy"
-            
+    def _get_pointcloud_path(self, name, category=None):            
         return os.path.join(
             self.opt.points_dir,
             (str(category).zfill(8) if category is not None else self.opt.category),
@@ -327,11 +319,8 @@ class ShapesPartial(torch.utils.data.Dataset):
             (str(category).zfill(8) if category is not None else self.opt.category),
             name,
             "models",
-            (
-                f"partial_samples_{random.randint(0, 4)}.npy" 
-                if "default" in self.opt.partial_view_mode 
-                else f"partial_samples_{self.opt.partial_view_mode}_{random.randint(0, 4)}.npy"
-            ),              # TODO: does this need to be matched with the int for pointcloud_path?
+            f"partial_samples_{self.opt.partial_view_mode}_{random.randint(0, 4)}.npy",
+            # different sample numbers are still in the same frame, no need to match
         )
         
     def _get_mesh_path(self, name, category=None):
@@ -522,6 +511,7 @@ class ShapesPartial(torch.utils.data.Dataset):
                     )
                 )
                 index += 1
+                continue
 
             if self.transform:
                 # TODO: add using original deformation or partial view
