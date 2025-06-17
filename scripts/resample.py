@@ -105,100 +105,110 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
     If not enough points are captured, try new views up to `max_viewpoint_retries`.
     """
 
-    for attempt in range(max_viewpoint_retries):
-        # Generate a random viewpoint
-        # sample from half spherical surface
-        phi = np.random.uniform(0, 2 * np.pi)
-        theta = np.random.uniform(0, np.pi)
-        x = radius * np.sin(theta) * np.cos(phi)
-        y = radius * np.sin(theta) * np.sin(phi)
-        z = radius * np.cos(theta)
-        viewpoint = np.array([x, y, z])
+    min_radius = 0.1
+    while radius >= min_radius:
+        for attempt in range(max_viewpoint_retries):
+            # Generate a random viewpoint
+            # sample from half spherical surface
+            phi = np.random.uniform(0, 2 * np.pi)
+            theta = np.random.uniform(0, np.pi)
+            x = radius * np.sin(theta) * np.cos(phi)
+            y = radius * np.sin(theta) * np.sin(phi)
+            z = radius * np.cos(theta)
+            viewpoint = np.array([x, y, z])
+            
+            # Setup scene
+            scene = pyrender.Scene()
+            mesh_pyrender = pyrender.Mesh.from_trimesh(mesh, smooth=False)
+            scene.add(mesh_pyrender)
+            camera = pyrender.PerspectiveCamera(yfov=np.radians(fov_degrees))
+            camera_pose, axis_pose = look_at(eye=viewpoint, center=np.array([0, 0, 0]), up=np.array([0, 1, 0]))
+            
+            light = pyrender.DirectionalLight(color=np.ones(3), intensity=3.0)
+            scene.add(light, pose=camera_pose)  # Add light from same direction as the camera
+            scene.add(camera, pose=camera_pose)
+            
+            # visualise the pyrender scene with additional axes for camera and origin
+            # axis_mesh = pyrender.Mesh.from_trimesh(trimesh.creation.axis(axis_length=2, origin_size=0.001), smooth=False)
+            # scene.add(axis_mesh, pose=axis_pose)
+            
+            # oaxis = trimesh.creation.axis(axis_length=2)
+            # oaxis.visual.face_colors = np.array([255, 255, 0, 255])  # yellow
+            # origin_mesh = pyrender.Mesh.from_trimesh(oaxis, smooth=False)
+            # scene.add(origin_mesh, pose=np.eye(4))  # Add origin axis for reference
+            
+            image_size = start_image_size
+            while image_size <= max_image_size:
+                # Render images in the scene
+                r = pyrender.OffscreenRenderer(image_size, image_size)
+                color, depth = r.render(scene)
+                color_img = Image.fromarray((color * 255).astype(np.uint8))
+                color_img.save(f"render_color_{attempt}.png")
+                r.delete()
+                
+                # Convert depth to 3D points
+                fx = fy = image_size / (2 * np.tan(np.radians(fov_degrees / 2)))
+                cx = cy = image_size / 2
+                i, j = np.meshgrid(np.arange(image_size), np.arange(image_size))
+                i = i.flatten()
+                j = j.flatten()
+                z = depth.flatten()
+                valid = z > 0
+                x = (i[valid] - cx) * z[valid] / fx
+                y = (j[valid] - cy) * z[valid] / fy
+                visible_points = np.vstack((x, y, z[valid])).T
+                visible_points_hom = np.hstack((visible_points, np.ones((visible_points.shape[0], 1))))
+                
+                # camera matrices for transforms
+                camera_R_hom = np.eye(4)
+                camera_R_hom[:3, :3] = camera_pose[:3, :3]
+                camera_t_hom = camera_pose[:, 3].reshape(4, 1)
+                
+                cam_inv = np.linalg.inv(camera_pose)
+                cam_inv_R_hom = np.eye(4)
+                cam_inv_R_hom[:3, :3] = cam_inv[:3, :3]
+                cam_inv_t_hom = cam_inv[:, 3].reshape(4, 1)
+                
+                # since the points were obtained from pinhole camera conventions, 
+                # need to apply the rotation to the camera pose, 
+                # then apply inverse to get the points into the world frame
+                
+                # rotation matrix for conversion between pyrender/opengl and pinhole camera conventions
+                cam_conv_R = np.array([
+                        [1,  0,  0, 0],
+                        [0, -1,  0, 0],
+                        [0,  0, -1, 0],
+                        [0,  0,  0, 1]
+                    ])
+                
+                # get the inverse transform in pinhole camera conventions
+                pinhole_T = cam_conv_R @ np.linalg.inv(camera_pose)
+                pinhole_R_hom = np.eye(4)
+                pinhole_R_hom[:3, :3] = pinhole_T[:3, :3]
+                pinhole_t_hom = pinhole_T[:, 3].reshape(4, 1)
+                
+                # not too sure why the rotation is applied as original non-inverse form, but it works
+                visible_points_world = camera_R_hom @ ((visible_points_hom @ cam_conv_R).T + pinhole_t_hom)
+                visible_points_world = visible_points_world.T[:, :3]  # Drop homogeneous coordinate
+                
+                # Check if we have enough points
+                if visible_points_world.shape[0] >= num_samples:
+                    # Downsample if needed
+                    if visible_points_world.shape[0] > num_samples:
+                        indices = np.random.choice(visible_points_world.shape[0], num_samples, replace=False)
+                        visible_points_world = visible_points_world[indices]
+                    return visible_points_world, camera_pose
+                image_size *= 2  # Increase resolution
+            print(f"Attempt {attempt+1}: Max resolution reached, trying new viewpoint...")
+            
+        # some objects are really small for some reason, sample from a smaller radius
+        radius *= 0.5  # Reduce radius for next attempt
+        print(f"Failed to sample {num_samples} points from any viewpoint after {max_viewpoint_retries} tries. Trying smaller radius: {radius}")
         
-        # Setup scene
-        scene = pyrender.Scene()
-        mesh_pyrender = pyrender.Mesh.from_trimesh(mesh, smooth=False)
-        scene.add(mesh_pyrender)
-        camera = pyrender.PerspectiveCamera(yfov=np.radians(fov_degrees))
-        camera_pose, axis_pose = look_at(eye=viewpoint, center=np.array([0, 0, 0]), up=np.array([0, 1, 0]))
-        
-        light = pyrender.DirectionalLight(color=np.ones(3), intensity=3.0)
-        scene.add(light, pose=camera_pose)  # Add light from same direction as the camera
-        scene.add(camera, pose=camera_pose)
-        
-        # visualise the pyrender scene with additional axes for camera and origin
-        # axis_mesh = pyrender.Mesh.from_trimesh(trimesh.creation.axis(axis_length=2, origin_size=0.001), smooth=False)
-        # scene.add(axis_mesh, pose=axis_pose)
-        
-        # oaxis = trimesh.creation.axis(axis_length=2)
-        # oaxis.visual.face_colors = np.array([255, 255, 0, 255])  # yellow
-        # origin_mesh = pyrender.Mesh.from_trimesh(oaxis, smooth=False)
-        # scene.add(origin_mesh, pose=np.eye(4))  # Add origin axis for reference
-        
-        image_size = start_image_size
-        while image_size <= max_image_size:
-            # Render images in the scene
-            r = pyrender.OffscreenRenderer(image_size, image_size)
-            color, depth = r.render(scene)
-            color_img = Image.fromarray((color * 255).astype(np.uint8))
-            color_img.save(f"render_color_{attempt}.png")
-            r.delete()
-            
-            # Convert depth to 3D points
-            fx = fy = image_size / (2 * np.tan(np.radians(fov_degrees / 2)))
-            cx = cy = image_size / 2
-            i, j = np.meshgrid(np.arange(image_size), np.arange(image_size))
-            i = i.flatten()
-            j = j.flatten()
-            z = depth.flatten()
-            valid = z > 0
-            x = (i[valid] - cx) * z[valid] / fx
-            y = (j[valid] - cy) * z[valid] / fy
-            visible_points = np.vstack((x, y, z[valid])).T
-            visible_points_hom = np.hstack((visible_points, np.ones((visible_points.shape[0], 1))))
-            
-            # camera matrices for transforms
-            camera_R_hom = np.eye(4)
-            camera_R_hom[:3, :3] = camera_pose[:3, :3]
-            camera_t_hom = camera_pose[:, 3].reshape(4, 1)
-            
-            cam_inv = np.linalg.inv(camera_pose)
-            cam_inv_R_hom = np.eye(4)
-            cam_inv_R_hom[:3, :3] = cam_inv[:3, :3]
-            cam_inv_t_hom = cam_inv[:, 3].reshape(4, 1)
-            
-            # since the points were obtained from pinhole camera conventions, 
-            # need to apply the rotation to the camera pose, 
-            # then apply inverse to get the points into the world frame
-            
-            # rotation matrix for conversion between pyrender/opengl and pinhole camera conventions
-            cam_conv_R = np.array([
-                    [1,  0,  0, 0],
-                    [0, -1,  0, 0],
-                    [0,  0, -1, 0],
-                    [0,  0,  0, 1]
-                ])
-            
-            # get the inverse transform in pinhole camera conventions
-            pinhole_T = cam_conv_R @ np.linalg.inv(camera_pose)
-            pinhole_R_hom = np.eye(4)
-            pinhole_R_hom[:3, :3] = pinhole_T[:3, :3]
-            pinhole_t_hom = pinhole_T[:, 3].reshape(4, 1)
-            
-            # not too sure why the rotation is applied as original non-inverse form, but it works
-            visible_points_world = camera_R_hom @ ((visible_points_hom @ cam_conv_R).T + pinhole_t_hom)
-            visible_points_world = visible_points_world.T[:, :3]  # Drop homogeneous coordinate
-            
-            # Check if we have enough points
-            if visible_points_world.shape[0] >= num_samples:
-                # Downsample if needed
-                if visible_points_world.shape[0] > num_samples:
-                    indices = np.random.choice(visible_points_world.shape[0], num_samples, replace=False)
-                    visible_points_world = visible_points_world[indices]
-                return visible_points_world, camera_pose
-            image_size *= 2  # Increase resolution
-        print(f"Attempt {attempt+1}: Max resolution reached, trying new viewpoint...")
-    raise RuntimeError(f"Failed to sample {num_samples} points from any viewpoint after {max_viewpoint_retries} tries.")
+    # failed to sample after all attempts. skip and log the model path causing the error
+    print(f"Failed to sample {num_samples} points from any viewpoint after {max_viewpoint_retries} tries.")
+    return None, None
+    # raise RuntimeError(f"Failed to sample {num_samples} points from any viewpoint after {max_viewpoint_retries} tries.")
 
 def _get_seg_points_path(folder, name):
     return os.path.join("/mnt/slow/Shapenetcore_benchmark", folder, 'points', name + '.pts')
@@ -227,7 +237,9 @@ def generate_labels_for_sampled_points(sampled_points, seg_points, seg_labels):
 # from concurrent.futures import ThreadPoolExecutor
 seg_labels_ = None
 # count, total = 0,0
-def process_file(i, data_root_dir, save_root_dir, mode="default"):
+def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=False):
+    failed_list = []
+    
     # Original pre-processed model file
     file_path = data_root_dir / Path(f"{i}/models/model_normalized2.obj")
     if not file_path.is_file():
@@ -261,15 +273,23 @@ def process_file(i, data_root_dir, save_root_dir, mode="default"):
         print(i)
     sampled_points = None
     
+    # Load partial point cloud sampling options from yaml file
+    with open(data_root_dir / "resample.yaml", 'r') as stream:
+        args = yaml.safe_load(stream)[mode]
+    
     for n in range(5):
         save_path = save_root_dir / i / "models"
         
         partial_pc_path = save_path / f"partial_samples_{mode}_{n}.npy"
-
-        # Load partial point cloud sampling options from yaml file
-        with open(data_root_dir / "resample.yaml", 'r') as stream:
-            args = yaml.safe_load(stream)[mode]
+        
+        # skip if the file already exists
+        if partial_pc_path.is_file():
+            print(f"File already exists: {partial_pc_path}")
+            if not overwrite:
+                continue
             
+        print(f"Processing: {save_path / f'partial_samples_{mode}_{n}.npy'}')")
+        
         # Sample the mesh for partial point clouds
         sampled_points, camera_pose = sample_visible_points_from_single_view(simplified_trimesh,
                                                                 num_samples=args['num_samples'],
@@ -278,6 +298,12 @@ def process_file(i, data_root_dir, save_root_dir, mode="default"):
                                                                 radius=args['radius'],
                                                                 max_image_size=args['max_image_size'],
                                                                 max_viewpoint_retries=args['max_viewpoint_retries'])
+        
+        # if no points were sampled successfully then both outputs will be None
+        if sampled_points is None or camera_pose is None:
+            print(f"Failed to sample points for {save_root_dir / i}. Skipping...")
+            failed_list.append(save_root_dir / i)
+            break
         
         # Visualise with open3d all the point clouds together ##########################
         # # visualise the full point cloud (sampled separately)
@@ -299,20 +325,33 @@ def process_file(i, data_root_dir, save_root_dir, mode="default"):
         # o3d.visualization.draw_geometries([pcd, full_pcd, axis_pcd, origin_pcd])
         #################################################################################
         
-        print(f"Saving to: {save_path / f'partial_samples_{mode}_{n}.npy'}')")
+        # print(f"Saving to: {save_path / f'partial_samples_{mode}_{n}.npy'}')")
         
         # save the points
         save_path.mkdir(parents=True, exist_ok=True)
         np.save(save_path / f"partial_samples_{mode}_{n}.npy", sampled_points)
+        
+    # save the failed list to a file
+    if failed_list:
+        with open("failed_list.txt", 'a') as f:
+            # log time
+            dt = np.datetime64('now') + np.timedelta64(10, 'h')
+            f.write(f"{dt}\n")
+            for item in failed_list:
+                f.write(f"{item}\n")
 
-# folders = {"02691156"}
-folders = {"02691156", "03636649", "03467517", "02954340", "02958343"}    # airplane, lamp, guitar, cap, car
+folders = {"02691156"}
+# folders = {"02691156", "03636649", "03467517", "02954340", "02958343"}    # airplane, lamp, guitar, cap, car
 # folders =   {"03636649", "03467517", "02954340", "02958343"}  # lamp, guitar, cap, car
+# folders = {"02691156", "03636649",}
+# folders = {"02691156", "03467517", "02954340", "02958343", "03797390", "04225987"}    # airplane, lamp, guitar, cap, car, mug, skateboard
+# folders = {"03467517", "02954340", "02958343", "03797390", "04225987"}    # lamp, guitar, cap, car, mug, skateboard
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--src_dir", type=str, default="data/shape_data_eric", help="Root directory for the source mesh.")
-    parser.add_argument("--dst_dir", type=str, default="data/shape_data_eric", help="Root directory for saving the resampled point clouds.")
+    parser.add_argument("--src_dir", type=str, default="/mnt/slow/shape_data_eric", help="Root directory for the source mesh.")
+    parser.add_argument("--dst_dir", type=str, default="/mnt/slow/shape_data_eric", help="Root directory for saving the resampled point clouds.")
     parser.add_argument("--view_mode", type=str, default="default", help="View mode to resample the data. See resample.yaml for options.")
+    parser.add_argument("--overwrite", action='store_true', help="Overwrite existing files if they exist.")
     args = parser.parse_args()
     
     data_root_dir = Path(args.src_dir)
@@ -326,4 +365,4 @@ if __name__ == "__main__":
     shuffle(folders_to_run)
     
     for idx, i in tqdm(enumerate(folders_to_run), total=len(folders_to_run)):
-        process_file(i, data_root_dir, save_root_dir, args.view_mode)
+        process_file(i, data_root_dir, save_root_dir, args.view_mode, args.overwrite)

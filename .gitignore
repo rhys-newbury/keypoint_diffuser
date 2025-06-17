@@ -16,3 +16,4 @@ data/*
 build/*
 *.gif
 *.npz
+failed_list.txt
