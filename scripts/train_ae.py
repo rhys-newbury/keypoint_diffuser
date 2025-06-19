@@ -623,7 +623,7 @@ def train(opt, rank, world_size):
             
             partial_target_shape_t = (
                 data["target_partial_shape"]
-                .view(data["partial_orig_offset"].shape[0], -1, 3)
+                .view(data["orig_offset"].shape[0], -1, 3)
                 .transpose(1, 2)
                 .cuda()
             )
@@ -652,25 +652,25 @@ def train(opt, rank, world_size):
             #     get_network_data(data, "partial_orig"), step=t
             # )
             
-            orig_data = get_network_data(data)
+            # orig_data = get_network_data(data)
             partial_data = get_network_data(data, "partial_orig")
 
             z0, partial_mu, partial_logvar = module.encode(partial_data)
             z_aux = reparameterize(partial_mu, partial_logvar)
             partial_code = torch.cat([z0, z_aux], dim=1)
 
-            orig_ts = orig_data["target_shape"].view(-1, 5000, 3).cuda()
-            if module.use_edm:
-                partial_diffusion_loss = module.loss(
-                    net=module.diffusion, data=orig_ts, code=partial_code.detach(), step=t
-                ).mean()
-            else:
-                partial_diffusion_loss = module.diffusion.get_loss(orig_ts.transpose(1, 2), partial_code)
+            # orig_ts = orig_data["target_shape"].view(-1, 5000, 3).cuda()
+            # if module.use_edm:
+            #     partial_diffusion_loss = module.loss(
+            #         net=module.diffusion, data=orig_ts, code=partial_code.detach(), step=t
+            #     ).mean()
+            # else:
+            #     partial_diffusion_loss = module.diffusion.get_loss(orig_ts.transpose(1, 2), partial_code)
 
             ################################################################################################
 
             partial_code_ = partial_code[:, : opt.latent_dim * 3].reshape(
-                data["partial_orig_offset"].shape[0], -1, 3
+                data["orig_offset"].shape[0], -1, 3
             )
 
             # kl divergence (full point cloud)
@@ -681,13 +681,14 @@ def train(opt, rank, world_size):
             partial_q = Normal(partial_mu, torch.exp(0.5 * logvar))
             partial_p = Normal(torch.zeros_like(partial_mu), torch.ones_like(partial_logvar))
 
+            # linear warmup until t=kl_warmup_steps
             lambda_4 = 0 if opt.lambda_4 == 0 else min(1.0, t / kl_warmup_steps)
             kl = kl_divergence(q, p).sum(dim=1).mean()
             partial_kl = kl_divergence(partial_q, partial_p).sum(dim=1).mean()
 
             if rank == 0:
                 wandb.log({"diffusion_loss": diffusion_loss}, step=t)
-                wandb.log({"partial_diffusion_loss": partial_diffusion_loss}, step=t)
+                # wandb.log({"partial_diffusion_loss": partial_diffusion_loss}, step=t)
                 wandb.log({"kl_divergence": kl}, step=t)
                 wandb.log({"partial_kl_divergence": partial_kl}, step=t)
 
@@ -700,14 +701,8 @@ def train(opt, rank, world_size):
 
             fps_loss, _ = pytorch3d.loss.chamfer_distance(fps, code_)
             
-            # fps (partial point cloud)
-            if t > opt.fps_steps and lambda_0 > 0:
-                print("turing off FPS loss")
-                lambda_0 = 0
-
-            partial_fps = sample_farthest_points(partial_target_shape_t, opt.latent_dim).transpose(2, 1)
-
-            partial_fps_loss, _ = pytorch3d.loss.chamfer_distance(partial_fps, partial_code_)
+            # fps (partial point cloud, target fps points generated from the original point cloud)
+            partial_fps_loss, _ = pytorch3d.loss.chamfer_distance(fps, partial_code_)
             
             if rank == 0:
                 wandb.log({"fps_loss": fps_loss}, step=t)
@@ -719,9 +714,9 @@ def train(opt, rank, world_size):
                 code_, target_shape_t.transpose(2, 1)
             )
             
-            # chamfer loss (partial point cloud)
+            # chamfer loss (partial point cloud keypoints with the full point cloud as target)
             partial_chamfer_loss, _ = pytorch3d.loss.chamfer_distance(
-                partial_code_, partial_target_shape_t.transpose(2, 1)
+                partial_code_, target_shape_t.transpose(2, 1)
             )
             
             # deformation consistency mse (full point cloud & differentialble transformation)
@@ -740,26 +735,34 @@ def train(opt, rank, world_size):
             # partial view consistency mse (full point cloud & partial view)
             # use keypoint predictions from the encoder process
             kp_partial = partial_code_.reshape(partial_code.shape[0], -1, 3)
-            partial_mse_loss = torch.mean((kp_partial - kp_deformed) ** 2)
+            partial_mse_loss = torch.mean((kp_orig - kp_partial) ** 2)
             
             # partial view consistency mse (partial view point cloud & deformed partial view)
-            data["partial_deformed_shape"].view(data["partial_orig_offset"].shape[0], -1, 3)
+            # data["partial_deformed_shape"].view(data["partial_orig_offset"].shape[0], -1, 3)
 
-            partial_deformed_matrix = data["partial_deformed_transformation"].view(
-                data["partial_orig_offset"].shape[0], -1, 3
-            )
+            # partial_deformed_matrix = data["partial_deformed_transformation"].view(
+            #     data["partial_orig_offset"].shape[0], -1, 3
+            # )
 
-            partial_deformed_code, _, _ = net(get_network_data(data, "partial_deformed"))
-            kp_partial_deformed = partial_deformed_code.reshape(code.shape[0], -1, 3)
-            kp_partial_transformed = torch.bmm(kp_partial, partial_deformed_matrix.transpose(1, 2))
-            partial_deformed_mse_loss = torch.mean((kp_partial_transformed - kp_partial_deformed) ** 2)
+            # partial_deformed_code, _, _ = net(get_network_data(data, "partial_deformed"))
+            # kp_partial_deformed = partial_deformed_code.reshape(code.shape[0], -1, 3)
+            # kp_partial_transformed = torch.bmm(kp_partial, partial_deformed_matrix.transpose(1, 2))
+            # partial_deformed_mse_loss = torch.mean((kp_partial_transformed - kp_partial_deformed) ** 2)
+            
+            
+            # partial warmup
+            if opt.lambda_p == 0:
+                lambda_p = 0
+            else:
+                lambda_p = 0 if t < opt.partial_start_steps else min(1.0, (t - opt.partial_start_steps) / opt.partial_warmup_steps)
             
             # combine all losses
-            total_diffusion_loss = diffusion_loss + partial_diffusion_loss
-            total_fps_loss = fps_loss + partial_fps_loss
-            total_kl_loss = kl + partial_kl
-            total_chamfer_loss = chamfer_loss + partial_chamfer_loss
-            total_mse_loss = mse_loss + partial_mse_loss + partial_deformed_mse_loss
+            total_diffusion_loss = diffusion_loss #+ partial_diffusion_loss
+            total_fps_loss = fps_loss + lambda_p * partial_fps_loss
+            total_kl_loss = kl + lambda_p * partial_kl
+            total_chamfer_loss = chamfer_loss + lambda_p * partial_chamfer_loss
+            total_mse_loss = mse_loss + lambda_p * partial_mse_loss #+ partial_deformed_mse_loss
+            
 
             loss_ = (
                 lambda_0 * total_fps_loss
@@ -771,6 +774,7 @@ def train(opt, rank, world_size):
 
             if rank == 0:
                 wandb.log({"chamfer_loss": chamfer_loss, "mse_loss": mse_loss}, step=t)
+                wandb.log({"partial_chamfer_loss": partial_chamfer_loss, "partial_mse_loss": partial_mse_loss}, step=t)
 
             loss = max(0, max_schedule - t) / max_schedule * loss_
 

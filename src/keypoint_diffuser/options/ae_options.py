@@ -22,6 +22,8 @@ class AEConfig:
     subdir: str = "test"
     batch_size: int = 48
     kl_warmup_steps: int = 10000
+    partial_warmup_steps: int = 10000
+    partial_start_steps: int = 10000
     fps_steps: int = 1000
     max_schedule: int = 100000
     print_options: bool = False
@@ -84,6 +86,7 @@ class AEConfig:
     lambda_2: int = 1
     lambda_3: int = 1
     lambda_4: int = 1
+    lambda_p: int = 1
 
 
 class AEOptions:
