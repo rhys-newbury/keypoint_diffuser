@@ -86,6 +86,57 @@ def normalize_to_box(inp):
 
     return inp, centroid, furthest_distance
 
+def normalize_to_box_multi(inp, pinp):
+    """
+    normalize point cloud to unit bounding box
+    keep statefulness to apply the same normalization to a second point cloud
+    center = (max - min)/2
+    scale = max(abs(x))
+    inp: pc [N, P, dim] or [P, dim]
+    output: pc, centroid, furthest_distance
+
+    From https://github.com/yifita/pytorch_points
+    """
+    assert pinp.shape == inp.shape
+    if len(inp.shape) == 2:
+        axis = 0
+        P = inp.shape[0]
+        D = inp.shape[1]
+    elif len(inp.shape) == 3:
+        axis = 1
+        P = inp.shape[1]
+        D = inp.shape[2]
+    else:
+        raise ValueError()
+
+    assert type(pinp) == type(inp)
+    if isinstance(inp, np.ndarray):
+        maxP = np.amax(inp, axis=axis, keepdims=True)
+        minP = np.amin(inp, axis=axis, keepdims=True)
+        centroid = (maxP + minP) / 2
+        inp = inp - centroid
+        furthest_distance = np.amax(np.abs(inp), axis=(axis, -1), keepdims=True)
+        inp = inp / furthest_distance
+        pinp = pinp - centroid
+        pinp = pinp / furthest_distance
+    elif isinstance(inp, torch.Tensor):
+        maxP = torch.max(inp, dim=axis, keepdim=True)[0]
+        minP = torch.min(inp, dim=axis, keepdim=True)[0]
+        centroid = (maxP + minP) / 2
+        inp = inp - centroid
+        in_shape = [*list(inp.shape[:axis]), P * D]
+        furthest_distance = torch.max(
+            torch.abs(inp).reshape(in_shape), dim=axis, keepdim=True
+        )[0]
+        furthest_distance = furthest_distance.unsqueeze(-1)
+        inp = inp / furthest_distance
+        pinp = pinp - centroid
+        pinp = pinp / furthest_distance
+    else:
+        raise ValueError()
+
+    return inp, pinp, centroid, furthest_distance
+
 
 class Timer:
     def __init__(self, name=None, acc=False, avg=False):

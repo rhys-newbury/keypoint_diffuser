@@ -13,7 +13,7 @@ import pandas as pd
 import torch
 
 from ..utils.io import find_files, read_keypoints, read_pcd
-from ..utils.utils import normalize_to_box
+from ..utils.utils import normalize_to_box_multi
 
 
 class ShapesPartial(torch.utils.data.Dataset):
@@ -55,12 +55,12 @@ class ShapesPartial(torch.utils.data.Dataset):
     def modify_commandline_options(parser):
         return parser
 
-    def normalize(self, x):
+    def normalize(self, x, xp):
         if self.opt.normalize == "unit_box":
-            pc, center, scale = normalize_to_box(x)
+            pc, pcp, center, scale = normalize_to_box_multi(x, xp)
         else:
             raise ValueError()
-        return pc, center, scale
+        return pc, pcp, center, scale
 
     def __init__(self, opt, transform=None):
         self.opt = opt
@@ -407,22 +407,23 @@ class ShapesPartial(torch.utils.data.Dataset):
         )
 
         # get point cloud
+        # print(f"point_cloud: {self._get_pointcloud_path(name, category)}")
+        # print(f"partial_point_cloud: {self._get_partial_pointcloud_path(name, category)}")
         points = np.load(self._get_pointcloud_path(name, category))
         points = torch.from_numpy(points).float()
-
-        points[:, :3], center, scale = self.normalize(points[:, :3])
-        points = points.clone()
-
-        normals = points[:, 3:6].clone()
-        label = points[:, -1].clone()
-        shape = points[:, :3].clone()
 
         # get partial point cloud
         partial = np.load(self._get_partial_pointcloud_path(name, category))
         partial = torch.from_numpy(partial).float()
 
-        partial[:, :3], center, scale = self.normalize(partial[:, :3])
+        # normalize point clouds
+        points[:, :3], partial[:, :3], center, scale = self.normalize(points[:, :3], partial[:, :3])
+        points = points.clone()
         partial = partial.clone()
+
+        normals = points[:, 3:6].clone()
+        label = points[:, -1].clone()
+        shape = points[:, :3].clone()
 
         partial_normals = partial[:, 3:6].clone()
         partial_label = partial[:, -1].clone()
@@ -514,17 +515,16 @@ class ShapesPartial(torch.utils.data.Dataset):
                 continue
 
             if self.transform:
-                # TODO: add using original deformation or partial view
-                # 1. random decision of which to use?
-                # 2. replace with only one option?
-                # 3. just use both? <----
-                
-                
                 # original deformation transform
                 transformed, deformed = self.transform(
                     {"coord": sample["target_shape"].cpu().numpy()}
                 )  # Apply transform
-                # import pdb; pdb.set_trace()
+                
+                # unused alt transform function
+                # transformed, partial, deformed = self.transform(
+                #     sample,
+                # )  # Apply transform
+                
                 # also transform partial view point cloud
                 partial, partial_deformed = self.transform(
                     {"coord": sample["target_partial_shape"].cpu().numpy()}
@@ -544,10 +544,10 @@ class ShapesPartial(torch.utils.data.Dataset):
                         f"partial_orig_{key}": value.cuda()
                         for key, value in partial.items()
                     },
-                    **{
-                        f"partial_deformed_{key}": value.cuda()
-                        for key, value in partial_deformed.items()
-                    },
+                    # **{
+                    #     f"partial_deformed_{key}": value.cuda()
+                    #     for key, value in partial_deformed.items()
+                    # },
                 }
                 
             return sample

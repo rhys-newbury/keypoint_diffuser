@@ -236,3 +236,36 @@ class Deform:
         data_dict["transformation"] = transformation.cpu().numpy().squeeze()
 
         return original, data_dict
+
+# class ApplyToAll:
+#     def __init__(self, transform):
+#         """Applies the same transformation to both versions"""
+#         self.transform = transform
+
+#     def __call__(self, samples):
+#         original, partial, deformed = samples
+#         return self.transform(original), self.transform(partial), self.transform(deformed)
+
+
+# class DeformWithPartial:
+#     # def __call__(self, data_dict, partial_data_dict):
+#     def __call__(self, full_data_dict):
+#         data_dict = {"coord": full_data_dict["target_shape"].cpu().numpy()}
+#         partial_data_dict = {"coord": full_data_dict["target_partial_shape"].cpu().numpy()}
+#         original = copy.deepcopy(data_dict)
+#         partial = copy.deepcopy(partial_data_dict)
+
+#         new_pc, transformation = apply_general_deformation(
+#             torch.Tensor(data_dict["coord"][None, :, :]).cuda(),
+#             apply_stretch=True,
+#             apply_bend=True,
+#             apply_twist=True,
+#             apply_taper=True,
+#             apply_noise=False,
+#         )
+
+#         data_dict["shape"] = new_pc.cpu().numpy().squeeze()
+#         data_dict["coord"] = new_pc.cpu().numpy().squeeze()
+#         data_dict["transformation"] = transformation.cpu().numpy().squeeze()
+
+#         return original, partial, data_dict

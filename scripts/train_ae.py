@@ -42,6 +42,8 @@ from keypoint_diffuser.utils.transforms import (
     Deform,
     GridSample,
     ToTensor,
+    # ApplyToAll,
+    # DeformWithPartial,
 )
 from torchvision import transforms
 
@@ -160,12 +162,12 @@ def visualize_reconstructed_point_cloud(
     # Convert tensors to NumPy arrays
     recon_shape_np = recon_shape.cpu().numpy()  # Shape: [N, 3]
     ref_shape_np = ref_shape.cpu().numpy()  # Shape: [N, 3]
-    orig_shape = orig_shape.cpu().numpy()
+    orig_shape_np = orig_shape.cpu().numpy()
     keypoints_np = keypoints.cpu().numpy().T  # Shape: [M, 3]
 
     # Create Open3D point cloud
     orig_pcd = o3d.geometry.PointCloud()
-    orig_pcd.points = o3d.utility.Vector3dVector(orig_shape)
+    orig_pcd.points = o3d.utility.Vector3dVector(orig_shape_np)
     orig_pcd.paint_uniform_color([1, 0, 0])
 
     recon_pcd = o3d.geometry.PointCloud()
@@ -201,6 +203,13 @@ def visualize_reconstructed_point_cloud(
 
     #     ref_pcd.transform(reg_icp.transformation)
 
+    # get the path for the source of the partial point cloud, and load it in
+    # loaded_path = "data/shape_data_eric/03797390/10f6e09036350e92b3f21f1137c3c347/models/partial_samples_myopia_2.npy"
+    # loaded_points = np.load(loaded_path)
+    # loaded_pcd = o3d.geometry.PointCloud()
+    # loaded_pcd.points = o3d.utility.Vector3dVector(loaded_points[:, :3])
+    # loaded_pcd.paint_uniform_color([0.5, 0.5, 0.5])  # Grey color for loaded points
+
     if visual:
         keypoint_spheres = []
         for keypoint in keypoints_np.T:
@@ -214,6 +223,7 @@ def visualize_reconstructed_point_cloud(
 
         # Visualize
         o3d.visualization.draw_geometries(
+            # [recon_pcd, orig_pcd, ref_pcd, *keypoint_spheres, loaded_pcd],
             [recon_pcd, orig_pcd, ref_pcd, *keypoint_spheres],
             window_name="R: Input point cloud; G: Reconstructed point cloud; B: Reference point cloud; Keypoints in pink",
         )
@@ -222,6 +232,8 @@ def visualize_reconstructed_point_cloud(
 def test(opt):
     t = transforms.Compose(
         [
+            # DeformWithPartial(),  # Forks into two versions: original and deformed
+            # ApplyToAll(
             Deform(),  # Forks into two versions: original and deformed
             ApplyToBoth(
                 transforms.Compose(
