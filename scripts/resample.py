@@ -128,7 +128,7 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
             scene.add(light, pose=camera_pose)  # Add light from same direction as the camera
             scene.add(camera, pose=camera_pose)
             
-            # visualise the pyrender scene with additional axes for camera and origin
+            # visualise the pyrender scene with additional axes for camera and origin ######################################
             # axis_mesh = pyrender.Mesh.from_trimesh(trimesh.creation.axis(axis_length=2, origin_size=0.001), smooth=False)
             # scene.add(axis_mesh, pose=axis_pose)
             
@@ -136,6 +136,7 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
             # oaxis.visual.face_colors = np.array([255, 255, 0, 255])  # yellow
             # origin_mesh = pyrender.Mesh.from_trimesh(oaxis, smooth=False)
             # scene.add(origin_mesh, pose=np.eye(4))  # Add origin axis for reference
+            # visualise the pyrender scene with additional axes for camera and origin ######################################
             
             image_size = start_image_size
             while image_size <= max_image_size:
@@ -234,6 +235,41 @@ def generate_labels_for_sampled_points(sampled_points, seg_points, seg_labels):
     sampled_labels = seg_labels[indices]
     return sampled_labels
 
+def sample_surface_points(mesh, num_points):
+    # Get the triangles and vertices from the mesh
+    triangles = mesh.triangles  # (n, 3, 3) array
+    vertices = mesh.vertices     # (n, 3) array
+    
+    # Calculate areas for each triangle
+    triangle_areas = []
+    for i in range(len(triangles)):
+        v0, v1, v2 = triangles[i]
+        area = 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0))
+        triangle_areas.append(area)
+    
+    total_area = sum(triangle_areas)
+    
+    # Normalize areas to get probability distribution
+    triangle_areas = np.array(triangle_areas)
+    probabilities = triangle_areas / total_area
+    
+    # Sample points based on area probabilities
+    sampled_points = []
+    while len(sampled_points) < num_points:
+        # Choose a triangle with probability proportional to its area
+        triangle_idx = np.random.choice(len(triangles), p=probabilities)
+        v0, v1, v2 = triangles[triangle_idx]
+        
+        # Sample point inside the triangle using barycentric coordinates
+        r1, r2 = np.random.random(), np.random.random()
+        if r1 + r2 > 1:
+            r1, r2 = 1 - r1, 1 - r2
+        sampled_point = (1 - r1 - r2) * v0 + r1 * v1 + r2 * v2
+        
+        sampled_points.append(sampled_point)
+    
+    return np.array(sampled_points)
+
 # from concurrent.futures import ThreadPoolExecutor
 seg_labels_ = None
 # count, total = 0,0
@@ -269,10 +305,32 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=Fals
         simplified_trimesh.fill_holes()
         simplified_trimesh.fill_holes()
         
+        if mode == "surface":
+            mesh = trimesh.load(file_path)
+            mesh.fill_holes()
+            mesh.fill_holes()
+        
     except Exception:
         print(i)
     sampled_points = None
     
+    # processing for surface sampling
+    if mode == "surface":
+        # sample points from the original mesh instead of the simplified mesh
+        surface_points = sample_surface_points(mesh, num_points=20000)
+        save_path = save_root_dir / i / "models"
+        surface_pc_path = save_path / f"surface_samples.npy"
+        # skip if the file already exists
+        if surface_pc_path.is_file():
+            print(f"File already exists: {surface_pc_path}")
+            if not overwrite:
+                return
+        print(f"Processing: {surface_pc_path}")
+        # save the points
+        save_path.mkdir(parents=True, exist_ok=True)
+        np.save(surface_pc_path, surface_points)
+        return
+            
     # Load partial point cloud sampling options from yaml file
     with open(data_root_dir / "resample.yaml", 'r') as stream:
         args = yaml.safe_load(stream)[mode]
@@ -288,7 +346,7 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=Fals
             if not overwrite:
                 continue
             
-        print(f"Processing: {save_path / f'partial_samples_{mode}_{n}.npy'}')")
+        print(f"Processing: {save_path / f'partial_samples_{mode}_{n}.npy'}")
         
         # Sample the mesh for partial point clouds
         sampled_points, camera_pose = sample_visible_points_from_single_view(simplified_trimesh,
@@ -350,7 +408,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--src_dir", type=str, default="/mnt/slow/shape_data_eric", help="Root directory for the source mesh.")
     parser.add_argument("--dst_dir", type=str, default="/mnt/slow/shape_data_eric", help="Root directory for saving the resampled point clouds.")
-    parser.add_argument("--view_mode", type=str, default="default", help="View mode to resample the data. See resample.yaml for options.")
+    parser.add_argument("--mode", type=str, default="default", help="View mode to resample the data. See resample.yaml for options.")
     parser.add_argument("--overwrite", action='store_true', help="Overwrite existing files if they exist.")
     args = parser.parse_args()
     
@@ -365,4 +423,4 @@ if __name__ == "__main__":
     shuffle(folders_to_run)
     
     for idx, i in tqdm(enumerate(folders_to_run), total=len(folders_to_run)):
-        process_file(i, data_root_dir, save_root_dir, args.view_mode, args.overwrite)
+        process_file(i, data_root_dir, save_root_dir, args.mode, args.overwrite)
