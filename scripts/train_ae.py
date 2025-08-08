@@ -168,15 +168,16 @@ def visualize_reconstructed_point_cloud(
     # Create Open3D point cloud
     orig_pcd = o3d.geometry.PointCloud()
     orig_pcd.points = o3d.utility.Vector3dVector(orig_shape_np)
-    orig_pcd.paint_uniform_color([1, 0, 0])
+    # orig_pcd.paint_uniform_color([1, 0, 0])
+    orig_pcd.paint_uniform_color([0, 1, 0])
 
     recon_pcd = o3d.geometry.PointCloud()
     recon_pcd.points = o3d.utility.Vector3dVector(recon_shape_np)
-    recon_pcd.paint_uniform_color([0, 1, 0])
+    recon_pcd.paint_uniform_color([1, .7, .7])
 
     ref_pcd = o3d.geometry.PointCloud()
     ref_pcd.points = o3d.utility.Vector3dVector(ref_shape_np)
-    ref_pcd.paint_uniform_color([0, 0, 1])
+    ref_pcd.paint_uniform_color([0, 0, 0])
     
     # try to align the two point clouds with ICP
     # for reconstructions the two point clouds should be in the same frame, default to false
@@ -218,7 +219,8 @@ def visualize_reconstructed_point_cloud(
             )  # Adjust radius as needed
 
             sphere.translate(keypoint)
-            sphere.paint_uniform_color([1, 0, 1])  # Pink color
+            # sphere.paint_uniform_color([1, 0, 1])  # Pink color
+            sphere.paint_uniform_color([0, 0, 1])  # Blue color
             keypoint_spheres.append(sphere)
 
         # Visualize
@@ -318,7 +320,10 @@ def test(opt):
             )
 
             # encode the input point cloud (original/partial depending on opt)
-            z0, mu, logvar = ae_model.encode(get_network_data(data))
+            if not opt.test_partial_samples:
+                z0, mu, logvar = ae_model.encode(get_network_data(data))
+            else:
+                z0, mu, logvar = ae_model.encode(get_network_data(data, "partial_orig"))
             z_aux = reparameterize(mu, logvar)  # sampled from q(z|x)
 
             # concatenate the keypoint latent z0 and the auxiliary latent z_aux
