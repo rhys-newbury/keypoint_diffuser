@@ -30,6 +30,7 @@ class AutoEncoder(Module):
             nn.Linear(64, args.extra_latent),
         )
 
+
         cls = PointwiseNetOld if args.use_old else PointwiseNet
 
         self.diffusion_ = cls(
@@ -58,11 +59,9 @@ class AutoEncoder(Module):
         Args:
             x:  Point clouds to be encoded, (B, N, d).
         """
-        code = self.encoder(x)
+        z_kp, z_aux_raw = self.encoder(x)
 
-        z_kp = code[:, : self.args.latent_dim * 3]
 
-        z_aux_raw = code[:, self.args.latent_dim * 3 :]
 
         mu = self.fc_mu(z_aux_raw)
         logvar = self.fc_logvar(z_aux_raw)
@@ -84,9 +83,9 @@ class AutoEncoder(Module):
         z0, mu, logvar = self.encode(x)
 
         z_aux = reparameterize(mu, logvar)
-        code = torch.cat([z0, z_aux], dim=1)
+        code = torch.cat([z0.reshape((z0.shape[0], -1)), z_aux], dim=1)
 
-        t = x["target_shape"].view(-1, 5000, 3).cuda()
+        t = x["target_shape"].view(-1, 2048, 3).cuda()
         if self.use_edm:
             loss = self.loss(
                 net=self.diffusion, data=t, code=code.detach(), step=step

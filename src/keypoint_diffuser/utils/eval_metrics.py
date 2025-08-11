@@ -8,7 +8,7 @@ from tqdm.auto import tqdm
 from .emd_loss.emd_module import EMDModule
 
 
-def downsample_batched_point_cloud(point_clouds, num_samples=4096):
+def downsample_batched_point_cloud(point_clouds, num_samples=2048):
     """
     Vectorized downsampling of batched point clouds using random sampling.
 
@@ -61,6 +61,54 @@ def distChamfer(a, b):
     ry = yy[:, diag_ind, diag_ind].unsqueeze(1).expand_as(yy)
     P = rx.transpose(2, 1) + ry - 2 * zz
     return P.min(1)[0], P.min(2)[0]
+
+
+def EMD_CD_recon(sample_pcs, ref_pcs, batch_size=8, reduced=True):
+    """
+    Computes Chamfer and EMD distances for reconstruction, in batches.
+
+    Args:
+        sample_pcs (B, N, 3): Predicted point clouds
+        ref_pcs (B, N, 3): Ground-truth point clouds
+        batch_size (int): Batch size for evaluation
+        reduced (bool): If True, returns mean CD and EMD. If False, returns per-sample tensors.
+
+    Returns:
+        dict with 'CD' and 'EMD' (averaged if reduced=True)
+    """
+    assert (
+        sample_pcs.shape == ref_pcs.shape
+    ), "Shape mismatch between prediction and reference"
+
+    cd_lst = []
+    emd_lst = []
+
+    B = sample_pcs.shape[0]
+    for b_start in tqdm(range(0, B, batch_size), desc="Reconstruction EMD-CD"):
+        b_end = min(B, b_start + batch_size)
+        samp_batch = sample_pcs[b_start:b_end]
+        ref_batch = ref_pcs[b_start:b_end]
+
+        dl, dr = distChamfer(samp_batch, ref_batch)
+        cd = dl.mean(dim=1) + dr.mean(dim=1)  # per-sample CD
+        emd = emd_approx(samp_batch, ref_batch)  # per-sample EMD
+
+        cd_lst.append(cd)
+        emd_lst.append(emd)
+
+    cd_all = torch.cat(cd_lst)
+    emd_all = torch.cat(emd_lst)
+
+    if reduced:
+        return {
+            "CD": cd_all.mean(),
+            "EMD": emd_all.mean(),
+        }
+    else:
+        return {
+            "CD": cd_all,
+            "EMD": emd_all,
+        }
 
 
 def EMD_CD(sample_pcs, ref_pcs, batch_size, reduced=True):

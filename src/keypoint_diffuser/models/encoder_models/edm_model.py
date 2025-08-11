@@ -30,7 +30,7 @@ class EDMPrecond(torch.nn.Module):
         s_noise=1,
     ):
         batch_size = code.shape[0]
-        latents = torch.randn([batch_size, 5000, 3], device=code.device)
+        latents = torch.randn([batch_size, 2048, 3], device=code.device)
 
         # Adjust noise levels based on what's supported by the network.
         sigma_min = max(sigma_min, self.sigma_min)

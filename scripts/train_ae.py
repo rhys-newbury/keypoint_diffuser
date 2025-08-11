@@ -1,7 +1,7 @@
-import copy
 import os
 import time
 from datetime import datetime
+from glob import glob
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -14,11 +14,14 @@ import torch.distributed as dist
 import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
+import math
+import random
 from einops import repeat
 from keypoint_diffuser.datasets import get_dataset
+from keypoint_diffuser.datasets.H5Datset import H5Dataset
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.models.encoder_models.common import get_linear_scheduler
-from keypoint_diffuser.options.ae_options import AEOptions
+from keypoint_diffuser.options.ae_options import AEOptions, AEConfig
 from keypoint_diffuser.utils.eval_metrics import EMD_CD
 from keypoint_diffuser.utils.nn import load_network, save_network
 from keypoint_diffuser.utils.utils import Timer, reparameterize
@@ -343,19 +346,20 @@ def get_network_data(data: dict[str, Any], key="orig"):
     return d
 
 
-def train(opt, rank, world_size):
+def train(opt: AEConfig, rank, world_size):
     if rank == 0:
         log_dir = os.path.join(opt.log_dir, RUN.name)
         checkpoints_dir = os.path.join(log_dir, CHECKPOINTS_DIR)
 
-    ema_halflife_kimg = (
-        500  # Half-life of the exponential moving average (EMA) of model weights.
-    )
-    ema_rampup_ratio = 0.05  # EMA ramp-up coefficient, None = no rampup.
-
     t = transforms.Compose(
         [
-            Deform(),  # Forks into two versions: original and deformed
+            Deform(
+                max_stretch_factor = opt.max_stretch_factor,
+                max_bending_factor = opt.max_bending_factor,
+                max_twist_factor   = opt.max_twist_factor  ,
+                max_taper_factor   = opt.max_taper_factor  ,
+                max_rotation_angle = opt.max_rotation_angle,
+            ),  # Forks into two versions: original and deformed
             ApplyToBoth(
                 transforms.Compose(
                     [
@@ -376,7 +380,11 @@ def train(opt, rank, world_size):
         ]
     )
 
-    dataset = get_dataset(opt.dataset)(opt, transform=t)
+    DATASET = "/app/shapenetcorev2_hdf5_2048/train/"
+    h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
+    dataset = H5Dataset(
+        h5_files, normalize=True, include_label=False, object_name=opt.category, transform=t
+    )
 
     if torch.cuda.device_count() > 1 and world_size > 1:
         print("Using DistributedSampler for multiple GPUs.")
@@ -399,32 +407,15 @@ def train(opt, rank, world_size):
         worker_init_fn=lambda id_: np.random.seed(np.random.get_state()[1][0] + id_),
     )
 
-    opt_test = copy.deepcopy(opt)
-    opt_test.phase = "test"
-    test_dataset = get_dataset(opt_test.dataset)(opt_test, transform=t)
-
-    torch.utils.data.DataLoader(
-        test_dataset,
-        batch_size=8,
-        shuffle=True,
-        drop_last=True,
-        collate_fn=collate_fn,
-        num_workers=opt.n_workers,
-        worker_init_fn=lambda id_: np.random.seed(np.random.get_state()[1][0] + id_),
-    )
-
     net = AutoEncoder(opt).cuda()
 
     if torch.cuda.device_count() > 1:
         net = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net)
-        ema = copy.deepcopy(net).eval().requires_grad_(False)
 
         print(f"Using DistributedDataParallel on {torch.cuda.device_count()}")
         net = DistributedDataParallel(
             net, device_ids=[rank], output_device=rank, find_unused_parameters=False
         )
-    else:
-        ema = copy.deepcopy(net).eval().requires_grad_(False)
 
     if opt.ckpt:
         ckpt = opt.ckpt
@@ -518,11 +509,11 @@ def train(opt, rank, world_size):
                 wandb.log({"diffusion_loss": diffusion_loss}, step=t)
                 wandb.log({"kl_divergence": kl}, step=t)
 
-            if t > opt.fps_steps and lambda_0 > 0:
-                print("turing off FPS loss")
-                lambda_0 = 0
+            # if t > opt.fps_steps and lambda_0 > 0:
 
-            fps = sample_farthest_points(target_shape_t, opt.latent_dim).transpose(2, 1)
+            fps = sample_farthest_points(target_shape_t, opt.latent_dim + 5).transpose(
+                2, 1
+            )
 
             fps_loss, _ = pytorch3d.loss.chamfer_distance(fps, code_)
 
@@ -568,18 +559,10 @@ def train(opt, rank, world_size):
                 scheduler.step()
                 optimizer.zero_grad()
 
-            ema_halflife_nimg = ema_halflife_kimg * 1000
-            if ema_rampup_ratio is not None:
-                ema_halflife_nimg = min(ema_halflife_nimg, cur_nimg * ema_rampup_ratio)
-            ema_beta = 0.5 ** (opt.batch_size / max(ema_halflife_nimg, 1e-8))
-            for p_ema, p_net in zip(ema.parameters(), net.parameters(), strict=False):
-                p_ema.copy_(p_net.detach().lerp(p_ema, ema_beta))
-
             cur_nimg += opt.batch_size
 
             if t % opt.save_interval == 0 and rank == 0:
                 os.path.join(checkpoints_dir, "outputs", "%07d" % t)
-                save_network(ema, checkpoints_dir, network_label="ema", epoch_label=t)
                 save_network(net, checkpoints_dir, network_label="net", epoch_label=t)
 
             iter_time = time.time() - iter_time_start
@@ -639,7 +622,7 @@ if __name__ == "__main__":
         print(f"Rank: {rank}, World size: {world_size}")
 
         if rank == 0:
-            RUN = wandb.init(project="diffuse_keypoints_lamp_fr")
+            RUN = wandb.init(project="diffuse_keypoints_sweep")
             wandb.run.log_code(".")
         train(opt, rank, world_size)
         print(f"Run name: {wandb.run.name}")

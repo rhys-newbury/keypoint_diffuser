@@ -1,5 +1,6 @@
 import os
 from enum import Enum
+from glob import glob
 from typing import Any
 
 import numpy as np
@@ -8,15 +9,15 @@ import torch.distributed as dist
 import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
-from keypoint_diffuser.datasets import get_dataset
+from keypoint_diffuser.datasets.H5Datset import H5Dataset
 from keypoint_diffuser.models import get_model
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.models.encoder_models.autoencoder_orig import AutoEncoderOrig
 from keypoint_diffuser.options.ae_options import AEOptions
 from keypoint_diffuser.options.base_options import BaseOptions
-from keypoint_diffuser.utils.eval_metrics import EMD_CD
+from keypoint_diffuser.utils.eval_metrics import EMD_CD, EMD_CD_recon
 from keypoint_diffuser.utils.nn import load_network
-from keypoint_diffuser.utils.pc_utils import collate_fn
+from keypoint_diffuser.utils.pc_utils import collate_fn, normalize_point_clouds
 from keypoint_diffuser.utils.utils import Timer, reparameterize
 from sklearn.decomposition import PCA
 from sklearn.neighbors import KernelDensity
@@ -112,8 +113,10 @@ def sample(opt):
     opt.phase = "train"
     opt.split = "train"
 
-    dataset = get_dataset(opt.dataset)(
-        opt, transform=t if Algos.Ours == CURRENT_EVAL else None
+    DATASET = "/app/shapenetcorev2_hdf5_2048/train/"
+    h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
+    dataset = H5Dataset(
+        h5_files, normalize=True, include_label=False, subclasses=(12,), transform=t
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -128,8 +131,10 @@ def sample(opt):
 
     opt.phase = "test"
     opt.split = "test"
-    test_dataset = get_dataset(opt.dataset)(
-        opt, transform=t if Algos.Ours == CURRENT_EVAL else None
+    DATASET = "/app/shapenetcorev2_hdf5_2048/val/"
+    h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
+    test_dataset = H5Dataset(
+        h5_files, normalize=True, include_label=False, subclasses=(12,), transform=t
     )
 
     test_dataloader = torch.utils.data.DataLoader(
@@ -165,6 +170,7 @@ def sample(opt):
 
     Timer("step")
     all_z0 = []  # flatten z0 per batch
+    all_recons = []
     all_z_aux = []
     models = []
 
@@ -183,7 +189,7 @@ def sample(opt):
                 z_aux = reparameterize(mu, logvar)  # sampled from q(z|x)
 
                 # Step 3: Concatenate
-                z_full = torch.cat([z0, z_aux], dim=1)
+                z_full = torch.cat([z0.reshape(z0.shape[0], -1), z_aux], dim=1)
 
                 all_z0.append(z0.detach().cpu())
                 all_z_aux.append(z_aux.cpu())
@@ -216,13 +222,23 @@ def sample(opt):
                     .view(data["orig_offset"].shape[0], -1, 3)
                     .transpose(1, 2)
                 )
+
+                z0, mu, logvar = ae_model.encode(get_network_data(data))
+                z_aux = reparameterize(mu, logvar)  # sampled from q(z|x)
+
+                # Step 3: Concatenate
+                z_full = torch.cat([z0.reshape(z0.shape[0], -1), z_aux], dim=1)
+
+                recons = ae_model.decode(z_full, 2048).detach()
+                all_recons.append(recons)
+
             elif CURRENT_EVAL == Algos.KPD or CURRENT_EVAL == Algos.DPM:
                 _, target_shape_t = get_data(test_dataset, data)
                 target_shape_t = target_shape_t.cpu()
 
             models.append(target_shape_t)
 
-    all_z0 = torch.cat(all_z0, dim=0)  # [N, 3d]
+    all_z0 = torch.cat(all_z0, dim=0).reshape(-1, 30)  # [N, 3d]
     if Algos.Ours == CURRENT_EVAL:
         all_z_aux = torch.cat(all_z_aux, dim=0)  # [N, m]
         mean_z_aux = all_z_aux.mean(dim=0, keepdim=True)  # [1, m]
@@ -256,38 +272,43 @@ def sample(opt):
     with torch.no_grad():
         for idx in tqdm(range(num_samples), total=num_samples):
             if Algos.Ours == CURRENT_EVAL:
-                recons = ae_model.decode(z_full[idx : idx + 1, ...], num_points=5000)
+                recons = ae_model.decode(z_full[idx : idx + 1, ...], num_points=2048)
             elif Algos.KPD == CURRENT_EVAL:
                 data = dataset.get_sample(np.random.randint(dataset.get_real_length()))
                 recons = net.decode(
                     data["source_shape"].T[None, :, :].cuda(),
                     z_full[idx : idx + 1, ...],
                 )
-                recons = recons["deformed"]  # torch.Size([1, 5000, 3])
+                recons = recons["deformed"]  # torch.Size([1, 2048, 3])
             elif Algos.DPM == CURRENT_EVAL:
-                recons = ae_model.decode(z_full[idx : idx + 1, ...], 5000).detach()
+                recons = ae_model.decode(z_full[idx : idx + 1, ...], 2048).detach()
 
             new.append(recons.cpu())
             torch.cuda.empty_cache()
 
-    generated = torch.cat(new).float().cpu()  # shape: (N, 5000, 3)
+    generated = torch.cat(new).float().cpu()  # shape: (N, 2048, 3)
     np.save("generated_ppl.npy", generated)
 
+    generated = normalize_point_clouds(generated, "shape_bbox")
+    models = normalize_point_clouds(models, "shape_bbox")
+    recons = normalize_point_clouds(torch.cat(all_recons), "shape_bbox")
+
     # Get min and max from generated reconstructions
-    min_vals = generated.amin(dim=(0, 1), keepdim=True)  # shape: (1, 1, 3)
-    max_vals = generated.amax(dim=(0, 1), keepdim=True)
 
     # Generate random noise in [0, 1]
-    random_noise = torch.rand_like(generated)
 
     # Scale noise to match the bounding box of the generated point clouds
-    random_noise = random_noise * (max_vals - min_vals) + min_vals
 
-    print("Generated vs Ground Truth:", EMD_CD(generated, models.cpu(), batch_size=8))
     print(
-        "Random Noise vs Ground Truth:",
-        EMD_CD(random_noise.float().cpu(), models.cpu(), batch_size=8),
+        "Generated vs Ground Truth:",
+        EMD_CD(generated.float(), models.cpu().float(), batch_size=8),
     )
+    print(
+        "reconstruction errors: ",
+        EMD_CD_recon(recons.cuda().float(), models.cuda().float(), batch_size=8),
+    )
+
+    # print(
     # for i, pc in enumerate(new):
     #     pcd_clean.estimate_normals(
 

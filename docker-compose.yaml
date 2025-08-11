@@ -10,7 +10,8 @@ services:
         - ~/.gitconfig:/etc/gitconfig
         - ~/.ssh:/home/taco/.ssh
         - /mnt/wslg:/mnt/wslg
-        - /home/taco/shape_data:/app/data/shapenet/shape_data
+        - /media/taco/shape_data:/app/data/shapenet/shape_data
+        - /media/taco/shape_data/keypoints/logs:/app/data/keypoints
         - /media/taco/nfs:/app/data/smplx
 
       network_mode: "host"

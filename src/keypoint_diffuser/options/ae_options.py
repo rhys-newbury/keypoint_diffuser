@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import configargparse
 
 from .. import datasets
-
+import numpy as np
 
 THOUSAND = 1000
 
@@ -82,6 +82,15 @@ class AEConfig:
     lambda_2: int = 1
     lambda_3: int = 1
     lambda_4: int = 1
+
+    max_stretch_factor: float = 2.2
+    max_bending_factor: float = 1.8
+    max_twist_factor: float = 1.9
+    max_taper_factor: float = 1.6
+    max_rotation_angle: float = np.pi / 6  
+
+    pcd_path: str = "/app/pcds"
+    annotation_json = "/app/annotations/cap.json"
 
 
 class AEOptions:

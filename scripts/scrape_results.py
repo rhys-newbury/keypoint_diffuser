@@ -33,12 +33,14 @@ entity = "rhys-newbury"
 project = "diffuse_keypoints_test_fr"
 
 url = "https://api.wandb.ai/graphql"
-
+cookie = "wandb=MTc1Mzc2OTQ3M3xEdi1oQkFFQ182SUFBUkFCRUFBQUp2LWlBQUVHYzNSeWFXNW5EQXdBQ25ObGMzTnBiMjVmYVdRRmFXNTBOalFFQlFEOW5SV298In9fJAAX3f0GcOyHotHA7TnzUVPDqURhs_60b4a1-LQ="
 headers = {
-    "Authorization": f"Bearer {WANDB_API_KEY}",
     "Content-Type": "application/json",
+    "Cookie": cookie,
+    "Origin": "https://wandb.ai",
+    "Referer": "https://wandb.ai/",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
 }
-
 query = """
 query Runs($entity: String!, $project: String!, $first: Int, $after: String) {
   project(entityName: $entity, name: $project) {
@@ -152,6 +154,28 @@ best_per_group = df_filtered.loc[best_indices].reset_index(drop=True)
 
 # Sort by category to group visually
 df_sorted = best_per_group.sort_values(by=["category", "type", "n_keypoints"])
+
+airplane_best = best_per_group[
+    (best_per_group["category"] == "02691156")  # Airplane synset ID
+]
+
+print("Best run(s) for Airplane:")
+print(
+    airplane_best[
+        [
+            "name",
+            "type",
+            "n_keypoints",
+            "average_correlation_per_keypoint",
+            "MMD-CD",
+            "MMD-EMD",
+        ]
+    ]
+)
+import pdb
+
+
+pdb.set_trace()
 
 # Build rows + manual gaps
 rows_with_gaps = []

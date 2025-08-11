@@ -16,3 +16,11 @@ data/*
 build/*
 *.gif
 *.npz
+scripts/wandb
+shapenetcorev2_hdf5_2048
+pcds/
+data2
+scripts/eval_logs
+.zip
+*.txt
+*.mp4
