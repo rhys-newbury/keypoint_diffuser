@@ -20,3 +20,5 @@ timm
 spconv-cu116
 pymeshlab
 rtree
+h5py
+simpleicp

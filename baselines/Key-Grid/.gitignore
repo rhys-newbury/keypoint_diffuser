@@ -1,7 +1,0 @@
-*.pth
-*.npz
-__pycache__
-emd_loss
-loss_plots
-eval_logs/
-shapenet/dataset
