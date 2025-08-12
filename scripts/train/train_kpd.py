@@ -8,7 +8,7 @@ import torch
 import torch.nn.parallel
 import torch.utils.data
 from keypoint_diffuser.datasets.H5Datset import H5Dataset
-from keypointdeformer.models import get_model
+from keypointdeformer.models.cage_skinning import CageSkinning
 from keypointdeformer.options.base_options import BaseOptions
 from keypointdeformer.utils.nn import load_network, save_network, weights_init
 from tensorboardX import SummaryWriter
@@ -50,7 +50,7 @@ def train(opt):
     )
 
     # network
-    net = get_model(opt.model)(opt).cuda()
+    net = CageSkinning(opt).cuda()
     net.apply(weights_init)
     if opt.ckpt:
         ckpt = opt.ckpt

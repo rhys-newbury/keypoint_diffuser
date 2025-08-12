@@ -1,6 +1,6 @@
 import configargparse
 
-from .. import models
+from keypointdeformer.models.cage_skinning import CageSkinning
 
 
 class BaseOptions:
@@ -58,7 +58,7 @@ class BaseOptions:
         parser.add_argument("--n_iterations", type=int, default=2000, help="")
         parser.add_argument("--log_interval", type=int, default=10, help="")
         parser.add_argument("--save_interval", type=int, default=100, help="")
-        # network optionss
+        # network options
         parser.add_argument(
             "--bottleneck_size", type=int, help="bottleneck size", default=256
         )
@@ -94,9 +94,7 @@ class BaseOptions:
 
         if not skip_model:
             # modify model-related parser options
-            model_name = opt.model
-            model_option_setter = models.get_option_setter(model_name)
-            parser = model_option_setter(parser)
+            parser = CageSkinning.modify_commandline_options(parser)
             opt, _ = parser.parse_known_args(args)  # parse again with the new defaults
 
         # # modify dataset-related parser options

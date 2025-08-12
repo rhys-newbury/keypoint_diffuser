@@ -1,6 +1,7 @@
 import random
 
 import h5py
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 
@@ -64,6 +65,23 @@ KEYS = {
 }
 
 
+def transform(pc, extrinsic_mat):
+    zup = np.asarray([[1, 0, 0], [0, -1, 0], [0, 0, -1]], dtype="f")  # Z_UP
+    return np.dot(extrinsic_mat @ zup, pc.T).T
+
+
+def random_y_rotation_matrix():
+    theta = np.random.uniform(0, 2 * np.pi)
+    R_y = np.array(
+        [
+            [np.cos(theta), 0, np.sin(theta)],
+            [0, 1, 0],
+            [-np.sin(theta), 0, np.cos(theta)],
+        ]
+    )
+    return R_y
+
+
 class H5Dataset(Dataset):
     def __init__(
         self,
@@ -73,6 +91,7 @@ class H5Dataset(Dataset):
         object_name="chair",
         transform=None,
         get_two=False,
+        random_rotate=False,
     ):
         self.files = h5_paths
         self.normalize = normalize
@@ -80,6 +99,7 @@ class H5Dataset(Dataset):
         self.object_name = object_name
         self.transform = transform
         self.get_two = get_two
+        self.random_rotate = random_rotate
 
         self.data = []
         self.labels = []
@@ -117,7 +137,23 @@ class H5Dataset(Dataset):
 
         pc = torch.tensor(pc, dtype=torch.float32)
 
+        if self.random_rotate:
+            # SC3K wants random rotations.
+            R1 = random_y_rotation_matrix()
+            R2 = random_y_rotation_matrix()
+
+            pc1 = transform(pc, R1)
+            pc2 = transform(pc, R2)
+
+            return (
+                pc1.astype(np.float32),
+                R1.astype(np.float32),
+                pc2.astype(np.float32),
+                R2.astype(np.float32),
+            )
+
         if self.get_two:
+            # KeypointDeformer wants two shapes
             rand_idx = random.randrange(len(self.data) - 1)
             target = self.data[rand_idx]
             target = self.normalize_pointcloud(target)
@@ -129,6 +165,7 @@ class H5Dataset(Dataset):
             }
 
         if self.transform:
+            # Keypoint Diffuser wants deformed shapes.
             transformed, deformed = self.transform(
                 {"coord": pc.cpu().numpy()}
             )  # Apply transform

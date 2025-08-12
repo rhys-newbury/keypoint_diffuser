@@ -10,8 +10,6 @@ from glob import glob
 import matplotlib.pyplot as plt
 import torch
 from key_grid.composed_chamfer import loss_all
-
-# from key
 from key_grid.merger_net import Net
 from keypoint_diffuser.datasets.H5Datset import H5Dataset
 from torch import optim
@@ -50,6 +48,9 @@ arg_parser.add_argument("--keynumber", type=int, help="", default=14)
 arg_parser.add_argument("--chamfer", type=int, help="", default=20)
 arg_parser.add_argument("--lambda_init_points", type=float, help="", default=1.0)
 arg_parser.add_argument("--lambda_chamfer", type=float, help="", default=1.0)
+arg_parser.add_argument(
+    "--category", type=str, help="Category of objects", default="chair"
+)
 
 loss_history = {
     "init_points": [],
@@ -123,14 +124,14 @@ if __name__ == "__main__":
         h5_files,
         normalize=True,
         include_label=False,
-        subclasses=(14,),
+        object_name=ns.category,
     )
     loader = torch.utils.data.DataLoader(
         dataset, batch_size=batch, shuffle=True, num_workers=0
     )
 
     net = Net(ns.max_points, ns.n_keypoint).cuda()
-    optimizer = optim.Adadelta(net.parameters(), lr=0.1, eps=1e-2)
+    optimizer = optim.Adam(net.parameters(), lr=0.1)
 
     for epoch in range(ns.epochs):
         feed(net, optimizer, loader, True, False, batch, epoch, ns)

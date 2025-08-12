@@ -24,3 +24,4 @@ scripts/eval_logs
 .zip
 *.txt
 *.mp4
+scripts/train/train_summary

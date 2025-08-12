@@ -1,5 +1,6 @@
 import requests
 
+
 url = "https://api.wandb.ai/graphql"
 cookie = "wandb=MTc1Mzc2OTQ3M3xEdi1oQkFFQ182SUFBUkFCRUFBQUp2LWlBQUVHYzNSeWFXNW5EQXdBQ25ObGMzTnBiMjVmYVdRRmFXNTBOalFFQlFEOW5SV298In9fJAAX3f0GcOyHotHA7TnzUVPDqURhs_60b4a1-LQ="
 headers = {
@@ -29,10 +30,12 @@ query Runs($entity: String!, $project: String!, $first: Int) {
 variables = {
     "entity": "rhys-newbury",
     "project": "diffuse_keypoints_test_fr",
-    "first": 100
+    "first": 100,
 }
 
-response = requests.post(url, headers=headers, json={"query": query, "variables": variables})
+response = requests.post(
+    url, headers=headers, json={"query": query, "variables": variables}
+)
 print(response.json())
 
 
