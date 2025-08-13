@@ -134,10 +134,12 @@ def generate_labels_for_sampled_points(sampled_points, seg_points, seg_labels):
 # from concurrent.futures import ThreadPoolExecutor
 seg_labels_ = None
 # count, total = 0,0
-def visualise_file(i, data_root_dir, mode, different_n=False):
-    # process and sampled point cloud
+def visualise_file(i, data_root_dir, mode, nin=None, different_n=False):
     for n in range(5):
-        file_path = data_root_dir / Path(f"{i}/models/new_samples_{n}.npy")
+        if nin is not None:
+            n = nin
+        # file_path = data_root_dir / Path(f"{i}/models/new_samples_{n}.npy")
+        file_path = data_root_dir / Path(f"{i}/models/surface_samples.npy")
         # file_path = data_root_dir / Path(f"{i}/models/partial_samples_{mode}_{n}.npy")#Path(f"{i}/models/partial_samples_{n}.npy")
 
         if not file_path.is_file():
@@ -226,6 +228,8 @@ def visualise_file(i, data_root_dir, mode, different_n=False):
             window_name="Point Cloud with Labels and Keypoints",
         )
         
+        if nin is not None:
+            return
         
         
 
