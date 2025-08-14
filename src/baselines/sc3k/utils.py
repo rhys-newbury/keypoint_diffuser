@@ -323,8 +323,6 @@ def pose_loss(kp1, kp2, rot1, rot2):
     return angle_
 
 
-
-
 def batch_compute_similarity_transform_torch(S1, S2):
     """
     Computes a similarity transform (sR, t) that takes

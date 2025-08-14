@@ -1,4 +1,5 @@
-FROM pytorch/pytorch:2.0.0-cuda11.7-cudnn8-devel
+FROM pytorch/pytorch:2.3.1-cuda11.8-cudnn8-devel
+
 ENV TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6+PTX"
 
 # Install System Dependencies

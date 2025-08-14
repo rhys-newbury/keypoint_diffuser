@@ -1,22 +1,13 @@
-"""
-Created on Aug 1, 2025
-Combined Predictor and Evaluator for Skeleton Merger on KeypointNet dataset.
-
-@author: eliphat
-"""
-
-import argparse
 import collections
 import json
 import os
+from pathlib import Path
 
 import matplotlib.pyplot as plotlib
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import tqdm
-from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
-from keypoint_diffuser.options.ae_options import AEOptions
+from baselines.sc3k.test_sc3k import SC3K
 from keypoint_diffuser.utils.pc_utils import collate_fn
 from keypoint_diffuser.utils.transforms import (
     Collect,
@@ -32,94 +23,14 @@ CHECKPOINT_EXT = ".pth"
 # ----------------------------
 # Argument Parser
 # ----------------------------
-arg_parser = argparse.ArgumentParser(
-    description="Combined prediction and evaluation for Skeleton Merger.",
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-)
-
-# Prediction args
-arg_parser.add_argument(
-    "-a",
-    "--annotation-json",
-    type=str,
-    default="annotations/cap.json",
-    help="Annotation JSON file path from KeypointNet dataset.",
-)
-arg_parser.add_argument(
-    "-i",
-    "--pcd-path",
-    type=str,
-    default="pcds",
-    help="Point cloud file folder path from KeypointNet dataset.",
-)
-arg_parser.add_argument(
-    "-m",
-    "--checkpoint-path",
-    type=str,
-    default="trained_merger.pt",
-    help="Model checkpoint file path.",
-)
-arg_parser.add_argument(
-    "-d",
-    "--device",
-    type=str,
-    default="cuda",
-    help='PyTorch device (e.g., "cuda" or "cpu").',
-)
-arg_parser.add_argument(
-    "-k", "--n-keypoint", type=int, default=10, help="Number of keypoints to detect."
-)
-arg_parser.add_argument(
-    "-b", "--batch", type=int, default=8, help="Batch size for prediction."
-)
-arg_parser.add_argument(
-    "--max-points",
-    type=int,
-    default=2048,
-    help="Max number of points in each point cloud.",
-)
-arg_parser.add_argument(
-    "-p",
-    "--prediction-output",
-    type=str,
-    default="merger_prediction.npz",
-    help="File path for saving predictions.",
-)
-
-# Evaluation flags
-arg_parser.add_argument(
-    "--op-align-fwd", action="store_true", help="Compute forward alignment score."
-)
-arg_parser.add_argument(
-    "--op-align-bwd", action="store_true", help="Compute backward alignment score."
-)
-arg_parser.add_argument("--op-miou", action="store_true", help="Plot mIoU curve.")
+p = SC3K.get_parser()
+p.add_argument("--ckpt", type=Path)
+p.add_argument("--annotation-json", type=Path, default="/app/annotations/chair.json")
+p.add_argument("--pcd-path", type=Path, default="/app/pcds")
 
 # ----------------------------
 # Utilities
 # ----------------------------
-
-
-def viz_pointcloud_and_keypoints(pc, kps, title, idx):
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection="3d")
-    pc = np.array(pc)
-    kps = np.array(kps)
-    ax.scatter(
-        pc[:, 0], pc[:, 1], pc[:, 2], c="gray", s=1, alpha=0.5, label="Point Cloud"
-    )
-    ax.scatter(kps[:, 0], kps[:, 1], kps[:, 2], c="red", s=30, label="Keypoints")
-    ax.set_title(title)
-    ax.legend()
-    plt.savefig(f"{idx}.png")
-
-
-def _normalize_to_unit_box(points):
-    min_xyz = points.min(axis=0)
-    max_xyz = points.max(axis=0)
-    center = (max_xyz + min_xyz) / 2
-    scale = (max_xyz - min_xyz).max()
-    return (points - center) / scale, center, scale
 
 
 def naive_read_pcd(path):
@@ -142,19 +53,9 @@ def naive_read_pcd(path):
 # ----------------------------
 
 
-def run_prediction(opt):
-    net = AutoEncoder(opt)
-    log_dir = os.path.join(opt.log_dir, opt.name)
-    checkpoints_dir = os.path.join(log_dir, CHECKPOINTS_DIR)
-
-    ckpt = opt.ckpt
-    if not ckpt.startswith(os.path.sep):
-        ckpt = os.path.join(checkpoints_dir, ckpt + CHECKPOINT_EXT)
-
-    ckpt = torch.load(ckpt)
-    net.load_state_dict(ckpt["states"])
-    net.eval()
-    net.cuda()
+def run_prediction(model, opt):
+    model.model.eval()
+    model.model.cuda()
 
     t = transforms.Compose(
         [
@@ -175,14 +76,11 @@ def run_prediction(opt):
     kpn_ds = json.load(open(opt.annotation_json))
     out_kpcd = []
     out_nfact = []
-    out_unitbox_meta = []  # To store unit box center and scale
 
     for i in tqdm.tqdm(
         range(0, len(kpn_ds), opt.batch_size), unit_scale=opt.batch_size
     ):
         Q = []
-        Q_nb = []
-        Q_orig = []
         for j in range(opt.batch_size):
             if i + j >= len(kpn_ds):
                 continue
@@ -195,47 +93,30 @@ def run_prediction(opt):
             pcmin = pc.min()
             pcn = (pc - pcmin) / (pcmax - pcmin)
             pcn = 2.0 * (pcn - 0.5)
-
-            pc[:, :3], center, scale = _normalize_to_unit_box(pc[:, :3])
-
-            Q_nb.append(pc)
             Q.append(pcn)
-            Q_orig.append(naive_read_pcd(pc_path))
             out_nfact.append([pcmax, pcmin])
-            out_unitbox_meta.append((center, scale))
 
         if len(Q) == 1:
             Q.append(Q[-1])
             out_nfact.append(out_nfact[-1])
         with torch.no_grad():
-            Q_nb = np.array(Q_nb)
+            Q = np.array(Q)
             T_nb = []
-            for i in range(Q_nb.shape[0]):
-                data = {"coord": Q_nb[i, ...]}
+            for i in range(Q.shape[0]):
+                data = {"coord": Q[i]}
                 T_nb.append(t(data))
 
             batch = collate_fn(
                 T_nb
             )  # assumes collate_fn knows how to stack dictionaries correctly
             batch = {k: v.cuda() for k, v in batch.items()}
+            batch["orig"] = Q
 
-            z0, _, _ = net.encode(batch)
-            key_points = z0.reshape(-1, 10, 3)
-            start_idx = len(out_kpcd)
+            with torch.no_grad():
+                key_points = model.get_keypoints(batch)
 
-            for idx in range(key_points.shape[0]):
-                kp_unitbox = key_points[idx].cpu().numpy()  # (K, 3)
-                center, scale = out_unitbox_meta[start_idx + idx]
-                pcmax, pcmin = out_nfact[start_idx + idx]
-
-                # Unnormalize from unit box to original
-                kp_abs = kp_unitbox * scale + center  # (K, 3)
-
-                # Renormalize to pcn format
-                kp_pcn = (kp_abs - pcmin) / (pcmax - pcmin)
-                kp_pcn = 2.0 * (kp_pcn - 0.5)
-
-                out_kpcd.append(kp_pcn)
+            for kp in key_points:
+                out_kpcd.append(kp)
 
     predicted = {"kpcd": out_kpcd, "nfact": out_nfact}
 
@@ -338,18 +219,12 @@ def mIoU_curve_plot(kpn_ds, predicted, pcd_path):
 # Main
 # ----------------------------
 if __name__ == "__main__":
-    parser = AEOptions()
-    opt = parser.parse()
+    opt = p.parse_args()
 
-    seed = opt.seed
-    torch.manual_seed(seed)
-    np.random.seed(seed)
+    model = SC3K()
+    model.load_model(opt.ckpt, opt)
 
-    kpn_ds, predicted = run_prediction(opt)
-
-    # Run prediction
-
-    # Run evaluations
+    kpn_ds, predicted = run_prediction(model, opt)
 
     fwd = fwd_alignment_scores(kpn_ds, predicted)
     bwd = bwd_alignment_scores(kpn_ds, predicted)
@@ -360,6 +235,3 @@ if __name__ == "__main__":
         "mIoU at threshold 0.1: ",
         mIoU_curve_plot(kpn_ds, predicted, opt.pcd_path) * 100,
     )
-    # e.g.,
-    # python3 /app/scripts/test_das.py --latent_dim=10 --n_iterations=20000 -c=../configs/object.yaml -t=../configs/test.yaml --category=03001627 --extra_latent=5 --use_old=True --use_edm=True --ckpt=/app/data2/keypoints/logs/dandy-sun-228/checkpoints/net_20000.pth
-#  python3 /app/scripts/test_das.py --latent_dim=10 --n_iterations=20000 -c=../configs/object.yaml -t=../configs/test.yaml --category=03001627 --extra_latent=5 --use_old=True --use_edm=True --ckpt=/app/data2/keypoints/logs/dandy-sun-228/checkpoints/net_20000.pth

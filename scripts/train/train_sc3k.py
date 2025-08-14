@@ -19,20 +19,22 @@ p.add_argument("--max-epoch", type=int, default=200)
 p.add_argument("--lr", type=float, default=1e-3)
 
 # Domain/task specifics you reference
-p.add_argument("--class-name", type=str, default="default_class")
 p.add_argument("--key-points", type=int, default=10)
 p.add_argument("--log-path", type=str, default=None)
 p.add_argument("--category", type=str, help="Category of objects", default="chair")
 
-# Loss term weights
-p.add_argument("--separation", type=float, default=1.0)
-p.add_argument("--overlap", type=float, default=1.0)
 p.add_argument("--overlap-threshold", type=float, default=0.05)
 
+# Loss term weights
+p.add_argument("--separation", type=float, default=0.5)
 p.add_argument("--shape", type=float, default=6.0)
-p.add_argument("--consist", type=float, default=1.0)
 p.add_argument("--volume", type=float, default=1.0)
-p.add_argument("--pose", type=float, default=0.07)
+p.add_argument("--overlap", type=float, default=0.07)
+
+p.add_argument("--consist", type=float, default=1.0)
+p.add_argument("--pose", type=float, default=0.05)
+
+
 p.add_argument("--lamda", type=float, default=0.0)
 p.add_argument("--lamda2", type=float, default=0.0)
 p.add_argument("--sample-points", type=int, default=2048)
@@ -122,7 +124,7 @@ def train(cfg):
             best_loss = meter.avg
             torch.save(
                 model.state_dict(),
-                f"Best_{cfg.class_name}_{cfg.key_points}kp.pth",
+                f"Best_{cfg.category}_{cfg.key_points}kp.pth",
             )
 
         writer.add_scalars(
@@ -132,7 +134,7 @@ def train(cfg):
     writer.close()  # close the summary writer
     torch.save(
         model.state_dict(),
-        f"{cfg.class_name}_{cfg.key_points}kp_{cfg.max_epoch}.pth",
+        f"{cfg.category}_{cfg.key_points}kp_{cfg.max_epoch}.pth",
     )
 
 

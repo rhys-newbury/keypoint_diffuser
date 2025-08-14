@@ -71,14 +71,17 @@ def transform(pc, extrinsic_mat):
 
 
 def random_y_rotation_matrix():
-    theta = np.random.uniform(0, 2 * np.pi)
+    pitch = np.deg2rad(np.random.uniform(-90, 90))
+
+    # Rotation around Y-axis for pitch in Z-up coordinates
     R_y = np.array(
         [
-            [np.cos(theta), 0, np.sin(theta)],
+            [np.cos(pitch), 0, np.sin(pitch)],
             [0, 1, 0],
-            [-np.sin(theta), 0, np.cos(theta)],
+            [-np.sin(pitch), 0, np.cos(pitch)],
         ]
     )
+
     return R_y
 
 
@@ -104,6 +107,8 @@ class H5Dataset(Dataset):
         self.data = []
         self.labels = []
 
+        self.rotations = []
+
         assert self.object_name in KEYS
 
         # Load only metadata, not full arrays
@@ -115,9 +120,21 @@ class H5Dataset(Dataset):
                 for i in range(len(x)):
                     label = y[i][0]
                     if KEYS[self.object_name] == label:
-                        self.data.append(x[i])
                         if include_label:
                             self.labels.append(label)
+                        if self.random_rotate:
+                            self.rotations.append(self.random_poses())
+                            for _ in range(24):
+                                self.data.append(x[i])
+                        else:
+                            self.data.append(x[i])
+        self.rotations = np.array(self.rotations).reshape(-1, 3, 3)
+
+    def random_poses(self):
+        output = np.zeros((24, 3, 3), dtype=np.float32)
+        for i in range(24):
+            output[i] = random_y_rotation_matrix()
+        return output
 
     def __len__(self):
         return len(self.data)
@@ -129,21 +146,25 @@ class H5Dataset(Dataset):
         pc = 2.0 * (pc - 0.5)
         return pc
 
+    def normalize_pc(self, pc):
+        pc = pc - pc.mean(0)
+        pc /= np.max(np.linalg.norm(pc, axis=-1))
+        return pc
+
     def __getitem__(self, idx):
         pc = self.data[idx]
 
-        if self.normalize:
-            pc = self.normalize_pointcloud(pc)
-
-        pc = torch.tensor(pc, dtype=torch.float32)
-
         if self.random_rotate:
-            # SC3K wants random rotations.
-            R1 = random_y_rotation_matrix()
-            R2 = random_y_rotation_matrix()
+            # SC3K wants 'random' rotations.
+            R1 = self.rotations[idx]
+            R2 = self.rotations[-(idx + 1)]
 
             pc1 = transform(pc, R1)
             pc2 = transform(pc, R2)
+
+            pc1 = self.normalize_pc(pc1)
+            pc2 = self.normalize_pc(pc2)
+
 
             return (
                 pc1.astype(np.float32),
@@ -151,6 +172,11 @@ class H5Dataset(Dataset):
                 pc2.astype(np.float32),
                 R2.astype(np.float32),
             )
+
+        if self.normalize:
+            pc = self.normalize_pointcloud(pc)
+
+        pc = torch.tensor(pc, dtype=torch.float32)
 
         if self.get_two:
             # KeypointDeformer wants two shapes
