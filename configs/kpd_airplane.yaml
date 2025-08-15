@@ -5,4 +5,4 @@ category: airplane
 mesh_dir: data/shapenet/shape_data
 log_dir: logs
 
-n_keypoints: 8
+key_points: 8

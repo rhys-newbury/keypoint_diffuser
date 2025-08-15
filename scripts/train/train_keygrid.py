@@ -6,35 +6,32 @@ Created on Fri Mar 12 15:56:16 2021
 import argparse
 import contextlib
 from glob import glob
+from pathlib import Path
 
-import matplotlib.pyplot as plt
 import torch
-from key_grid.composed_chamfer import loss_all
-from key_grid.merger_net import Net
+from baselines.key_grid.composed_chamfer import loss_all
+from baselines.key_grid.merger_net import Net
 from keypoint_diffuser.datasets.H5Datset import H5Dataset
 from torch import optim
 from tqdm import tqdm
+from utils import DATASET
+
+import wandb
 
 
 arg_parser = argparse.ArgumentParser(
     description="Training Key_Grid for the PointNet++ on the ClothesNet dataset."
 )
-arg_parser.add_argument(
-    "-m",
-    "--checkpoint-path",
-    "--model-path",
-    type=str,
-    default="Key_Grid/model/chair.pt",
-    help="Model checkpoint file path for saving.",
-)
+
 arg_parser.add_argument(
     "-k",
-    "--n-keypoint",
+    "--key_points",
     type=int,
     default=10,
     help="Requested number of keypoints to detect.",
 )
 arg_parser.add_argument("-b", "--batch", type=int, default=8, help="Batch size.")
+
 arg_parser.add_argument(
     "-e", "--epochs", type=int, default=100, help="Number of epochs to train."
 )
@@ -51,11 +48,7 @@ arg_parser.add_argument("--lambda_chamfer", type=float, help="", default=1.0)
 arg_parser.add_argument(
     "--category", type=str, help="Category of objects", default="chair"
 )
-
-loss_history = {
-    "init_points": [],
-    "chamfer": [],
-}
+arg_parser.add_argument("--ckpt-dir", type=Path, default=Path("."))
 
 
 def feed(net, optimizer, loader, train, shuffle, batch, epoch, ns):
@@ -77,68 +70,46 @@ def feed(net, optimizer, loader, train, shuffle, batch, epoch, ns):
             keypoint, reconstruct = net(batch_x, "True")
             loss = loss_all(batch_x, keypoint, reconstruct, epoch, ns)
             running_init_points += loss["init_points"]
-            if epoch > ns.chamfer:
+            if epoch > cfg.chamfer:
                 running_chamfer += loss["chamfer"]
+
+            wandb.log(loss)
             loss = sum(loss.values())
 
             if train:
                 loss.backward()
                 optimizer.step()
 
-            # print('[%s%d, %4d] init_point: %.4f chamfer: %.4f smooth: %.4f '%
-            #       ('VT'[train], epoch, i, running_init_points / (i + 1), running_chamfer / (i + 1), running_smoothing/(i+1)))
-
-    num_batches = len(loader)
-    avg_init = running_init_points / num_batches
-    avg_chamfer = running_chamfer / num_batches
-
-    loss_history["init_points"].append(avg_init.item())
-    try:
-        loss_history["chamfer"].append(avg_chamfer.item())
-    except:
-        loss_history["chamfer"].append(0)
-
-    # Plot
-    plt.figure()
-    plt.plot(loss_history["init_points"], label="Init Points Loss")
-    plt.plot(loss_history["chamfer"], label="Chamfer Loss")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("Loss per Epoch")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(f"loss_plots/loss_epoch_{epoch}.png")
-    plt.close()
-
 
 if __name__ == "__main__":
-    ns = arg_parser.parse_args()
-    batch = ns.batch
+    cfg = arg_parser.parse_args()
+    batch = cfg.batch
 
-    DATASET = "/app/shapenetcorev2_hdf5_2048/train"
-    TESTSET = "/app/shapenetcorev2_hdf5_2048/val"
+    wandb.init(project=f"keygrid_{cfg.category}_train", config=cfg)
+
+    ckpt_dir = cfg.ckpt_dir / wandb.run.name
+    ckpt_dir.mkdir()
 
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
     dataset = H5Dataset(
         h5_files,
         normalize=True,
         include_label=False,
-        object_name=ns.category,
+        object_name=cfg.category,
     )
     loader = torch.utils.data.DataLoader(
         dataset, batch_size=batch, shuffle=True, num_workers=0
     )
 
-    net = Net(ns.max_points, ns.n_keypoint).cuda()
+    net = Net(cfg.max_points, cfg.key_points).cuda()
     optimizer = optim.Adam(net.parameters(), lr=0.1)
 
-    for epoch in range(ns.epochs):
-        feed(net, optimizer, loader, True, False, batch, epoch, ns)
+    for epoch in range(cfg.epochs):
+        feed(net, optimizer, loader, True, False, batch, epoch, cfg)
         torch.save(
             {
                 "epoch": epoch,
                 "model_state_dict": net.state_dict(),
             },
-            f"{epoch}.pth",
+            f"{str(ckpt_dir)}/{cfg.key_points}kp_{epoch}.pth",
         )

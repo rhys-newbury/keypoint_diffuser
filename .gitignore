@@ -25,3 +25,4 @@ scripts/eval_logs
 *.txt
 *.mp4
 scripts/train/train_summary
+scripts/train/wandb

@@ -10,7 +10,7 @@ import torch
 import torch.nn.functional as F
 
 
-def compute_loss(kp1, kp2, data, writer, step, cfg, split="split??"):
+def compute_loss(kp1, kp2, data, step, cfg, split="split??"):
     device = kp1.device
     l_sep1 = cfg.separation * separation_loss(kp1)
     l_sep2 = cfg.separation * separation_loss(kp2)
@@ -26,17 +26,18 @@ def compute_loss(kp1, kp2, data, writer, step, cfg, split="split??"):
     l_pose = cfg.pose * pose_loss(
         kp1, kp2, data[1].float().to(device), data[3].float().to(device)
     )
-
-    writer.add_scalar(f"{split}_loss/consist", l_consist, step)
-    writer.add_scalar(f"{split}_loss/relative_pose", l_pose, step)
-    writer.add_scalar(f"{split}_loss/sep1", l_sep1, step)
-    writer.add_scalar(f"{split}_loss/sep2", l_sep2, step)
-    writer.add_scalar(f"{split}_loss/overlap1", l_overlap1, step)
-    writer.add_scalar(f"{split}_loss/overlap2", l_overlap2, step)
-    writer.add_scalar(f"{split}_loss/shape1", l_shape1, step)
-    writer.add_scalar(f"{split}_loss/shape2", l_shape2, step)
-    writer.add_scalar(f"{split}_loss/volume1", l_volume1, step)
-    writer.add_scalar(f"{split}_loss/volume2", l_volume2, step)
+    d = {
+        f"{split}_loss/consist": l_consist,
+        f"{split}_loss/relative_pose": l_pose,
+        f"{split}_loss/sep1": l_sep1,
+        f"{split}_loss/sep2": l_sep2,
+        f"{split}_loss/overlap1": l_overlap1,
+        f"{split}_loss/overlap2": l_overlap2,
+        f"{split}_loss/shape1": l_shape1,
+        f"{split}_loss/shape2": l_shape2,
+        f"{split}_loss/volume1": l_volume1,
+        f"{split}_loss/volume2": l_volume2,
+    }
 
     return (
         l_sep1
@@ -49,7 +50,7 @@ def compute_loss(kp1, kp2, data, writer, step, cfg, split="split??"):
         + l_volume1
         + l_volume2
         + l_pose
-    )  # + l_reconstruction
+    ), d  # + l_reconstruction
 
 
 def consistancy_loss(kp1, kp2, rot1, rot2):

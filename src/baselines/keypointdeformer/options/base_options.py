@@ -1,6 +1,7 @@
-import configargparse
+from pathlib import Path
 
-from keypointdeformer.models.cage_skinning import CageSkinning
+import configargparse
+from baselines.keypointdeformer.models.cage_skinning import CageSkinning
 
 
 class BaseOptions:
@@ -15,67 +16,35 @@ class BaseOptions:
             is_config_file=True,
             help="config file path",
         )
-        parser.add_argument(
-            "-t",
-            "--test_config",
-            required=False,
-            is_config_file=True,
-            help="config file path",
-        )
+
         # basic parameters
-        parser.add_argument("--name", required=True, type=str, help="experiment name")
         parser.add_argument("--category", required=True, type=str, help="object name")
 
-        parser.add_argument(
-            "--dataset", type=str, default="shapes", help="dataset name"
-        )
-        parser.add_argument(
-            "--num_point", type=int, help="number of input points", default=1024
-        )
-        parser.add_argument(
-            "--points_dir", type=str, help="points data root", default=None
-        )
-        parser.add_argument("--dim", type=int, help="2D or 3D", default=3)
-        parser.add_argument(
-            "--log_dir", type=str, help="log directory", default="./log"
-        )
-        parser.add_argument(
-            "--subdir", type=str, help="save to directory name", default="test"
-        )
         parser.add_argument("--batch_size", type=int, help="batch size", default=16)
-        parser.add_argument("--n_keypoints", type=int, help="")
+        parser.add_argument("--key_points", type=int, help="", default=10)
         parser.add_argument("--cage_size", type=float, default=1.4, help="")
-        parser.add_argument("--print_options", action="store_true", help="")
-        # training setup
+
         parser.add_argument("--lr", type=float, help="learning rate", default=0.001)
-        parser.add_argument(
-            "--phase", type=str, choices=["test", "train"], default="train"
-        )
-        parser.add_argument("--ckpt", type=str, help="test model")
+
         parser.add_argument("--seed", type=int, default=0, help="")
         parser.add_argument("--n_workers", type=int, default=4, help="")
         parser.add_argument("--iteration", type=int, default=None, help="")
-        parser.add_argument("--n_iterations", type=int, default=2000, help="")
-        parser.add_argument("--log_interval", type=int, default=10, help="")
-        parser.add_argument("--save_interval", type=int, default=100, help="")
-        # network options
+        parser.add_argument("--n_iterations", type=int, default=20000, help="")
+
         parser.add_argument(
             "--bottleneck_size", type=int, help="bottleneck size", default=256
         )
+        parser.add_argument("--ckpt_dir", type=Path, default=Path("."), help="")
         parser.add_argument(
             "--normalization",
             type=str,
             choices=["batch", "instance", "none"],
             default="none",
         )
+
         parser.add_argument(
             "--disable_d_residual", dest="d_residual", action="store_false"
         )
-        parser.add_argument("--model", type=str, default="cage_skinning", help="")
-        # dataset related optionsw
-        parser.add_argument("--mesh_dir", type=str, help="")
-        parser.add_argument("--keypoints_dir", type=str, help="")
-
         self.initialized = True
         return parser
 
@@ -136,17 +105,12 @@ class BaseOptions:
             args, skip_model=skip_model, unknown_ok=unknown_ok
         )
 
-        if opt.print_options:
-            self.print_options(opt)
-
         if unknown:
             self.print_unknown(unknown)
 
-        if opt.phase == "test":
-            assert opt.ckpt is not None
-        opt.batch_size if opt.phase == "train" else 1
         if opt.normalization == "none":
             opt.normalization = None
+
         self.opt = opt
 
         return self.opt

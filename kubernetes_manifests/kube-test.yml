@@ -40,7 +40,7 @@ spec:
                 # [
                 #   "python",
                 #   "scripts/main.py",
-                #   "--n_keypoints=8",
+                #   "--key_points=8",
                 #   "--n_iterations=200000",
                 #   "-c=configs/lamp.yaml",
                 # ]

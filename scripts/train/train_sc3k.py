@@ -1,12 +1,15 @@
 import argparse
 from glob import glob
+from pathlib import Path
 
 import torch
+from baselines.sc3k import network
+from baselines.sc3k.utils import AverageMeter, compute_loss
 from keypoint_diffuser.datasets.H5Datset import H5Dataset
-from sc3k import network
-from sc3k.utils import AverageMeter, compute_loss
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+from utils import DATASET, TESTSET
+
+import wandb
 
 
 p = argparse.ArgumentParser(description="Train SC3K (argparse version)")
@@ -39,13 +42,10 @@ p.add_argument("--lamda", type=float, default=0.0)
 p.add_argument("--lamda2", type=float, default=0.0)
 p.add_argument("--sample-points", type=int, default=2048)
 
+p.add_argument("--ckpt-dir", type=Path, default=Path("."))
+
 
 def train(cfg):
-    writer = SummaryWriter("train_summary")
-
-    DATASET = "/app/shapenetcorev2_hdf5_2048/train"
-    TESTSET = "/app/shapenetcorev2_hdf5_2048/val"
-
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
     dataset = H5Dataset(
         h5_files,
@@ -77,6 +77,9 @@ def train(cfg):
     model = network.sc3k(cfg).to(device)  # cuda()   # unsupervised network
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
 
+    ckpt_dir = cfg.ckpt_dir / wandb.run.name
+    ckpt_dir.mkdir()
+
     meter = AverageMeter()
     best_loss = 1e10
     train_step = 0
@@ -89,15 +92,16 @@ def train(cfg):
         model.train()
         for _i, data in enumerate(train_iter):
             kp1, kp2 = model(data)
-            loss = compute_loss(kp1, kp2, data, writer, train_step, cfg, split="train")
+            loss, values = compute_loss(kp1, kp2, data, train_step, cfg, split="train")
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
             train_iter.set_postfix(loss=loss.item())
             meter.update(loss.item())
-            writer.add_scalar(
-                "train_loss/overall", loss, train_step
+
+            wandb.log(
+                {**values, "train_loss/overall": loss}, step=train_step
             )  # write training loss
             train_step += 1  # increment in train_step
 
@@ -110,11 +114,12 @@ def train(cfg):
         for _i, data in enumerate(val_iter):
             with torch.no_grad():
                 kp1, kp2 = model(data)
-                loss = compute_loss(kp1, kp2, data, writer, val_step, cfg, split="val")
+                loss, values = compute_loss(kp1, kp2, data, val_step, cfg, split="val")
 
-                writer.add_scalar(
-                    "val_loss/overall", loss, val_step
+                wandb.log(
+                    {**values, "val_loss/overall": loss}, step=train_step
                 )  # write validation loss
+
                 val_step += 1  # increment in val_step
 
             val_iter.set_postfix(loss=loss.item())
@@ -126,20 +131,19 @@ def train(cfg):
                 model.state_dict(),
                 f"Best_{cfg.category}_{cfg.key_points}kp.pth",
             )
+        torch.save(
+            model.state_dict(),
+            f"{str(ckpt_dir)}/{cfg.key_points}kp_{epoch}.pth",
+        )
 
-        writer.add_scalars(
-            "loss_per_epoch", {"train_loss": train_loss, "val_loss": val_loss}, epoch
-        )  # write validation loss
-
-    writer.close()  # close the summary writer
-    torch.save(
-        model.state_dict(),
-        f"{cfg.category}_{cfg.key_points}kp_{cfg.max_epoch}.pth",
-    )
+        wandb.log({"train_loss": train_loss, "val_loss": val_loss}, step=epoch)
 
 
 if __name__ == "__main__":
     cfg = p.parse_args()
     cfg.task = "generic"
     cfg.split = "train"
+
+    wandb.init(project=f"skeleton_merger_{cfg.category}_train", config=cfg)
+
     train(cfg)

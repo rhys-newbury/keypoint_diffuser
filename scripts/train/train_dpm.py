@@ -266,7 +266,7 @@ if __name__ == "__main__":
         wandb.log(
             {
                 "ckpt": opt.ckpt,
-                "n_keypoints": opt.latent_dim,
+                "key_points": opt.latent_dim,
                 "type": "dpm",
                 "category": opt.category,
             }

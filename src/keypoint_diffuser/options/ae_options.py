@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 
 import configargparse
+import numpy as np
 
 from .. import datasets
-import numpy as np
+
 
 THOUSAND = 1000
 
@@ -57,8 +58,8 @@ class AEConfig:
     seg_split_dir: str = None
     keypointnet_dir: str = None
     keypointnet_compatible: str = None
-    keypointnet_common_keypoints: bool = False
-    keypointnet_min_n_common_keypoints: int = 6
+    keypointnet_commokey_points: bool = False
+    keypointnet_min_n_commokey_points: int = 6
     keypointnet_min_samples: float = 0.8
     keypoints_gt_source: str = None
     data_type: str = "shapenet"
@@ -87,7 +88,7 @@ class AEConfig:
     max_bending_factor: float = 1.8
     max_twist_factor: float = 1.9
     max_taper_factor: float = 1.6
-    max_rotation_angle: float = np.pi / 6  
+    max_rotation_angle: float = np.pi / 6
 
     pcd_path: str = "/app/pcds"
     annotation_json = "/app/annotations/cap.json"

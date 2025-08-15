@@ -32,11 +32,10 @@ class CageSkinning(nn.Module):
         super().__init__()
 
         self.opt = opt
-        self.dim = self.opt.dim
 
         template_vertices, template_faces = self.create_cage()
         self.init_template(template_vertices, template_faces)
-        self.init_networks(opt.bottleneck_size, self.opt.dim, opt)
+        self.init_networks(opt.bottleneck_size, 3, opt)
         self.init_optimizer()
 
     def create_cage(self):
@@ -50,9 +49,7 @@ class CageSkinning(nn.Module):
     def init_networks(self, bottleneck_size, dim, opt):
         # keypoint predictor
         shape_encoder_kpt = nn.Sequential(
-            PointNetfeat(
-                dim=dim, num_points=opt.num_point, bottleneck_size=bottleneck_size
-            ),
+            PointNetfeat(dim=dim, num_points=2048, bottleneck_size=bottleneck_size),
             Linear(
                 bottleneck_size,
                 bottleneck_size,
@@ -63,18 +60,16 @@ class CageSkinning(nn.Module):
         nd_decoder_kpt = MLPDeformer2(
             dim=dim,
             bottleneck_size=bottleneck_size,
-            npoint=opt.n_keypoints,
+            npoint=opt.key_points,
             residual=opt.d_residual,
             normalization=opt.normalization,
         )
         self.keypoint_predictor = nn.Sequential(shape_encoder_kpt, nd_decoder_kpt)
 
         # influence predictor
-        influence_size = self.opt.n_keypoints * self.template_vertices.shape[2]
+        influence_size = self.opt.key_points * self.template_vertices.shape[2]
         shape_encoder_influence = nn.Sequential(
-            PointNetfeat(
-                dim=dim, num_points=opt.num_point, bottleneck_size=influence_size
-            ),
+            PointNetfeat(dim=dim, num_points=2048, bottleneck_size=influence_size),
             Linear(
                 influence_size,
                 influence_size,
@@ -100,9 +95,9 @@ class CageSkinning(nn.Module):
         self.register_buffer("template_faces", template_faces)
         self.register_buffer("template_vertices", template_vertices)
 
-        # n_keypoints x number of vertices
+        # key_points x number of vertices
         self.influence_param = nn.Parameter(
-            torch.zeros(self.opt.n_keypoints, self.template_vertices.shape[2]),
+            torch.zeros(self.opt.key_points, self.template_vertices.shape[2]),
             requires_grad=True,
         )
 
@@ -153,7 +148,7 @@ class CageSkinning(nn.Module):
         self.shape = shape
         self.keypoints = keypoints
 
-        n_fps = self.opt.n_fps if self.opt.n_fps else 2 * self.opt.n_keypoints
+        n_fps = self.opt.n_fps if self.opt.n_fps else 2 * self.opt.key_points
         self.init_keypoints = sample_farthest_points(shape, n_fps)
 
         if target_shape is not None:
