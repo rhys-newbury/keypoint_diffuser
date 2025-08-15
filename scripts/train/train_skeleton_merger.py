@@ -12,6 +12,7 @@ from pathlib import Path
 import torch
 from baselines.skeleton_merger.composed_chamfer import composed_sqrt_chamfer
 from baselines.skeleton_merger.merger_net import Net
+from db_utils import save_train_run
 from keypoint_diffuser.datasets.H5Datset import H5Dataset
 from torch import optim
 from tqdm import tqdm
@@ -25,9 +26,8 @@ arg_parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
 
-arg_parser.add_argument(
-    "--category", type=str, help="Category of objects", default="chair"
-)
+arg_parser.add_argument("--category", type=str, help="Category of objects")
+arg_parser.add_argument("--db", type=Path, help="Database path")
 
 arg_parser.add_argument(
     "-k",
@@ -116,6 +116,8 @@ if __name__ == "__main__":
 
     ckpt_dir = ns.ckpt_dir / wandb.run.name
     ckpt_dir.mkdir()
+
+    save_train_run(ns.db, "SM", ns.category, ckpt_dir, ns.key_points)
 
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
     dataset = H5Dataset(

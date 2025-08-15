@@ -94,3 +94,11 @@ class Net(nn.Module):  # Skeleton Merger structure
         strengths = F.sigmoid(self.MA_L(self.MA(global_feats)))
         ofs = torch.cat(ofs, dim=1)  # P x 72 x 3
         return rp, kpcd, kp_heatmaps, ofs, strengths
+
+    def get_keypoints(self, input_x):
+        """Shortened `forward` but only keypoints"""
+        point_cloud = torch.cat([input_x, input_x, input_x], -1)
+        kp_x, _ = self.PTW(point_cloud.permute(0, 2, 1))
+        kp_x = self.PT_L(kp_x)
+        kp_heatmaps = F.softmax(kp_x.permute(0, 2, 1), -1)  # [n, k, npt]
+        return kp_heatmaps.bmm(input_x)  # KeyPoint ClouD [n, k, 3]

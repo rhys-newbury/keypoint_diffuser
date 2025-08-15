@@ -1,6 +1,8 @@
+import argparse
 import collections
 import json
 import os
+import sqlite3
 from pathlib import Path
 
 import matplotlib.pyplot as plotlib
@@ -8,6 +10,7 @@ import numpy as np
 import torch
 import tqdm
 from baselines.sc3k.test_sc3k import SC3K
+from baselines.skeleton_merger.test_sm import SM
 from keypoint_diffuser.utils.pc_utils import collate_fn
 from keypoint_diffuser.utils.transforms import (
     Collect,
@@ -20,13 +23,33 @@ from torchvision import transforms
 CHECKPOINTS_DIR = "checkpoints"
 CHECKPOINT_EXT = ".pth"
 
-# ----------------------------
-# Argument Parser
-# ----------------------------
-p = SC3K.get_parser()
-p.add_argument("--ckpt", type=Path)
-p.add_argument("--annotation-json", type=Path, default="/app/annotations/chair.json")
-p.add_argument("--pcd-path", type=Path, default="/app/pcds")
+MODEL_CLASSES = {
+    "SC3K": SC3K,
+    "SM": SM,
+    # Add more models here:
+}
+
+
+p = argparse.ArgumentParser()
+subparsers = p.add_subparsers(dest="model", required=True)
+
+# Create a subparser for each model
+for model_name, model_cls in MODEL_CLASSES.items():
+    subparser = subparsers.add_parser(model_name)
+    model_cls.get_parser(
+        subparser
+    )  # pass the subparser in instead of creating inside get_parser
+    subparser.add_argument("--ckpt", type=Path)
+    subparser.add_argument(
+        "--annotation-json", type=Path, default="/app/annotations/chair.json"
+    )
+    subparser.add_argument("--pcd-path", type=Path, default="/app/pcds")
+    subparser.add_argument("--batch-size", type=int, default=32)
+    subparser.add_argument("--key-points", type=int, default=10)
+    subparser.add_argument(
+        "--category", type=str, help="Category of objects", default="chair"
+    )
+    subparser.add_argument("--db-path", type=Path, default=Path("results.db"))
 
 # ----------------------------
 # Utilities
@@ -216,22 +239,85 @@ def mIoU_curve_plot(kpn_ds, predicted, pcd_path):
 
 
 # ----------------------------
+# Database
+# ----------------------------
+def init_db(db_path):
+    con = sqlite3.connect(str(db_path))
+    cur = con.cursor()
+    # single flat table with your config + metrics
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            model TEXT NOT NULL,
+            ckpt TEXT,
+            annotation_json TEXT,
+            pcd_path TEXT,
+            batch_size INTEGER,
+            key_points INTEGER,
+            category TEXT,
+            fwd REAL,
+            bwd REAL,
+            das REAL,
+            miou_at_0_1 REAL
+        )
+    """
+    )
+    con.commit()
+    return con
+
+
+def save_run(db_path, opt, fwd, bwd, das, miou_at_0_1):
+    con = init_db(db_path)
+    cur = con.cursor()
+    cur.execute(
+        """
+        INSERT INTO runs (model, ckpt, annotation_json, pcd_path, batch_size, key_points, category,
+                          fwd, bwd, das, miou_at_0_1)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """,
+        (
+            opt.model,
+            str(opt.ckpt) if opt.ckpt is not None else None,
+            str(opt.annotation_json),
+            str(opt.pcd_path),
+            int(opt.batch_size),
+            int(opt.key_points),
+            str(opt.category),
+            float(fwd),
+            float(bwd),
+            float(das),
+            float(miou_at_0_1),
+        ),
+    )
+    con.commit()
+    run_id = cur.lastrowid
+    con.close()
+    return run_id
+
+
+# ----------------------------
 # Main
 # ----------------------------
 if __name__ == "__main__":
     opt = p.parse_args()
 
-    model = SC3K()
+    model_cls = MODEL_CLASSES[opt.model]
+    model = model_cls()  # or model_cls(opt) if your ctor expects args
     model.load_model(opt.ckpt, opt)
 
     kpn_ds, predicted = run_prediction(model, opt)
 
     fwd = fwd_alignment_scores(kpn_ds, predicted)
     bwd = bwd_alignment_scores(kpn_ds, predicted)
+    dual = (fwd + bwd) / 2.0
+    miou_at_01 = mIoU_curve_plot(kpn_ds, predicted, opt.pcd_path)
+
     print("Forward Alignment Score:", fwd)
     print("Backward Alignment Score:", bwd)
     print("DUAL ALIGNMENT SCORE: ", (fwd + bwd) / 2)
-    print(
-        "mIoU at threshold 0.1: ",
-        mIoU_curve_plot(kpn_ds, predicted, opt.pcd_path) * 100,
+    print("mIoU at threshold 0.1: ", miou_at_01 * 100)
+    run_id = save_run(
+        db_path=opt.db_path, opt=opt, fwd=fwd, bwd=bwd, das=dual, miou_at_0_1=miou_at_01
     )
+    print(f"[✓] saved to {opt.db_path} (run_id={run_id})")

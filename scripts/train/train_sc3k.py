@@ -144,6 +144,6 @@ if __name__ == "__main__":
     cfg.task = "generic"
     cfg.split = "train"
 
-    wandb.init(project=f"skeleton_merger_{cfg.category}_train", config=cfg)
+    wandb.init(project=f"sc3k_{cfg.category}_train", config=cfg)
 
     train(cfg)

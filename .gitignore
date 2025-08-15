@@ -26,3 +26,4 @@ scripts/eval_logs
 *.mp4
 scripts/train/train_summary
 scripts/train/wandb
+*.db
