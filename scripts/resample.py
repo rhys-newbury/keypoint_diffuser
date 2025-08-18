@@ -99,7 +99,7 @@ def look_at(eye, center, up=np.array([0, 1, 0])):
     vis_model_view_matrix = (vis_translation_matrix) @ rotation_matrix
     return model_view_matrix, vis_model_view_matrix
 
-def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, start_image_size=512, radius=2.0, max_image_size=2048, max_viewpoint_retries=10):
+def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, start_image_size=512, radius=2.0, max_image_size=2048, max_viewpoint_retries=10, remove_far_points=False):
     """
     Sample at least `num_samples` visible points from a single random view.
     If not enough points are captured, try new views up to `max_viewpoint_retries`.
@@ -154,6 +154,16 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
                 i = i.flatten()
                 j = j.flatten()
                 z = depth.flatten()
+                            
+                # for tac mode, remove points that are much further away than the closest point
+                if remove_far_points:
+                    print(f"Removing far points with tac mode, threshold: {image_size / 2}")
+                    min_dist = np.min(z[z > 0])  # Minimum depth value greater than zero
+                    print(f"Minimum depth value: {min_dist}")
+                    diff_threshold = 0.05
+                    far = z > (min_dist + diff_threshold)
+                    z[far] = 0.0  # Set far points to zero (not considered by depth image)
+                    
                 valid = z > 0
                 x = (i[valid] - cx) * z[valid] / fx
                 y = (j[valid] - cy) * z[valid] / fy
@@ -322,10 +332,10 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=Fals
         surface_pc_path = save_path / f"surface_samples.npy"
         # skip if the file already exists
         if surface_pc_path.is_file():
-            print(f"File already exists: {surface_pc_path}")
+            # print(f"File already exists: {surface_pc_path}")
             if not overwrite:
                 return
-        print(f"Processing: {surface_pc_path}")
+        # print(f"Processing: {surface_pc_path}")
         # save the points
         save_path.mkdir(parents=True, exist_ok=True)
         np.save(surface_pc_path, surface_points)
@@ -346,7 +356,7 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=Fals
             if not overwrite:
                 continue
             
-        print(f"Processing: {save_path / f'partial_samples_{mode}_{n}.npy'}")
+        # print(f"Processing: {save_path / f'partial_samples_{mode}_{n}.npy'}")
         
         # Sample the mesh for partial point clouds
         sampled_points, camera_pose = sample_visible_points_from_single_view(simplified_trimesh,
@@ -355,7 +365,8 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=Fals
                                                                 start_image_size=args['start_image_size'],
                                                                 radius=args['radius'],
                                                                 max_image_size=args['max_image_size'],
-                                                                max_viewpoint_retries=args['max_viewpoint_retries'])
+                                                                max_viewpoint_retries=args['max_viewpoint_retries'], 
+                                                                remove_far_points= args['remove_far_points'])
         
         # if no points were sampled successfully then both outputs will be None
         if sampled_points is None or camera_pose is None:
@@ -398,11 +409,11 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=Fals
             for item in failed_list:
                 f.write(f"{item}\n")
 
-folders = {"02691156"}
+# folders = {"02691156", "03797390"}  # airplane, mug
 # folders = {"02691156", "03636649", "03467517", "02954340", "02958343"}    # airplane, lamp, guitar, cap, car
 # folders =   {"03636649", "03467517", "02954340", "02958343"}  # lamp, guitar, cap, car
 # folders = {"02691156", "03636649",}
-# folders = {"02691156", "03467517", "02954340", "02958343", "03797390", "04225987"}    # airplane, lamp, guitar, cap, car, mug, skateboard
+folders = {"02691156", "03467517", "02954340", "02958343", "03797390", "04225987"}    # airplane, lamp, guitar, cap, car, mug, skateboard
 # folders = {"03467517", "02954340", "02958343", "03797390", "04225987"}    # lamp, guitar, cap, car, mug, skateboard
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
