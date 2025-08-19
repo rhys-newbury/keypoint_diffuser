@@ -1,7 +1,7 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: bag-eval
+  name: manager-list3
 spec:
   maxRetry: 1
   minAvailable: 1
@@ -27,36 +27,20 @@ spec:
                         values:
                           - NVIDIA-RTX-A6000
                           - NVIDIA-GeForce-RTX-3090
-                          - NVIDIA-GeForce-RTX-2080-Ti
-                          # - NVIDIA-GeForce-GTX-1080-Ti
-
-          # nodeSelector:
-          #   nvidia.com/gpu.product: NVIDIA-RTX-A6000
           containers:
             - name: runner
               imagePullPolicy: Always
               image: mu00120825.eng.monash.edu.au:5021/keypoint_diffuser:latest
               command:
-                # [
-                #   "python",
-                #   "scripts/main.py",
-                #   "--key_points=8",
-                #   "--n_iterations=200000",
-                #   "-c=configs/lamp.yaml",
-                # ]
-                ["bash",
-                "run.sh",
-                "train_ae.py",
-                "restful-brook-5",
-                "8",
-                "configs/lamp.yaml",
-                "--use_old=false",
-                "--use_edm=true"
+                [
+                  "python",
+                  "test_db.py",
+                  "--db=/mnt/slow/results.db",
+                  "--only-algo=SM",
+                  "--keep-going"
                 ]
-              # command: ["/bin/bash", "-c", "--"]
-              # args: ["while true; do sleep 30; done;"]
 
-              workingDir: /app
+              workingDir: /app/scripts/test
 
               env:
                 - name: WANDB_API_KEY
@@ -65,7 +49,8 @@ spec:
                       name: wandb
                       key: api-key
                 - name: WANDB_CACHE_DIR
-                  value: /home/taco
+                  value: /home/user
+
               resources:
                 requests:
                   memory: 24Gi
@@ -80,6 +65,8 @@ spec:
                   mountPath: /mnt/storage
                 - name: slow
                   mountPath: /mnt/slow
+                - name: slow2
+                  mountPath: /mnt/slow2
                 - mountPath: /dev/shm
                   name: dshm
           volumes:
@@ -92,7 +79,7 @@ spec:
                 options:
                   networkPath: //130.194.128.238/fast
                   mountOptions: dir_mode=0777,file_mode=0777,noperm
-            - name: slow
+            - name: slow2
               flexVolume:
                 driver: fstab/cifs
                 fsType: cifs
@@ -101,6 +88,10 @@ spec:
                 options:
                   networkPath: //130.194.128.238/slow
                   mountOptions: dir_mode=0777,file_mode=0777,noperm
+            - name: slow
+              nfs:
+                server: 130.194.128.238
+                path: /mnt/fast/more-users/bryce-rhys
 
             - name: dshm
               emptyDir:

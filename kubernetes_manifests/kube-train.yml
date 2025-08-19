@@ -8,7 +8,7 @@ spec:
   schedulerName: volcano
   queue: default
   tasks:
-    - replicas: 3
+    - replicas: 1
       name: train
       template:
         spec:
@@ -33,13 +33,11 @@ spec:
               image: mu00120825.eng.monash.edu.au:5021/keypoint_diffuser:latest
               command:
                 [
-                  "python",
-                  "-u",
-                  "manager.py",
-                  "--jobs_path=/mnt/slow/job_list3.yaml"
+                  "bash",
+                  "train.sh"
                 ]
 
-              workingDir: /app/scripts
+              workingDir: /app/scripts/train
 
               env:
                 - name: WANDB_API_KEY
@@ -64,6 +62,8 @@ spec:
                   mountPath: /mnt/storage
                 - name: slow
                   mountPath: /mnt/slow
+                - name: slow2
+                  mountPath: /mnt/slow2
                 - mountPath: /dev/shm
                   name: dshm
           volumes:
@@ -76,7 +76,7 @@ spec:
                 options:
                   networkPath: //130.194.128.238/fast
                   mountOptions: dir_mode=0777,file_mode=0777,noperm
-            - name: slow
+            - name: slow2
               flexVolume:
                 driver: fstab/cifs
                 fsType: cifs
@@ -85,6 +85,10 @@ spec:
                 options:
                   networkPath: //130.194.128.238/slow
                   mountOptions: dir_mode=0777,file_mode=0777,noperm
+            - name: slow
+              nfs:
+                server: 130.194.128.238
+                path: /mnt/fast/more-users/bryce-rhys
 
             - name: dshm
               emptyDir:

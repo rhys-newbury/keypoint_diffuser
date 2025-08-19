@@ -16,8 +16,8 @@ def compute_loss(kp1, kp2, data, step, cfg, split="split??"):
     l_sep2 = cfg.separation * separation_loss(kp2)
     l_overlap1 = cfg.overlap * overlap_loss(kp1, cfg.overlap_threshold)
     l_overlap2 = cfg.overlap * overlap_loss(kp2, cfg.overlap_threshold)
-    l_shape1 = cfg.shape * shape_loss(kp1, data[0].float().to(device))
-    l_shape2 = cfg.shape * shape_loss(kp2, data[2].float().to(device))
+    l_shape1 = cfg.shape * shape_loss(data[0].float().to(device), kp1)
+    l_shape2 = cfg.shape * shape_loss(data[2].float().to(device), kp2)
     l_consist = cfg.consist * consistancy_loss(
         kp1, kp2, data[1].float().to(device), data[3].float().to(device)
     )

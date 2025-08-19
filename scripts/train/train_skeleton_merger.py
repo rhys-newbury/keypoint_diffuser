@@ -79,7 +79,11 @@ def feed(net, optimizer, loader, train, epoch):
 
             if train:
                 optimizer.zero_grad()
-            RPCD, KPCD, KPA, LF, MA = net(batch_x)
+            try:
+                RPCD, KPCD, KPA, LF, MA = net(batch_x)
+            except ValueError:
+                continue
+
             blrc = composed_sqrt_chamfer(batch_x, RPCD, MA)
             bldiv = L2(LF)
             loss = blrc + bldiv
@@ -127,7 +131,10 @@ if __name__ == "__main__":
         object_name=ns.category,
     )
     loader = torch.utils.data.DataLoader(
-        dataset, batch_size=batch, shuffle=True, num_workers=0
+        dataset,
+        batch_size=batch,
+        shuffle=True,
+        num_workers=0,
     )
 
     h5_files_test = glob(f"{TESTSET}**/*.h5", recursive=True)
@@ -138,7 +145,10 @@ if __name__ == "__main__":
         object_name=ns.category,
     )
     loader_test = torch.utils.data.DataLoader(
-        dataset_test, batch_size=batch, shuffle=False, num_workers=0
+        dataset_test,
+        batch_size=batch,
+        shuffle=False,
+        num_workers=0,
     )
 
     net = Net(ns.max_points, ns.key_points).to(ns.device)

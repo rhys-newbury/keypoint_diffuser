@@ -41,7 +41,7 @@ for model_name, model_cls in MODEL_CLASSES.items():
     )  # pass the subparser in instead of creating inside get_parser
     subparser.add_argument("--ckpt", type=Path)
     subparser.add_argument(
-        "--annotation-json", type=Path, default="/app/annotations/chair.json"
+        "--annotation-json", type=Path, default="/app/annotations/airplane.json"
     )
     subparser.add_argument("--pcd-path", type=Path, default="/app/pcds")
     subparser.add_argument("--batch-size", type=int, default=32)
@@ -50,6 +50,7 @@ for model_name, model_cls in MODEL_CLASSES.items():
         "--category", type=str, help="Category of objects", default="chair"
     )
     subparser.add_argument("--db-path", type=Path, default=Path("results.db"))
+    subparser.add_argument("--normalization-method", type=str, default="minmax")
 
 # ----------------------------
 # Utilities
@@ -112,12 +113,20 @@ def run_prediction(model, opt):
             mid = entry["model_id"]
             pc_path = os.path.join(opt.pcd_path, cid, f"{mid}.pcd")
             pc = naive_read_pcd(pc_path)
-            pcmax = pc.max()
-            pcmin = pc.min()
-            pcn = (pc - pcmin) / (pcmax - pcmin)
-            pcn = 2.0 * (pcn - 0.5)
-            Q.append(pcn)
-            out_nfact.append([pcmax, pcmin])
+
+            if opt.normalization_method == "minmax":
+                pcmax = pc.max()
+                pcmin = pc.min()
+                pcn = (pc - pcmin) / (pcmax - pcmin)
+                pcn = 2.0 * (pcn - 0.5)
+                out_nfact.append([pcmax, pcmin])
+                Q.append(pcn)
+            else:
+                center = pc.mean(0)
+                scale = np.max(np.linalg.norm(pc - center, axis=-1))
+                out_nfact.append([center, scale])
+                pcn = (pc - center) / scale
+                Q.append(pcn)
 
         if len(Q) == 1:
             Q.append(Q[-1])
@@ -156,10 +165,16 @@ def fwd_alignment_scores(kpn_ds, predicted):
     preds = []
     for entry, kpcd, nfact in zip(kpn_ds, predicted["kpcd"], predicted["nfact"]):
         dmax, dmin = nfact
+        center, scale = nfact
+
         ground_truths = []
         for kp in entry["keypoints"]:
-            nkp = (kp["xyz"] - dmin) / (dmax - dmin)
-            nkp = 2.0 * (nkp - 0.5)
+            if opt.normalization_method == "minmax":
+                nkp = (kp["xyz"] - dmin) / (dmax - dmin)
+                nkp = 2.0 * (nkp - 0.5)
+            else:
+                nkp = (kp["xyz"] - center) / scale
+
             ground_truths.append(nkp)
         ground_truths = np.array(ground_truths)
         dist = np.sum(
@@ -175,10 +190,15 @@ def bwd_alignment_scores(kpn_ds, predicted):
     preds = collections.defaultdict(list)
     for entry, kpcd, nfact in zip(kpn_ds, predicted["kpcd"], predicted["nfact"]):
         dmax, dmin = nfact
+        center, scale = nfact
         ground_truths = []
         for kp in entry["keypoints"]:
-            nkp = (kp["xyz"] - dmin) / (dmax - dmin)
-            nkp = 2.0 * (nkp - 0.5)
+            if opt.normalization_method == "minmax":
+                nkp = (kp["xyz"] - dmin) / (dmax - dmin)
+                nkp = 2.0 * (nkp - 0.5)
+            else:
+                nkp = (kp["xyz"] - center) / scale
+
             ground_truths.append(nkp)
         ground_truths = np.array(ground_truths)
         dist = np.sum(
@@ -203,10 +223,17 @@ def mIoU(kpn_ds, predicted, pcd_path):
         mid = entry["model_id"]
         pc = naive_read_pcd(os.path.join(pcd_path, cid, f"{mid}.pcd"))
         dmax, dmin = nfact
+        center, scale = nfact
+
         ground_truths = [pc[kp["pcd_info"]["point_index"]] for kp in entry["keypoints"]]
         gts.append(ground_truths)
-        npc = (pc - dmin) / (dmax - dmin)
-        npc = 2.0 * (npc - 0.5)
+
+        if opt.normalization_method == "minmax":
+            npc = (pc - dmin) / (dmax - dmin)
+            npc = 2.0 * (npc - 0.5)
+        else:
+            npc = (pc - center) / scale
+
         dist = np.sqrt(
             np.sum((np.expand_dims(kpcd, 1) - np.expand_dims(npc, 0)) ** 2, axis=-1)
         )
