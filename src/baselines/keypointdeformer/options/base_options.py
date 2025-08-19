@@ -19,6 +19,7 @@ class BaseOptions:
 
         # basic parameters
         parser.add_argument("--category", required=True, type=str, help="object name")
+        parser.add_argument("--db", type=Path, help="Database path")
 
         parser.add_argument("--batch_size", type=int, help="batch size", default=16)
         parser.add_argument("--key_points", type=int, help="", default=10)
@@ -29,7 +30,7 @@ class BaseOptions:
         parser.add_argument("--seed", type=int, default=0, help="")
         parser.add_argument("--n_workers", type=int, default=4, help="")
         parser.add_argument("--iteration", type=int, default=None, help="")
-        parser.add_argument("--n_iterations", type=int, default=20000, help="")
+        parser.add_argument("--epochs", type=int, default=80, help="")
 
         parser.add_argument(
             "--bottleneck_size", type=int, help="bottleneck size", default=256

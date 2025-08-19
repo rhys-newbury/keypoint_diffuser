@@ -211,7 +211,7 @@ class H5Dataset(Dataset):
                 {"coord": pc.cpu().numpy()}
             )  # Apply transform
             pc = {
-                **{"target_shape": pc},
+                "target_shape": pc,
                 **{f"orig_{key}": value.cuda() for key, value in transformed.items()},
                 **{f"deformed_{key}": value.cuda() for key, value in deformed.items()},
             }

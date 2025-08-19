@@ -1,23 +1,22 @@
 from torch.nn import Module
 
-from .diffusion import DiffusionPointOrig, PointwiseNetOld, VarianceSchedule
-from .encoders.pointnet import PointNetEncoder
+from .diffusion import *
+from .encoders import *
 
 
-class AutoEncoderOrig(Module):
+class AutoEncoder(Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        context_dim = args.latent_dim * 3 + args.extra_latent
-        self.encoder = PointNetEncoder(zdim=context_dim)
-        self.diffusion = DiffusionPointOrig(
-            net=PointwiseNetOld(
-                point_dim=3, context_dim=context_dim, residual=args.residual
+        self.encoder = PointNetEncoder(zdim=args.latent_dim)
+        self.diffusion = DiffusionPoint(
+            net=PointwiseNet(
+                point_dim=3, context_dim=args.latent_dim, residual=args.residual
             ),
             var_sched=VarianceSchedule(
                 num_steps=args.num_steps,
                 beta_1=args.beta_1,
-                beta_t=args.beta_t,
+                beta_T=args.beta_T,
                 mode=args.sched_mode,
             ),
         )

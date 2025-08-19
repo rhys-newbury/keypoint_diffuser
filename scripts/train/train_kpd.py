@@ -7,6 +7,7 @@ import torch.utils.data
 from baselines.keypointdeformer.models.cage_skinning import CageSkinning
 from baselines.keypointdeformer.options.base_options import BaseOptions
 from baselines.keypointdeformer.utils.nn import save_network, weights_init
+from db_utils import save_train_run
 from keypoint_diffuser.datasets.H5Datset import H5Dataset
 from utils import DATASET
 
@@ -23,10 +24,11 @@ def get_data(data):
 
 
 def train(opt):
-    wandb.init(project=f"keygrid_{opt.category}_train", config=opt)
+    wandb.init(project=f"KPD_{opt.category}_train", config=opt)
 
     ckpt_dir = opt.ckpt_dir / wandb.run.name
     ckpt_dir.mkdir()
+    save_train_run(opt.db, "KPD", opt.category, ckpt_dir, opt.key_points)
 
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
     dataset = H5Dataset(
@@ -55,13 +57,10 @@ def train(opt):
 
     if opt.iteration:
         t = opt.iteration
-    epoch_idx = 0
 
-    while t <= opt.n_iterations:
+    for e in range(opt.epochs):
+        print(f"starting epoch {e}")
         for _, data in enumerate(dataloader):
-            if t > opt.n_iterations:
-                break
-
             source_shape_t, target_shape_t = get_data(data)
             net(source_shape_t, target_shape=target_shape_t)
             current_loss = net.compute_loss(t)
@@ -69,12 +68,9 @@ def train(opt):
 
             wandb.log(current_loss)
             t += 1
+        print(current_loss)
 
-        epoch_idx += 1
-
-        save_network(net, ckpt_dir, network_label="net", epoch_label=t)
-
-    save_network(net, ckpt_dir, network_label="net", epoch_label="final")
+        save_network(net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=e)
 
 
 if __name__ == "__main__":

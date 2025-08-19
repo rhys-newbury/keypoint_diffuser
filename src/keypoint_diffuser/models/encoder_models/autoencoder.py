@@ -30,7 +30,6 @@ class AutoEncoder(Module):
             nn.Linear(64, args.extra_latent),
         )
 
-
         cls = PointwiseNetOld if args.use_old else PointwiseNet
 
         self.diffusion_ = cls(
@@ -60,8 +59,6 @@ class AutoEncoder(Module):
             x:  Point clouds to be encoded, (B, N, d).
         """
         z_kp, z_aux_raw = self.encoder(x)
-
-
 
         mu = self.fc_mu(z_aux_raw)
         logvar = self.fc_logvar(z_aux_raw)

@@ -5,6 +5,7 @@ from pathlib import Path
 import torch
 from baselines.sc3k import network
 from baselines.sc3k.utils import AverageMeter, compute_loss
+from db_utils import save_train_run
 from keypoint_diffuser.datasets.H5Datset import H5Dataset
 from tqdm import tqdm
 from utils import DATASET, TESTSET
@@ -17,7 +18,8 @@ p = argparse.ArgumentParser(description="Train SC3K (argparse version)")
 # Core training args
 p.add_argument("--batch-size", type=int, default=32)
 p.add_argument("--num-workers", type=int, default=4)
-p.add_argument("--max-epoch", type=int, default=200)
+p.add_argument("--max-epoch", type=int, default=80)
+p.add_argument("--db", type=Path, help="Database path")
 
 p.add_argument("--lr", type=float, default=1e-3)
 
@@ -45,7 +47,7 @@ p.add_argument("--sample-points", type=int, default=2048)
 p.add_argument("--ckpt-dir", type=Path, default=Path("."))
 
 
-def train(cfg):
+def train(cfg, ckpt_dir):
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
     dataset = H5Dataset(
         h5_files,
@@ -76,9 +78,6 @@ def train(cfg):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = network.sc3k(cfg).to(device)  # cuda()   # unsupervised network
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
-
-    ckpt_dir = cfg.ckpt_dir / wandb.run.name
-    ckpt_dir.mkdir()
 
     meter = AverageMeter()
     best_loss = 1e10
@@ -146,4 +145,9 @@ if __name__ == "__main__":
 
     wandb.init(project=f"sc3k_{cfg.category}_train", config=cfg)
 
-    train(cfg)
+    ckpt_dir = cfg.ckpt_dir / wandb.run.name
+    ckpt_dir.mkdir()
+
+    save_train_run(cfg.db, "KeyGrid", cfg.category, ckpt_dir, cfg.key_points)
+
+    train(cfg, ckpt_dir)

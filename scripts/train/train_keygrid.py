@@ -11,6 +11,7 @@ from pathlib import Path
 import torch
 from baselines.key_grid.composed_chamfer import loss_all
 from baselines.key_grid.merger_net import Net
+from db_utils import save_train_run
 from keypoint_diffuser.datasets.H5Datset import H5Dataset
 from torch import optim
 from tqdm import tqdm
@@ -89,6 +90,7 @@ if __name__ == "__main__":
 
     ckpt_dir = cfg.ckpt_dir / wandb.run.name
     ckpt_dir.mkdir()
+    save_train_run(cfg.db, "SC3K", cfg.category, ckpt_dir, cfg.key_points)
 
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
     dataset = H5Dataset(

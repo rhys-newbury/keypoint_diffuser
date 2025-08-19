@@ -10,13 +10,10 @@ import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
 from keypoint_diffuser.datasets.H5Datset import H5Dataset
-from keypoint_diffuser.models import get_model
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
-from keypoint_diffuser.models.encoder_models.autoencoder_orig import AutoEncoderOrig
 from keypoint_diffuser.options.ae_options import AEOptions
 from keypoint_diffuser.options.base_options import BaseOptions
 from keypoint_diffuser.utils.eval_metrics import EMD_CD, EMD_CD_recon
-from keypoint_diffuser.utils.nn import load_network
 from keypoint_diffuser.utils.pc_utils import collate_fn, normalize_point_clouds
 from keypoint_diffuser.utils.utils import Timer, reparameterize
 from sklearn.decomposition import PCA
@@ -157,16 +154,6 @@ def sample(opt):
         ae_model = AutoEncoder(opt).cuda()
         ae_model.load_state_dict(ckpt["states"])
         ae_model.eval()
-    elif Algos.KPD == CURRENT_EVAL:
-        net = get_model(opt.model)(opt).cuda()
-        ckpt = opt.ckpt
-        if not ckpt.startswith(os.path.sep):
-            ckpt = os.path.join(checkpoints_dir, ckpt + CHECKPOINT_EXT)
-        load_network(net, ckpt)
-    elif Algos.DPM == CURRENT_EVAL:
-        ae_model = AutoEncoderOrig(opt).cuda()
-        ckpt = torch.load(ckpt)
-        ae_model.load_state_dict(ckpt["states"])
 
     Timer("step")
     all_z0 = []  # flatten z0 per batch
