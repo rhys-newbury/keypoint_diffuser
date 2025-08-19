@@ -35,7 +35,7 @@ class BaseOptions:
         parser.add_argument(
             "--bottleneck_size", type=int, help="bottleneck size", default=256
         )
-        parser.add_argument("--ckpt_dir", type=Path, default=Path("."), help="")
+        parser.add_argument("--ckpt-dir", type=Path, default=Path("."), help="")
         parser.add_argument(
             "--normalization",
             type=str,

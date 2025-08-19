@@ -1,5 +1,6 @@
 import argparse
 import collections
+import contextlib
 import json
 import os
 import sqlite3
@@ -9,6 +10,7 @@ import matplotlib.pyplot as plotlib
 import numpy as np
 import torch
 import tqdm
+from baselines.keypointdeformer.test_kpd import KPD
 from baselines.sc3k.test_sc3k import SC3K
 from baselines.skeleton_merger.test_sm import SM
 from keypoint_diffuser.utils.pc_utils import collate_fn
@@ -26,8 +28,14 @@ CHECKPOINT_EXT = ".pth"
 MODEL_CLASSES = {
     "SC3K": SC3K,
     "SM": SM,
+    "KPD": KPD,
     # Add more models here:
 }
+
+
+def try_add_arg(p: argparse.ArgumentParser, arg, type, default=None, **kwargs):
+    with contextlib.suppress(argparse.ArgumentError):
+        p.add_argument(arg, type=type, default=default, **kwargs)
 
 
 p = argparse.ArgumentParser()
@@ -39,18 +47,22 @@ for model_name, model_cls in MODEL_CLASSES.items():
     model_cls.get_parser(
         subparser
     )  # pass the subparser in instead of creating inside get_parser
-    subparser.add_argument("--ckpt", type=Path)
-    subparser.add_argument(
-        "--annotation-json", type=Path, default="/app/annotations/airplane.json"
+    try_add_arg(subparser, "--ckpt", type=Path)
+    try_add_arg(
+        subparser,
+        "--annotation-json",
+        type=Path,
+        default="/app/annotations/airplane.json",
     )
-    subparser.add_argument("--pcd-path", type=Path, default="/app/pcds")
-    subparser.add_argument("--batch-size", type=int, default=32)
-    subparser.add_argument("--key-points", type=int, default=10)
-    subparser.add_argument(
-        "--category", type=str, help="Category of objects", default="chair"
+    try_add_arg(subparser, "--pcd-path", type=Path, default="/app/pcds")
+    try_add_arg(subparser, "--batch-size", type=int, default=32)
+    try_add_arg(subparser, "--key-points", type=int, default=10)
+
+    try_add_arg(
+        subparser, "--category", type=str, help="Category of objects", default="chair"
     )
-    subparser.add_argument("--db-path", type=Path, default=Path("results.db"))
-    subparser.add_argument("--normalization-method", type=str, default="minmax")
+    try_add_arg(subparser, "--db-path", type=Path, default=Path("results.db"))
+    try_add_arg(subparser, "--normalization-method", type=str, default="minmax")
 
 # ----------------------------
 # Utilities

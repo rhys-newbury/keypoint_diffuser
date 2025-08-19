@@ -170,11 +170,11 @@ class Linear(nn.Module):
     ):
         super().__init__()
         self.activation = activation
-        self.normalization = normalization
-        bias = not normalization and bias
+        self.normalization = None if normalization == "none" else normalization
+        bias = not self.normalization and bias
         self.linear = nn.Linear(in_channels, out_channels, bias=bias)
 
-        if normalization is not None:
+        if self.normalization is not None:
             if self.normalization == "batch":
                 self.norm = nn.BatchNorm1d(
                     out_channels, affine=True, eps=0.001, momentum=momentum
@@ -202,7 +202,7 @@ class Linear(nn.Module):
     def forward(self, x, epoch=None):
         x = self.linear(x)
 
-        if self.normalization is not None:
+        if self.normalization is not None and self.normalization != "none":
             x = self.norm(x)
 
         if self.activation is not None:

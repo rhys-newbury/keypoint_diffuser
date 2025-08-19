@@ -15,8 +15,13 @@ TRAINABLE=(
   "table"
   "vessel"
 )
+sleep 1m
+
+
+SCRIPT="${1:-train_kpd.py}"
+shift
 
 for category in "${TRAINABLE[@]}"; do
     echo "Training category: $category"
-    python3 train_kpd.py --category="$category" --db=/mnt/slow/results.db --ckpt-dir=/mnt/slow2/skeleton_merger
+    python3 $SCRIPT --category="$category" --db=/mnt/slow/results.db --ckpt-dir=/mnt/slow2/skeleton_merger
 done
