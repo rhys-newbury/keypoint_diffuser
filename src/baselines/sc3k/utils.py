@@ -76,44 +76,6 @@ def consistancy_loss(kp1, kp2, rot1, rot2):
     return F.mse_loss(kp1, kp2_to_kp1.float())
 
 
-def chamfer_distance(pc, recons_pc):
-    """
-    Parameters
-    ----------
-    pc              Input point cloud
-    recons_pc       Reconstructed point cloud
-
-    Returns Shape loss -> how far the reconstructed points (PC) are estimated from the input point cloud
-    -------
-
-    """
-
-    pred_to_gt = torch.cat(
-        [
-            torch.squeeze(
-                torch.norm(
-                    pc[i].unsqueeze(1) - recons_pc[i].unsqueeze(0), dim=2, p=None
-                ).topk(1, largest=False, dim=0)[0]
-            )
-            for i in range(len(recons_pc))
-        ],
-        dim=0,
-    )
-    gt_to_pred = torch.cat(
-        [
-            torch.squeeze(
-                torch.norm(
-                    recons_pc[i].unsqueeze(1) - pc[i].unsqueeze(0), dim=2, p=None
-                ).topk(1, largest=False, dim=0)[0]
-            )
-            for i in range(len(pc))
-        ],
-        dim=0,
-    )
-
-    return torch.mean(pred_to_gt) + torch.mean(gt_to_pred)
-
-
 def shape_loss(pc, kp):
     """
     Parameters
@@ -125,47 +87,9 @@ def shape_loss(pc, kp):
     -------
 
     """
-    loss = torch.cat(
-        [
-            torch.squeeze(
-                torch.norm(pc[i].unsqueeze(1) - kp[i].unsqueeze(0), dim=2, p=None).topk(
-                    1, largest=False, dim=0
-                )[0]
-            )
-            for i in range(len(kp))
-        ],
-        dim=0,
-    )
-    return torch.mean(loss)
-
-
-def overlap_loss_torch_error(kp, threshold=0.05):
-    """
-    Parameters
-    ----------
-    kp:         Key-points
-    threshold   allowable overlap between the key-points
-    Method:     Find distance of every point from all the points
-                select the minimum distances that are greater than 0 (distance from itself)
-                return count of the separated distances => final loss
-
-    Returns     separation loss -> avoid estimation of multiple key-points on the same 3D location
-    -------
-    """
-
-    distances = torch.cat(
-        [
-            torch.squeeze(
-                torch.norm(kp[i].unsqueeze(1) - kp[i].unsqueeze(0), dim=2, p=None)
-            )
-            for i in range(len(kp))
-        ],
-        dim=0,
-    )
-
-    return (
-        torch.count_nonzero(distances[(distances < threshold)] > 0) / len(kp) * len(kp)
-    )
+    D = torch.cdist(kp, pc, p=2)  # [B, K, P]
+    nn = D.min(dim=2).values  # nearest pc point per keypoint: [B, K]
+    return nn.mean()  # equals (1/K) sum_i (...) then mean over batch
 
 
 def overlap_loss(kp, threshold=0.05):
@@ -182,24 +106,18 @@ def overlap_loss(kp, threshold=0.05):
     -------
     """
 
-    distances = torch.cat(
-        [
-            torch.squeeze(
-                torch.norm(kp[i].unsqueeze(1) - kp[i].unsqueeze(0), dim=2, p=None)
-            )
-            for i in range(len(kp))
-        ],
-        dim=0,
-    )
+    _, K, _ = kp.shape
+    D = torch.cdist(kp, kp, p=2)  # [B, K, K]
 
-    return (
-        torch.sum(distances[(distances < threshold)] > 0).float()
-        / len(distances)
-        * len(distances)
-    )
+    # mask out i == j, but keep K^2 in the denominator (as in the paper)
+    offdiag = ~torch.eye(K, dtype=torch.bool, device=kp.device).unsqueeze(0)
+
+    hits = ((threshold > D) & offdiag).float()  # 1 if pair overlaps, else 0
+    per_batch = hits.sum(dim=(1, 2)) / (K * K)  # divide by K^2
+    return per_batch.mean()
 
 
-def separation_loss(kp):
+def separation_loss(kp, floor=0.01):
     """
     Parameters
     ----------
@@ -211,19 +129,20 @@ def separation_loss(kp):
     Returns     separation loss ->  average distance of every point from closest points
     -------
     """
-    min_distances = torch.cat(
-        [
-            torch.squeeze(
-                torch.norm(kp[i].unsqueeze(1) - kp[i].unsqueeze(0), dim=2, p=None).topk(
-                    2, largest=False, dim=0
-                )[0]
-            )
-            for i in range(len(kp))
-        ],
-        dim=0,
-    )
+    B, K, _ = kp.shape
+    D = torch.cdist(kp, kp, p=2)  # [B,K,K], Euclidean
 
-    return 1 / torch.mean(min_distances[min_distances > 0])
+    # exclude self-distances
+    eye = torch.eye(K, dtype=torch.bool, device=kp.device).unsqueeze(0)
+    D = D.masked_fill(eye, float("inf"))  # or: D + eye.float()*1e6
+
+    # nearest neighbor distance for each keypoint
+    nn = D.min(dim=-1).values  # [B,K]
+
+    # per-sample mean, then floor by 0.01, then invert; finally average over batch
+    mean_nn = nn.mean(dim=1)  # [B]
+    denom = torch.clamp(mean_nn, min=floor)
+    return (1.0 / denom).mean()
 
 
 def volume_loss(kp, pc):
