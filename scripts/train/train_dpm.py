@@ -19,6 +19,7 @@ import wandb
 parser = argparse.ArgumentParser()
 # Model arguments
 parser.add_argument("--key-points", type=int, default=10)
+parser.add_argument("--db", type=Path, help="Database path")
 
 parser.add_argument("--num_steps", type=int, default=200)
 parser.add_argument("--beta_1", type=float, default=1e-4)

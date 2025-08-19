@@ -31,6 +31,8 @@ arg_parser.add_argument(
     default=10,
     help="Requested number of keypoints to detect.",
 )
+arg_parser.add_argument("--db", type=Path, help="Database path")
+
 arg_parser.add_argument("-b", "--batch", type=int, default=8, help="Batch size.")
 
 arg_parser.add_argument(

@@ -5,7 +5,7 @@ from torch.nn import Module
 from keypoint_diffuser.utils.loss import EDMLossCurriculum
 from keypoint_diffuser.utils.utils import reparameterize
 
-from .diffusion import DiffusionPoint, PointwiseNet, PointwiseNetOld, VarianceSchedule
+from .diffusion import DiffusionPoint, PointwiseNet, VarianceSchedule
 from .edm_model import EDMPrecond
 from .encoders.point_transformer import PointTransformerv2
 
@@ -30,9 +30,7 @@ class AutoEncoder(Module):
             nn.Linear(64, args.extra_latent),
         )
 
-        cls = PointwiseNetOld if args.use_old else PointwiseNet
-
-        self.diffusion_ = cls(
+        self.diffusion_ = PointwiseNet(
             point_dim=3,
             context_dim=args.latent_dim * 3 + args.extra_latent,
             residual=args.residual,

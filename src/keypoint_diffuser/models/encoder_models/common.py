@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.nn import Module
 from torch.optim.lr_scheduler import LambdaLR
 
 
@@ -16,40 +15,6 @@ def weight_init(shape, mode, fan_in, fan_out):
     if mode == "kaiming_normal":
         return np.sqrt(1 / fan_in) * torch.randn(*shape)
     raise ValueError(f'Invalid init mode "{mode}"')
-
-
-class Linear(torch.nn.Module):
-    def __init__(
-        self,
-        in_features,
-        out_features,
-        bias=True,
-        init_mode="kaiming_normal",
-        init_weight=1,
-        init_bias=0,
-    ):
-        super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        init_kwargs = {
-            "mode": init_mode,
-            "fan_in": in_features,
-            "fan_out": out_features,
-        }
-        self.weight = torch.nn.Parameter(
-            weight_init([out_features, in_features], **init_kwargs) * init_weight
-        )
-        self.bias = (
-            torch.nn.Parameter(weight_init([out_features], **init_kwargs) * init_bias)
-            if bias
-            else None
-        )
-
-    def forward(self, x):
-        x = x @ self.weight.to(x.dtype).t()
-        if self.bias is not None:
-            x = x.add_(self.bias.to(x.dtype))
-        return x
 
 
 class FiLMResidualMLP(nn.Module):
@@ -89,20 +54,6 @@ class FiLMResidualMLP(nn.Module):
 
         out = self.linear2(out)  # (B, N, D_out)
         return self.shortcut(x) + out
-
-
-class ConcatSquashLinear(Module):
-    def __init__(self, dim_in, dim_out, dim_ctx, **kwargs):
-        super().__init__()
-        self._layer = Linear(dim_in, dim_out, **kwargs)
-        self._hyper_bias = Linear(dim_ctx, dim_out, bias=False, **kwargs)
-        self._hyper_gate = Linear(dim_ctx, dim_out, **kwargs)
-
-    def forward(self, ctx, x):
-        gate = torch.sigmoid(self._hyper_gate(ctx))
-        bias = self._hyper_bias(ctx)
-        ret = self._layer(x) * gate + bias
-        return ret
 
 
 def get_linear_scheduler(optimizer, start_epoch, end_epoch, start_lr, end_lr):
