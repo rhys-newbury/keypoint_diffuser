@@ -91,7 +91,7 @@ def train(cfg, ckpt_dir):
         model.train()
         for _i, data in enumerate(train_iter):
             kp1, kp2 = model(data)
-            loss, values = compute_loss(kp1, kp2, data, train_step, cfg, split="train")
+            loss, values = compute_loss(kp1, kp2, data, cfg, split="train")
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -113,7 +113,7 @@ def train(cfg, ckpt_dir):
         for _i, data in enumerate(val_iter):
             with torch.no_grad():
                 kp1, kp2 = model(data)
-                loss, values = compute_loss(kp1, kp2, data, val_step, cfg, split="val")
+                loss, values = compute_loss(kp1, kp2, data, cfg, split="val")
 
                 wandb.log(
                     {**values, "val_loss/overall": loss}, step=train_step
@@ -132,7 +132,7 @@ def train(cfg, ckpt_dir):
             )
         torch.save(
             model.state_dict(),
-            f"{str(ckpt_dir)}/{cfg.key_points}kp_{epoch}.pth",
+            f"{ckpt_dir!s}/{cfg.key_points}kp_{epoch}.pth",
         )
 
         wandb.log({"train_loss": train_loss, "val_loss": val_loss}, step=epoch)

@@ -6,7 +6,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-import matplotlib.pyplot as plotlib
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import tqdm
@@ -266,14 +266,14 @@ def mIoU(kpn_ds, predicted, pcd_path):
 
 
 def mIoU_curve_plot(kpn_ds, predicted, pcd_path):
-    plotlib.style.use("seaborn")
+    plt.style.use("seaborn")
     miou_curve = list(mIoU(kpn_ds, predicted, pcd_path))
-    plotlib.plot(np.linspace(0.0, 0.1), miou_curve)
-    plotlib.title("mIoU Curve")
-    plotlib.xlabel("Distance Threshold")
-    plotlib.ylabel("mIoU")
-    plotlib.grid(True)
-    plotlib.savefig("mIoU.png")
+    plt.plot(np.linspace(0.0, 0.1), miou_curve)
+    plt.title("mIoU Curve")
+    plt.xlabel("Distance Threshold")
+    plt.ylabel("mIoU")
+    plt.grid(True)
+    plt.savefig("mIoU.png")
     return miou_curve[-1]
 
 

@@ -87,7 +87,7 @@ class BaseOptions:
             default = self.parser.get_default(k)
             if v != default:
                 comment = "\t[default: %s]" % str(default)
-            message += f"{str(k):>25}: {str(v):<30}{comment}\n"
+            message += f"{k!s:>25}: {v!s:<30}{comment}\n"
         message += "----------------- End -------------------"
         print(message)
 

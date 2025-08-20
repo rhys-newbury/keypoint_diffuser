@@ -25,7 +25,7 @@ spec:
                       - key: nvidia.com/gpu.product
                         operator: In
                         values:
-                          - NVIDIA-RTX-A6000
+                          - NVIDIA-GeForce-RTX-2080-Ti
                           - NVIDIA-GeForce-RTX-3090
           containers:
             - name: runner
@@ -36,7 +36,7 @@ spec:
                   "python",
                   "test_db.py",
                   "--db=/mnt/slow/results.db",
-                  "--only-algo=SM",
+                  "--only-algo=KPD",
                   "--keep-going"
                 ]
 

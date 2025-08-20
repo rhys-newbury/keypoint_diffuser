@@ -398,7 +398,7 @@ def train(opt: AEConfig, rank, world_size):
             loss.backward()
 
             if (t + 1) % accumulation_steps == 0:
-                print(f"Rank {rank}: Gradient step at iteration {t+1}")
+                print(f"Rank {rank}: Gradient step at iteration {t + 1}")
                 clip_grad_norm_(net.parameters(), opt.max_grad_norm)
                 optimizer.step()
                 scheduler.step()
@@ -416,9 +416,7 @@ def train(opt: AEConfig, rank, world_size):
             if t % opt.log_interval == 0 and rank == 0:
                 samples_sec = opt.batch_size / iter_time
                 losses_str = str(loss)
-                log_str = "{:d}: iter {:.1f} sec, {:.1f} samples/sec {}".format(
-                    t, iter_time, samples_sec, losses_str
-                )
+                log_str = f"{t:d}: iter {iter_time:.1f} sec, {samples_sec:.1f} samples/sec {losses_str}"
                 print(log_str)
                 with open(log_path, "a") as log_file:
                     log_file.write(log_str + "\n")

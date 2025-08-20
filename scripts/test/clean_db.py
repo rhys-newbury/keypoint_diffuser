@@ -64,7 +64,7 @@ def delete_dominated_rows(
         sql = f"""
             SELECT r.id
             FROM runs AS r
-            WHERE 1=1 {model_clause and ' ' + model_clause}
+            WHERE 1=1 {model_clause and " " + model_clause}
               AND {cond}
         """
         cur = con.execute(sql, params)
@@ -73,7 +73,7 @@ def delete_dominated_rows(
 
     sql = f"""
         DELETE FROM runs AS r
-        WHERE 1=1 {model_clause and ' ' + model_clause}
+        WHERE 1=1 {model_clause and " " + model_clause}
           AND {cond}
     """
     cur = con.execute(sql, params)
@@ -115,7 +115,7 @@ def delete_null_ties(
         sql = f"""
             SELECT r.id
             FROM runs AS r
-            WHERE 1=1 {model_clause and ' ' + model_clause}
+            WHERE 1=1 {model_clause and " " + model_clause}
               AND {cond}
         """
         cur = con.execute(sql, params)
@@ -124,7 +124,7 @@ def delete_null_ties(
 
     sql = f"""
         DELETE FROM runs AS r
-        WHERE 1=1 {model_clause and ' ' + model_clause}
+        WHERE 1=1 {model_clause and " " + model_clause}
           AND {cond}
     """
     cur = con.execute(sql, params)

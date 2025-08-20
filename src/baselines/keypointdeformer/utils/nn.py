@@ -99,12 +99,13 @@ class Conv1d(nn.Module):
         activation=None,
         normalization=None,
         momentum=0.01,
-        conv_params={},
+        conv_params=None,
     ):
         super().__init__()
         self.activation = activation
         self.normalization = normalization
         bias = not normalization and bias
+        conv_params = conv_params or {}
         self.conv = nn.Conv1d(
             in_channels,
             out_channels,

@@ -9,10 +9,10 @@ from .default import (
 
 
 __all__ = [
-    "encode",
     "decode",
-    "z_order_encode",
-    "z_order_decode",
-    "hilbert_encode",
+    "encode",
     "hilbert_decode",
+    "hilbert_encode",
+    "z_order_decode",
+    "z_order_encode",
 ]

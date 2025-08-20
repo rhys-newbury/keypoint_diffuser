@@ -117,5 +117,5 @@ if __name__ == "__main__":
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
             },
-            f"{str(ckpt_dir)}/{args.key_points}kp_{epoch}.pth",
+            f"{ckpt_dir!s}/{args.key_points}kp_{epoch}.pth",
         )

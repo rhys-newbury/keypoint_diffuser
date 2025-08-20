@@ -165,8 +165,6 @@ class PointNetfeat(nn.Module):
         self.bn2 = nn.BatchNorm1d(128)
         self.bn3 = nn.BatchNorm1d(1024)
         self.fstn = STNkd(k=64)  # feature_transform = True
-        #
-        #
 
     def forward(self, x):
         trans = self.stn(x)

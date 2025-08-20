@@ -2,10 +2,7 @@ from math import ceil
 
 import torch
 from torch import Tensor
-from torch.nn import ELU, Conv1d
-from torch.nn import BatchNorm1d as BN
-from torch.nn import Linear as L
-from torch.nn import Sequential as S
+from torch.nn import ELU, BatchNorm1d, Conv1d, Linear, Sequential
 from torch.nn import functional as F
 
 
@@ -52,36 +49,36 @@ class XConv(torch.nn.Module):
         C_in, C_delta, C_out = in_channels, hidden_channels, out_channels
         D, K = dim, kernel_size
 
-        self.mlp1 = S(
-            L(dim, C_delta),
+        self.mlp1 = Sequential(
+            Linear(dim, C_delta),
             ELU(),
-            BN(C_delta),
-            L(C_delta, C_delta),
+            BatchNorm1d(C_delta),
+            Linear(C_delta, C_delta),
             ELU(),
-            BN(C_delta),
+            BatchNorm1d(C_delta),
             Reshape(-1, K, C_delta),
         )
 
-        self.mlp2 = S(
-            L(D * K, K**2),
+        self.mlp2 = Sequential(
+            Linear(D * K, K**2),
             ELU(),
-            BN(K**2),
+            BatchNorm1d(K**2),
             Reshape(-1, K, K),
             Conv1d(K, K**2, K, groups=K),
             ELU(),
-            BN(K**2),
+            BatchNorm1d(K**2),
             Reshape(-1, K, K),
             Conv1d(K, K**2, K, groups=K),
-            BN(K**2),
+            BatchNorm1d(K**2),
             Reshape(-1, K, K),
         )
 
         C_in = C_in + C_delta
         depth_multiplier = int(ceil(C_out / C_in))
-        self.conv = S(
+        self.conv = Sequential(
             Conv1d(C_in, C_in * depth_multiplier, K, groups=C_in),
             Reshape(-1, C_in * depth_multiplier),
-            L(C_in * depth_multiplier, C_out, bias=bias),
+            Linear(C_in * depth_multiplier, C_out, bias=bias),
         )
 
     def forward(self, x: Tensor | None, pos: Tensor):
@@ -149,9 +146,9 @@ class PointCNNEncoder(torch.nn.Module):
             192, 384, dim=3, kernel_size=16, hidden_channels=256, dilation=2
         )
 
-        self.lin1 = L(384, 256)
-        self.lin2 = L(256, 128)
-        self.lin3 = L(128, zdim * 2)
+        self.lin1 = Linear(384, 256)
+        self.lin2 = Linear(256, 128)
+        self.lin3 = Linear(128, zdim * 2)
 
     def forward(self, pos):
         x = F.relu(self.conv1(None, pos))

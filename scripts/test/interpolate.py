@@ -214,7 +214,7 @@ def interpolate(opt):
         )
         pcd_clean.orient_normals_consistent_tangent_plane(k=10)
 
-        o3d.io.write_point_cloud(f"interp_pca_airplane_{i+1}.ply", pcd_clean)
+        o3d.io.write_point_cloud(f"interp_pca_airplane_{i + 1}.ply", pcd_clean)
 
 
 if __name__ == "__main__":

@@ -178,8 +178,8 @@ class H5Dataset(Dataset):
             pc1 = transform(pc, R1)
             pc2 = transform(pc, R2)
 
-            pc1 = self.normalize_pc(pc1)
-            pc2 = self.normalize_pc(pc2)
+            pc1 = self.normalize_pointcloud(pc1)
+            pc2 = self.normalize_pointcloud(pc2)
 
             return (
                 pc1.astype(np.float32),

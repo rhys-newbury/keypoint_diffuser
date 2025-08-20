@@ -3,6 +3,7 @@ Created on Tue Oct 27 16:50:30 2020
 
 @author: eliphat
 """
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -76,8 +77,8 @@ class Head(nn.Module):  # Decoder unit, one per line segment
 
 def mask_feature(input, mask_rate):
     if mask_rate > 0:
-        B, N, _ = input.shape
-        mask_N, mask_long = int(mask_rate * N), int((1 - mask_rate) * N)
+        _, N, _ = input.shape
+        _, mask_long = int(mask_rate * N), int((1 - mask_rate) * N)
         random_N = 1
         damage_mask = torch.zeros(
             input.shape[0], input.shape[1], 1, device=input.device

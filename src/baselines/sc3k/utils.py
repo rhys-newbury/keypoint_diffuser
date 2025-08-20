@@ -5,12 +5,13 @@ engr.mz@hotmail.com
 May 31, 2022
 """
 
+import math
 
 import torch
 import torch.nn.functional as F
 
 
-def compute_loss(kp1, kp2, data, step, cfg, split="split??"):
+def compute_loss(kp1, kp2, data, cfg, split="split??"):
     device = kp1.device
     l_sep1 = cfg.separation * separation_loss(kp1)
     l_sep2 = cfg.separation * separation_loss(kp2)
@@ -65,6 +66,7 @@ def consistancy_loss(kp1, kp2, rot1, rot2):
     -------
 
     """
+
     kp2_to_kp1 = torch.transpose(
         torch.bmm(
             torch.bmm(rot1.double(), torch.transpose(rot2.double(), 1, 2)),
@@ -87,6 +89,7 @@ def shape_loss(pc, kp):
     -------
 
     """
+
     D = torch.cdist(kp, pc, p=2)  # [B, K, P]
     nn = D.min(dim=2).values  # nearest pc point per keypoint: [B, K]
     return nn.mean()  # equals (1/K) sum_i (...) then mean over batch
@@ -129,7 +132,7 @@ def separation_loss(kp, floor=0.01):
     Returns     separation loss ->  average distance of every point from closest points
     -------
     """
-    B, K, _ = kp.shape
+    _, K, _ = kp.shape
     D = torch.cdist(kp, kp, p=2)  # [B,K,K], Euclidean
 
     # exclude self-distances
@@ -220,27 +223,17 @@ def pose_loss(kp1, kp2, rot1, rot2):
     -------
 
     """
+
     device = kp1.device
     gt_rot = torch.bmm(rot1.double(), torch.transpose(rot2.double(), 1, 2))
     mat = batch_compute_similarity_transform_torch(kp1, kp2)
-    frob = torch.sqrt(torch.sum(torch.square(gt_rot - mat)))  # Forbunius Norm
+    frob = torch.norm(gt_rot - mat, dim=(1, 2))  # Forbunius Norm
 
-    angle_ = torch.mean(
-        torch.arcsin(
-            torch.clamp(
-                torch.min(
-                    torch.tensor(1.0).to(device),
-                    frob / (2.0 * torch.sqrt(torch.tensor(2.0).to(device))),
-                ),
-                -0.99999,
-                0.99999,
-            )
-        )
-    )
-    #     torch.clamp(torch.min(torch.tensor(1.).cuda(), frob / (2. * torch.sqrt(torch.tensor(2.).cuda()))), -0.99999,
-    #                 0.99999))))
+    frob_min = torch.min(torch.tensor(1.0).to(device), 1 / (2 * math.sqrt(2)) * frob)
+    frob_clamped = torch.clamp(frob_min, -1, 1)
+    angle = 2 * torch.arcsin(frob_clamped)
 
-    return angle_
+    return torch.mean(angle)
 
 
 def batch_compute_similarity_transform_torch(S1, S2):
@@ -265,9 +258,6 @@ def batch_compute_similarity_transform_torch(S1, S2):
     X1 = S1 - mu1
     X2 = S2 - mu2
 
-    # 2. Compute variance of X1 used for scale.
-    torch.sum(X1**2, dim=1).sum(dim=1)
-
     # 3. The outer product of X1 and X2.
     K = X1.bmm(X2.permute(0, 2, 1))
 
@@ -283,15 +273,6 @@ def batch_compute_similarity_transform_torch(S1, S2):
     # Construct R.
     R = V.bmm(Z.bmm(U.permute(0, 2, 1)))  # position
     R = torch.linalg.inv(R)  # rotation
-
-    #
-    # # 5. Recover scale.
-    #
-    # # 6. Recover translation.
-    #
-    #
-    # if transposed:
-    #
 
     return R
 

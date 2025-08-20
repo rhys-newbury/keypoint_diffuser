@@ -3,6 +3,7 @@ Created on Tue Oct 27 16:50:30 2020
 
 @author: eliphat
 """
+
 import torch
 import torch.nn.functional as F
 from torch import nn

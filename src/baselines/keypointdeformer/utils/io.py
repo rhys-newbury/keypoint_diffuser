@@ -1,6 +1,4 @@
-import os
 import warnings
-from glob import glob
 
 import numpy as np
 import pytorch3d.io
@@ -127,41 +125,3 @@ def read_pcd(path):
         if is_data:
             points += [line[:3]]
     return np.array(points, dtype=np.float32)
-
-
-def find_files(
-    source,
-    file_ext=[
-        "txt",
-    ],
-):
-    """
-    From https://github.com/yifita/deep_cage
-    """
-
-    def is_type(file, file_ext):
-        if isinstance(file_ext, str):
-            file_ext = [file_ext]
-        tmp = [os.path.splitext(file)[-1].lower()[1:] == ext for ext in file_ext]
-        return any(tmp)
-
-    # If file_ext is a list
-    if source is None:
-        return []
-    source_fns = []
-    if isinstance(source, str):
-        if os.path.isdir(source) or source[-1] == "*":
-            if isinstance(file_ext, list):
-                for fmt in file_ext:
-                    source_fns += find_files(source, fmt)
-            else:
-                source_fns = sorted(glob(f"{source}/**/*.{file_ext}", recursive=True))
-        elif os.path.isfile(source):
-            source_fns = [source]
-        assert all(
-            is_type(f, file_ext) for f in source_fns
-        ), "Given files contain files with unsupported format"
-    elif len(source) and isinstance(source[0], str):
-        for s in source:
-            source_fns.extend(find_files(s, file_ext=file_ext))
-    return source_fns

@@ -3,6 +3,7 @@ Created on Fri Mar 12 15:56:16 2021
 
 @author: eliphat
 """
+
 import argparse
 import contextlib
 import time
@@ -62,7 +63,7 @@ def feed(net, optimizer, loader, train, epoch):
     running_ldiv = 0.0
     net.train(train)
 
-    with contextlib.suppress() if train else torch.no_grad():
+    with contextlib.nullcontext() if train else torch.no_grad():
         running_lrc = 0.0
         running_ldiv = 0.0
         running_loss = 0.0
@@ -161,5 +162,5 @@ if __name__ == "__main__":
                 "epoch": epoch,
                 "model_state_dict": net.state_dict(),
             },
-            f"{str(ckpt_dir)}/{ns.key_points}kp_{epoch}.pth",
+            f"{ckpt_dir!s}/{ns.key_points}kp_{epoch}.pth",
         )

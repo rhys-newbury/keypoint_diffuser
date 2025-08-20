@@ -3,8 +3,9 @@ Created on Fri Mar 12 15:56:16 2021
 
 @author: eliphat
 """
+
 import argparse
-import contextlib
+from contextlib import nullcontext
 from glob import glob
 from pathlib import Path
 
@@ -62,7 +63,7 @@ def feed(net, optimizer, loader, train, shuffle, batch, epoch, ns):
 
     # Global or external storage for losses (initialize somewhere before training loop)
 
-    with contextlib.suppress() if train else torch.no_grad():
+    with nullcontext() if train else torch.no_grad():
         for _i, batch_x in enumerate(
             tqdm(loader, total=len(loader), desc="Training", unit="batch")
         ):
@@ -115,5 +116,5 @@ if __name__ == "__main__":
                 "epoch": epoch,
                 "model_state_dict": net.state_dict(),
             },
-            f"{str(ckpt_dir)}/{cfg.key_points}kp_{epoch}.pth",
+            f"{ckpt_dir!s}/{cfg.key_points}kp_{epoch}.pth",
         )

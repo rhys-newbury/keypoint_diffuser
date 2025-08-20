@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn import Module, ModuleList
 
-from .common import *
+from .common import ConcatSquashLinear
 
 
 class VarianceSchedule(Module):

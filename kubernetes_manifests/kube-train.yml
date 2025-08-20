@@ -1,7 +1,7 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: manager-list2
+  name: kpd
 spec:
   maxRetry: 1
   minAvailable: 1
@@ -27,6 +27,8 @@ spec:
                         values:
                           - NVIDIA-RTX-A6000
                           - NVIDIA-GeForce-RTX-3090
+                          - NVIDIA-GeForce-RTX-2080-Ti
+
           containers:
             - name: runner
               imagePullPolicy: Always
@@ -34,7 +36,8 @@ spec:
               command:
                 [
                   "bash",
-                  "train.sh"
+                  "train.sh",
+                  "train_keygrid.py"
                 ]
 
               workingDir: /app/scripts/train
