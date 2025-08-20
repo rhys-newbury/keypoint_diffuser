@@ -1,14 +1,8 @@
-from time import time
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
-
-
-def timeit(tag, t):
-    print(f"{tag}: {time() - t}s")
-    return time()
 
 
 def pc_normalize(pc):

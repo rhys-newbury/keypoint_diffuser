@@ -1,4 +1,3 @@
-import time
 
 import numpy as np
 import pytorch3d.io
@@ -85,44 +84,6 @@ def normalize_to_box(inp):
         raise ValueError()
 
     return inp, centroid, furthest_distance
-
-
-class Timer:
-    def __init__(self, name=None, acc=False, avg=False):
-        self.name = name
-        self.acc = acc
-        self.avg = avg
-        self.total = 0.0
-        self.iters = 0
-        self.tstart = time.time()
-
-    def __enter__(self):
-        self.start()
-
-    def __exit__(self, type_, value, traceback):
-        self.stop()
-
-    def start(self):
-        self.tstart = time.time()
-
-    def stop(self):
-        self.iters += 1
-        self.total += time.time() - self.tstart
-        if not self.acc:
-            self.reset()
-
-    def reset(self):
-        name_string = ""
-        if self.name:
-            name_string = "[" + self.name + "] "
-        value = self.total
-        msg = "Elapsed"
-        if self.avg:
-            value /= self.iters
-            msg = "Avg elapsed"
-        print(f"{name_string}{msg}: {value:.4f}")
-        if not self.avg:
-            self.total = 0.0
 
 
 def reparameterize(mu, logvar):

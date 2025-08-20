@@ -25,6 +25,7 @@ spec:
                       - key: nvidia.com/gpu.product
                         operator: In
                         values:
+                          - NVIDIA-RTX-A6000
                           - NVIDIA-GeForce-RTX-2080-Ti
                           - NVIDIA-GeForce-RTX-3090
           containers:

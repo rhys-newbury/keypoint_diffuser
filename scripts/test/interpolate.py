@@ -11,7 +11,7 @@ import torch.utils.data.distributed
 from keypoint_diffuser.datasets import get_dataset
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.options.ae_options import AEOptions
-from keypoint_diffuser.utils.utils import Timer, reparameterize
+from keypoint_diffuser.utils.utils import reparameterize
 from tqdm import tqdm
 
 
@@ -116,7 +116,6 @@ def interpolate(opt):
     ae_model = AutoEncoder(opt).cuda()
     ae_model.load_state_dict(ckpt["states"])
     ae_model.eval()
-    Timer("step")
     all_z0 = []  # flatten z0 per batch
     all_z_aux = []
 

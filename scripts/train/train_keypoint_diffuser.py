@@ -317,7 +317,6 @@ def train(opt: AEConfig, rank, world_size):
     while t <= opt.n_iterations:
         print(t)
         epoch += 1
-        iter_time_start = time.time()  # Start iteration timer
         if torch.cuda.device_count() > 1 and world_size > 1:
             dataloader.sampler.set_epoch(epoch)
 
