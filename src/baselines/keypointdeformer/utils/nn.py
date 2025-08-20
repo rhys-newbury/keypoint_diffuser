@@ -5,8 +5,6 @@ import numpy as np
 import torch
 from torch import nn
 
-from . import logger
-
 
 def load_network(net, path):
     """
@@ -17,7 +15,6 @@ def load_network(net, path):
     From https://github.com/yifita/deep_cage
     """
     if isinstance(path, str):
-        logger.info(f"loading network from {path}")
         if path[-3:] == "pth":
             loaded_state = torch.load(path)
             if "states" in loaded_state:
@@ -33,12 +30,12 @@ def load_network(net, path):
 
     missingkeys, unexpectedkeys = network.load_state_dict(loaded_state, strict=False)
     if len(missingkeys) > 0:
-        logger.warn(
+        print(
             f"load_network {len(missingkeys)} missing keys",
             "\n".join(missingkeys),
         )
     if len(unexpectedkeys) > 0:
-        logger.warn(
+        print(
             f"load_network {len(unexpectedkeys)} unexpected keys",
             "\n".join(unexpectedkeys),
         )
