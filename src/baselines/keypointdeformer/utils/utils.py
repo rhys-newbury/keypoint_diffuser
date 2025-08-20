@@ -1,4 +1,3 @@
-
 import numpy as np
 import pytorch3d.io
 import torch
