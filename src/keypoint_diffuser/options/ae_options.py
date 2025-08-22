@@ -22,8 +22,8 @@ class AEConfig:
     subdir: str = "test"
     batch_size: int = 48
     kl_warmup_steps: int = 10000
-    partial_warmup_steps: int = 10000
-    partial_start_steps: int = 10000
+    partial_warmup_steps: int = 1
+    partial_start_steps: int = 0
     fps_steps: int = 1000
     max_schedule: int = 100000
     print_options: bool = False
@@ -53,6 +53,7 @@ class AEConfig:
     ckpt: str = None
     mesh_dir: str = None
     keypoints_dir: str = None
+    freeze_decoder: bool = False
 
     use_old: bool = False
     use_edm: bool = False
@@ -151,7 +152,7 @@ class AEOptions:
         if unknown:
             self.print_unknown(unknown)
 
-        if opt.phase == "test":
+        if (opt.phase == "test") or (opt.phase == "train" and opt.freeze_decoder):
             assert opt.ckpt is not None
 
         if opt.normalization == "none":

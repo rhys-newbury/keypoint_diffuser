@@ -366,7 +366,7 @@ def test(opt):
                     ref_points, 
                     kp,
                     points,
-                    visual=True,
+                    # visual=True,
                     )
 
                 distances = torch.cdist(kp.double(), torch.tensor(seg_points).cuda())
@@ -475,6 +475,7 @@ def get_network_data(data: dict[str, Any], key="orig"):
 
 def train(opt, rank, world_size):
     if rank == 0:
+        print(opt.log_dir, RUN.name)
         log_dir = os.path.join(opt.log_dir, RUN.name)
         checkpoints_dir = os.path.join(log_dir, CHECKPOINTS_DIR)
 
@@ -576,6 +577,11 @@ def train(opt, rank, world_size):
         writer = SummaryWriter(
             logdir=os.path.join(checkpoints_dir, "logs", summary_dir), flush_secs=5
         )
+
+    # freeze decoder if specified
+    if opt.freeze_decoder:
+        for param in net.diffusion.parameters():
+            param.requires_grad = False
 
     optimizer = torch.optim.Adam(
         net.parameters(), lr=opt.lr, weight_decay=opt.weight_decay
@@ -802,6 +808,17 @@ def train(opt, rank, world_size):
 
             cur_nimg += opt.batch_size
 
+            # record options and parameters at the start of training
+            if t == 0 and rank == 0:
+                message = "--------------------------- Options -------------------------\n"
+                message += "------------- All options not shown are default -------------\n"
+                for k, v in sorted(vars(opt).items()):
+                    v = v if v is not None else ""
+                    message += f"{k:>25}: {v:<30}\n"
+                message += "--------------------------- End -----------------------------\n"
+                with open(log_path, "a") as log_file:
+                    log_file.write(message)
+                    
             if t % opt.save_interval == 0 and rank == 0:
                 os.path.join(checkpoints_dir, "outputs", "%07d" % t)
                 save_network(ema, checkpoints_dir, network_label="ema", epoch_label=t)
