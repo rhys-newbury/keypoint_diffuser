@@ -1,11 +1,16 @@
 import argparse
 from abc import abstractmethod
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+import torch
 
 
+@dataclass
 class TestBase:
+    model: torch.nn.Module = field(init=False, default=None)
+
     @staticmethod
     def get_parser(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
         return p

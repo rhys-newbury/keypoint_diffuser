@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from classes import MODEL_CLASSES
 
 
 VALID_METRICS = {"das", "fwd", "bwd", "miou_at_0_1"}
@@ -111,7 +112,7 @@ def main():
     )
     ap.add_argument(
         "--model",
-        choices=["SC3K", "SM"],
+        choices=MODEL_CLASSES.keys(),
         default=None,
         help="Optional: filter rows by model",
     )

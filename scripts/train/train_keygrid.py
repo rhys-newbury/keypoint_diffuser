@@ -55,13 +55,11 @@ arg_parser.add_argument(
 arg_parser.add_argument("--ckpt-dir", type=Path, default=Path("."))
 
 
-def feed(net, optimizer, loader, train, shuffle, batch, epoch, ns):
+def feed(net, optimizer, loader, train, epoch, ns):
     running_init_points = 0.0
     running_chamfer = 0.0
     net.train(train)
     net.cuda()
-
-    # Global or external storage for losses (initialize somewhere before training loop)
 
     with nullcontext() if train else torch.no_grad():
         for _i, batch_x in enumerate(
@@ -110,7 +108,7 @@ if __name__ == "__main__":
     optimizer = optim.Adam(net.parameters(), lr=0.1)
 
     for epoch in range(cfg.epochs):
-        feed(net, optimizer, loader, True, False, batch, epoch, cfg)
+        feed(net, optimizer, loader, True, epoch, cfg)
         torch.save(
             {
                 "epoch": epoch,

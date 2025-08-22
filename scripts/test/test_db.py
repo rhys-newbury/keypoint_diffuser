@@ -5,7 +5,7 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
-from .get_das import MODEL_CLASSES
+from classes import MODEL_CLASSES
 
 
 EPOCH_RE = re.compile(r"(?P<k>\d+)kp_(?P<epoch>\d+)\.pth$", re.IGNORECASE)

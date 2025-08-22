@@ -144,6 +144,17 @@ class Net(nn.Module):
         heatmaps = torch.exp(-squared_dist / 2.5e-3)
         return heatmaps
 
+    def get_keypoints(self, input_x):
+        B, C, W = input_x.shape
+        point_cloud = torch.cat([input_x, input_x, input_x], -1)
+        kp_x, _, _, _ = self.PTW(point_cloud.permute(0, 2, 1))
+        kp_x = self.PT_L(kp_x)
+        kp_heatmaps = F.softmax(kp_x.permute(0, 2, 1), -1)
+        kp_heatmaps = (kp_heatmaps == kp_heatmaps.max(dim=2, keepdim=True)[0]).to(
+            input_x
+        )
+        return kp_heatmaps.bmm(input_x)  # KeyPoint ClouD [n, k, 3]
+
     def forward(self, input_x, train):
         B, C, W = input_x.shape
         normal_point = gen_grid2d(C, -1, 1).cuda()
