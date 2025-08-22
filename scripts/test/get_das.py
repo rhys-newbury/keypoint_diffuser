@@ -378,7 +378,7 @@ if __name__ == "__main__":
     model.load_model(opt.ckpt, opt)
 
     kpn_ds, predicted, out_Q = run_prediction(model, opt)
-    save_numpy_geoms(kpn_ds, predicted, out_Q, opt, out_dir=Path("output") /opt.model)
+    save_numpy_geoms(kpn_ds, predicted, out_Q, opt, out_dir=Path("output") / opt.model)
 
     fwd = fwd_alignment_scores(kpn_ds, predicted)
     bwd = bwd_alignment_scores(kpn_ds, predicted)
