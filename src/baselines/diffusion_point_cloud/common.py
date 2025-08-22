@@ -1,38 +1,6 @@
-import numpy as np
 import torch
 from torch.nn import Linear, Module
 from torch.optim.lr_scheduler import LambdaLR
-
-
-def reparameterize_gaussian(mean, logvar):
-    std = torch.exp(0.5 * logvar)
-    eps = torch.randn(std.size()).to(mean)
-    return mean + std * eps
-
-
-def gaussian_entropy(logvar):
-    const = 0.5 * float(logvar.size(1)) * (1.0 + np.log(np.pi * 2))
-    ent = 0.5 * logvar.sum(dim=1, keepdim=False) + const
-    return ent
-
-
-def standard_normal_logprob(z):
-    dim = z.size(-1)
-    log_z = -0.5 * dim * np.log(2 * np.pi)
-    return log_z - z.pow(2) / 2
-
-
-def truncated_normal_(tensor, mean=0, std=1, trunc_std=2):
-    """
-    Taken from https://discuss.pytorch.org/t/implementing-truncated-normal-initializer/4778/15
-    """
-    size = tensor.shape
-    tmp = tensor.new_empty((*size, 4)).normal_()
-    valid = (tmp < trunc_std) & (tmp > -trunc_std)
-    ind = valid.max(-1, keepdim=True)[1]
-    tensor.data.copy_(tmp.gather(-1, ind).squeeze(-1))
-    tensor.data.mul_(std).add_(mean)
-    return tensor
 
 
 class ConcatSquashLinear(Module):
@@ -45,7 +13,6 @@ class ConcatSquashLinear(Module):
     def forward(self, ctx, x):
         gate = torch.sigmoid(self._hyper_gate(ctx))
         bias = self._hyper_bias(ctx)
-        # if x.dim() == 3:
         ret = self._layer(x) * gate + bias
         return ret
 

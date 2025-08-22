@@ -296,7 +296,6 @@ def save_numpy_geoms(
             "category": opt.category,
             "class_id": entry["class_id"],
             "model_id": entry["model_id"],
-            "normalization_method": opt.normalization_method,
             "num_pc": int(pc.shape[0]),
             "num_pred": int(pred.shape[0]),
             "num_gt": int(gt.shape[0]),
