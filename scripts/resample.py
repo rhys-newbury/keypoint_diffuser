@@ -157,12 +157,16 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
                             
                 # for tac mode, remove points that are much further away than the closest point
                 if remove_far_points:
-                    print(f"Removing far points with tac mode, threshold: {image_size / 2}")
-                    min_dist = np.min(z[z > 0])  # Minimum depth value greater than zero
-                    print(f"Minimum depth value: {min_dist}")
-                    diff_threshold = 0.05
-                    far = z > (min_dist + diff_threshold)
-                    z[far] = 0.0  # Set far points to zero (not considered by depth image)
+                    try:
+                        # print(f"Removing far points with tac mode")
+                        min_dist = np.min(z[z > 0])  # Minimum depth value greater than zero
+                        # print(f"Minimum depth value: {min_dist}")
+                        diff_threshold = 0.05
+                        far = z > (min_dist + diff_threshold)
+                        z[far] = 0.0  # Set far points to zero (not considered by depth image)
+                    except Exception as e:
+                        # print(e)
+                        print("No valid points to reduce")
                     
                 valid = z > 0
                 x = (i[valid] - cx) * z[valid] / fx
@@ -352,7 +356,7 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=Fals
         
         # skip if the file already exists
         if partial_pc_path.is_file():
-            print(f"File already exists: {partial_pc_path}")
+            # print(f"File already exists: {partial_pc_path}")
             if not overwrite:
                 continue
             
@@ -413,8 +417,9 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=Fals
 # folders = {"02691156", "03636649", "03467517", "02954340", "02958343"}    # airplane, lamp, guitar, cap, car
 # folders =   {"03636649", "03467517", "02954340", "02958343"}  # lamp, guitar, cap, car
 # folders = {"02691156", "03636649",}
-folders = {"02691156", "03467517", "02954340", "02958343", "03797390", "04225987"}    # airplane, lamp, guitar, cap, car, mug, skateboard
+# folders = {"02691156", "03467517", "02954340", "02958343", "03797390", "04225987"}    # airplane, lamp, guitar, cap, car, mug, skateboard
 # folders = {"03467517", "02954340", "02958343", "03797390", "04225987"}    # lamp, guitar, cap, car, mug, skateboard
+folders = None    # do everything
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--src_dir", type=str, default="/mnt/slow/shape_data_eric", help="Root directory for the source mesh.")
@@ -428,8 +433,12 @@ if __name__ == "__main__":
     
     folders_to_run = []
     for l in open(data_root_dir / "list.txt"):
-        if l.strip().split("/")[1] in folders:
+        if folders is None:
+            # resample for everything in the list
             folders_to_run.append(l.strip())
+        else:
+            if l.strip().split("/")[1] in folders:
+                folders_to_run.append(l.strip())
     print(len(folders_to_run))
     shuffle(folders_to_run)
     
