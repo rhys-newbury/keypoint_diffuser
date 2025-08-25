@@ -24,9 +24,12 @@ CHECKPOINTS_DIR = "checkpoints"
 CHECKPOINT_EXT = ".pth"
 
 
-def try_add_arg(p: argparse.ArgumentParser, arg, type, default=None, **kwargs):
+def try_add_arg(p: argparse.ArgumentParser, arg, type=None, default=None, **kwargs):
     with contextlib.suppress(argparse.ArgumentError):
-        p.add_argument(arg, type=type, default=default, **kwargs)
+        if type:
+            p.add_argument(arg, type=type, default=default, **kwargs)
+        else:
+            p.add_argument(arg, default=default, **kwargs)
 
 
 p = argparse.ArgumentParser()
@@ -53,7 +56,7 @@ for model_name, model_cls in MODEL_CLASSES.items():
         subparser, "--category", type=str, help="Category of objects", default="chair"
     )
     try_add_arg(subparser, "--db-path", type=Path, default=Path("results.db"))
-    try_add_arg(subparser, "--save", type=bool, action="store_true")
+    try_add_arg(subparser, "--save", action="store_true")
 
 # ----------------------------
 # Utilities

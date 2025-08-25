@@ -68,27 +68,6 @@ def build_argparser() -> argparse.ArgumentParser:
         try_add_arg(sp, "--batch-size", type=int, default=16)
         try_add_arg(sp, "--num-workers", type=int, default=4)
         try_add_arg(sp, "--db-path", type=Path, default=Path("results.db"))
-        try_add_arg(
-            sp,
-            "--sample-limit",
-            type=int,
-            default=0,
-            help="Evaluate at most this many samples (0 = all)",
-        )
-        try_add_arg(
-            sp,
-            "--sinkhorn-eps",
-            type=float,
-            default=0.01,
-            help="Entropic regularization for Sinkhorn EMD",
-        )
-        try_add_arg(
-            sp,
-            "--sinkhorn-iter",
-            type=int,
-            default=100,
-            help="Number of Sinkhorn iterations",
-        )
     return p
 
 
