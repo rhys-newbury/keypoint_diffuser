@@ -28,3 +28,16 @@ class KPD(TestBase):
             .numpy()
             .transpose(0, 2, 1)
         )
+
+    def get_data(self, data):
+        source_shape, target_shape = data["source_shape"], data["target_shape"]
+
+        source_shape_t = source_shape.transpose(1, 2)
+        target_shape_t = target_shape.transpose(1, 2)
+
+        return source_shape_t.cuda(), target_shape_t.cuda()
+
+    def get_reconstruction(self, pcd: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
+        data = self.get_data(pcd)
+        out_dict = self.model(*data)
+        return (out_dict["deformed"]), data[0].transpose(2, 1)

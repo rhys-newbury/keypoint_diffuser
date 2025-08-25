@@ -1,5 +1,4 @@
 import numpy as np
-import pytorch3d.io
 import torch
 from einops import repeat
 
@@ -30,14 +29,6 @@ def sample_farthest_points(points, num_samples, return_index=False):
         return sampled, indexes
     else:
         return sampled
-
-
-def resample_mesh(mesh, n_points):
-    points, normals = pytorch3d.ops.sample_points_from_meshes(
-        mesh, n_points, return_normals=True
-    )
-    points = torch.cat([points[0], normals[0]], dim=-1)
-    return points
 
 
 def normalize_to_box(inp):

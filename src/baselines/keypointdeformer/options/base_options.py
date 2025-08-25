@@ -79,18 +79,6 @@ class BaseOptions:
 
         return opt, unknown
 
-    def print_options(self, opt):
-        message = ""
-        message += "----------------- Options ---------------\n"
-        for k, v in sorted(vars(opt).items()):
-            comment = ""
-            default = self.parser.get_default(k)
-            if v != default:
-                comment = "\t[default: %s]" % str(default)
-            message += f"{k!s:>25}: {v!s:<30}{comment}\n"
-        message += "----------------- End -------------------"
-        print(message)
-
     def print_unknown(self, unknown):
         message = ""
         message += "----------------- Unknown options ---------------\n"

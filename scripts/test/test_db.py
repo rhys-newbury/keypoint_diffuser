@@ -148,7 +148,8 @@ def main():
                 continue
 
             for ckpt_path in ckpt_list:
-                # if already_evaluated(eval_db_path, ckpt_path, algo, category):
+                if already_evaluated(eval_db_path, ckpt_path, algo, category):
+                    continue
 
                 annotation_json = Path("/app/annotations") / f"{category}.json"
                 cmd = [

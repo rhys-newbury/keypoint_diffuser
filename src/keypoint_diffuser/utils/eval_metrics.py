@@ -84,7 +84,7 @@ def EMD_CD_recon(sample_pcs, ref_pcs, batch_size=8, reduced=True):
     emd_lst = []
 
     B = sample_pcs.shape[0]
-    for b_start in tqdm(range(0, B, batch_size), desc="Reconstruction EMD-CD"):
+    for b_start in range(0, B, batch_size):
         b_end = min(B, b_start + batch_size)
         samp_batch = sample_pcs[b_start:b_end]
         ref_batch = ref_pcs[b_start:b_end]

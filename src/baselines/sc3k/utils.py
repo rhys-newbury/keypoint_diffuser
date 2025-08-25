@@ -172,40 +172,6 @@ def volume_loss(kp, pc):
 
     return F.smooth_l1_loss(dim_kp, dim_pc)
 
-    # https: // pytorch3d.readthedocs.io / en / latest / modules / ops.html
-    # pytorch3d.ops.box3d_overlap(boxes1: torch.Tensor, boxes2: torch.Tensor, eps: float = 0.0001) → Tuple[
-    #     torch.Tensor, torch.Tensor]
-
-    """
-    https://github.com/cfernandezlab/Category-Specific-Keypoints/blob/master/models/losses.py
-    class CoverageLoss(nn.Module):
-    def __init__(self, opt):
-        super(CoverageLoss, self).__init__()
-        self.opt = opt
-        self.cov_criteria = nn.SmoothL1Loss() # reduction='none'
-
-    def forward(self, kp, pc):
-        # singular values - not efficient
-        '''U, Spc, V = torch.svd(pc)
-        U, Skp, V = torch.svd(kp)
-        Spc = torch.div(Spc,torch.sum(Spc[:,:3], dim= 1).unsqueeze(1))
-        Skp = torch.div(Skp,torch.sum(Skp[:,:3], dim= 1).unsqueeze(1))
-        cov_loss = self.cov_criteria(Skp, Spc)'''
-
-        # volume
-        val_max_pc, _ = torch.max(pc,2)
-        val_min_pc, _ = torch.min(pc,2)
-        dim_pc = val_max_pc - val_min_pc
-        val_max_kp, _ = torch.max(kp,2)
-        val_min_kp, _ = torch.min(kp,2)
-        dim_kp = val_max_kp - val_min_kp
-        cov_loss = self.cov_criteria(dim_kp, dim_pc)
-
-        return cov_loss
-
-
-        """
-
 
 def pose_loss(kp1, kp2, rot1, rot2):
     """
