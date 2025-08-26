@@ -52,7 +52,6 @@ def loss_all(batch_x, keypoint, reconstruct, epoch, ns):
     losses["init_points"] = ns.lambda_init_points * init_points_loss
 
     if epoch > ns.chamfer:
-        B, C, W = batch_x.shape
         chamfer_loss = pytorch3d.loss.chamfer_distance(reconstruct, batch_x)[0]
         losses["chamfer"] = ns.lambda_chamfer * chamfer_loss
 

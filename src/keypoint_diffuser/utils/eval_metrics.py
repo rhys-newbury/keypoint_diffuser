@@ -2,6 +2,7 @@
 From https://github.com/stevenygd/PointFlow/tree/master/metrics
 """
 
+import pytorch3d.loss
 import torch
 from tqdm.auto import tqdm
 
@@ -49,20 +50,6 @@ def emd_approx(sample, ref):
     return emd_norm
 
 
-# Borrow from https://github.com/ThibaultGROUEIX/AtlasNet
-def distChamfer(a, b):
-    x, y = a, b
-    bs, num_points, points_dim = x.size()
-    xx = torch.bmm(x, x.transpose(2, 1))
-    yy = torch.bmm(y, y.transpose(2, 1))
-    zz = torch.bmm(x, y.transpose(2, 1))
-    diag_ind = torch.arange(0, num_points).to(a).long()
-    rx = xx[:, diag_ind, diag_ind].unsqueeze(1).expand_as(xx)
-    ry = yy[:, diag_ind, diag_ind].unsqueeze(1).expand_as(yy)
-    P = rx.transpose(2, 1) + ry - 2 * zz
-    return P.min(1)[0], P.min(2)[0]
-
-
 def EMD_CD_recon(sample_pcs, ref_pcs, batch_size=8, reduced=True):
     """
     Computes Chamfer and EMD distances for reconstruction, in batches.
@@ -88,12 +75,10 @@ def EMD_CD_recon(sample_pcs, ref_pcs, batch_size=8, reduced=True):
         b_end = min(B, b_start + batch_size)
         samp_batch = sample_pcs[b_start:b_end]
         ref_batch = ref_pcs[b_start:b_end]
-
-        dl, dr = distChamfer(samp_batch, ref_batch)
-        cd = dl.mean(dim=1) + dr.mean(dim=1)  # per-sample CD
+        cd, _ = pytorch3d.loss.chamfer_distance(samp_batch, ref_batch)
         emd = emd_approx(samp_batch, ref_batch)  # per-sample EMD
 
-        cd_lst.append(cd)
+        cd_lst.append(cd.reshape(1))
         emd_lst.append(emd)
 
     cd_all = torch.cat(cd_lst)
@@ -125,8 +110,8 @@ def EMD_CD(sample_pcs, ref_pcs, batch_size, reduced=True):
         sample_batch = sample_pcs[b_start:b_end]
         ref_batch = ref_pcs[b_start:b_end]
 
-        dl, dr = distChamfer(sample_batch, ref_batch)
-        cd_lst.append(dl.mean(dim=1) + dr.mean(dim=1))
+        cd, _ = pytorch3d.loss.chamfer_distance(sample_batch, ref_batch)
+        cd_lst.append(cd.reshape(1))
 
         emd_batch = emd_approx(sample_batch, ref_batch)
         emd_lst.append(emd_batch)

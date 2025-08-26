@@ -40,4 +40,4 @@ class KPD(TestBase):
     def get_reconstruction(self, pcd: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
         data = self.get_data(pcd)
         out_dict = self.model(*data)
-        return (out_dict["deformed"]), data[0].transpose(2, 1)
+        return (out_dict["deformed"].unsqueeze(1)), data[0].transpose(2, 1)

@@ -20,6 +20,7 @@ Run:
 """
 import argparse
 import contextlib
+import json
 import sqlite3
 from glob import glob
 from pathlib import Path
@@ -27,7 +28,6 @@ from pathlib import Path
 import numpy as np
 import torch
 import tqdm
-from baselines.test_base import TestBase
 from classes import MODEL_CLASSES
 from keypoint_diffuser.datasets.H5Datset import H5Dataset
 from keypoint_diffuser.utils.eval_metrics import EMD_CD_recon
@@ -46,6 +46,45 @@ TESTSET = "/app/shapenetcorev2_hdf5_2048/val"
 # ----------------------------
 # CLI
 # ----------------------------
+
+
+def save_recon_geoms(
+    best_recons, best_gts, cds, emds, opt, out_dir: Path = Path("output")
+):
+    """
+    Save best reconstructions and ground truths as numpy arrays.
+      - recon.npy : best reconstruction (normalized point cloud)
+      - gt.npy    : ground truth point cloud
+      - meta.json : per-sample metadata (with metrics)
+    """
+
+    out_dir = out_dir / opt.model / opt.category
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    saved = 0
+    for idx, (recon, gt, cd, emd) in enumerate(zip(best_recons, best_gts, cds, emds)):
+        # recon: [M, 3], gt: [N, 3]
+        dst = out_dir / f"sample_{idx:05d}"
+        dst.mkdir(parents=True, exist_ok=True)
+
+        np.save(dst / "recon.npy", np.asarray(recon, dtype=np.float32))
+        np.save(dst / "gt.npy", np.asarray(gt, dtype=np.float32))
+
+        meta = {
+            "model": opt.model,
+            "category": getattr(opt, "category", None),
+            "sample_idx": idx,
+            "num_recon": int(recon.shape[0]),
+            "num_gt": int(gt.shape[0]),
+            "cd": float(cd),
+            "emd": float(emd),
+        }
+        with open(dst / "meta.json", "w") as f:
+            json.dump(meta, f, indent=2)
+
+        saved += 1
+
+    print(f"[✓] Saved {saved} reconstructions under {out_dir}/")
 
 
 def try_add_arg(p: argparse.ArgumentParser, *names, **kwargs):
@@ -68,6 +107,8 @@ def build_argparser() -> argparse.ArgumentParser:
         try_add_arg(sp, "--batch-size", type=int, default=16)
         try_add_arg(sp, "--num-workers", type=int, default=4)
         try_add_arg(sp, "--db-path", type=Path, default=Path("results.db"))
+        try_add_arg(sp, "--key-points", type=int, default=10)
+
     return p
 
 
@@ -117,23 +158,46 @@ def make_loader(opt: argparse.Namespace) -> DataLoader:
     )
 
 
-def run_reconstruction(
-    model: TestBase, loader: DataLoader, opt: argparse.Namespace
-) -> tuple[float, float]:
+def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output")):
+    cds, emds = [], []
+    best_recons, best_gts = [], []
+
     model.model.eval()
-    model.model.cuda()
-
-    cds = []
-    emds = []
-
     with torch.no_grad():
-        for batch in tqdm.tqdm(loader, desc="Reconstruct"):
-            # Model forward: expect same shape back
-            pc, recon = model.get_reconstruction(batch)  # should return (B, N, 3)
-            recon = recon.float()
-            results = EMD_CD_recon(recon, pc, reduced=False)
-            cds.extend(results["CD"].cpu().numpy().tolist())
-            emds.extend(results["EMD"].cpu().numpy().tolist())
+        for batch in tqdm.tqdm(loader, desc="Reconstruct (best per item)"):
+            # recon_list: list of length B; each item is a list of [2048,3] tensors
+            recon_list, pc = model.get_reconstruction(batch)
+            gt_batch = pc.float()
+            B = gt_batch.shape[0]
+
+            for b in range(B):
+                cands = recon_list[b]
+                if len(cands) == 0:  # no valid candidates for this item
+                    continue
+                # Stack candidates -> [C, 2048, 3]
+                preds = (
+                    torch.stack(cands, dim=0).float() if type(cands) == list else cands
+                )
+
+                C = preds.shape[0]
+
+                # Repeat GT -> [C, N, 3]
+                gt_b = gt_batch[b].unsqueeze(0).expand(C, -1, -1)
+
+                # One call for all candidates
+                res = EMD_CD_recon(preds, gt_b, reduced=False)
+                cd_all = res["CD"].detach().cpu().numpy()  # shape [C] or [C,]
+                emd_all = res["EMD"].detach().cpu().numpy()  # shape [C] or [C,]
+
+                # Pick best by CD
+                i = int(np.argmin(cd_all))
+                cds.append(float(cd_all[i]))
+                emds.append(float(emd_all[i]))
+
+                best_recons.append(preds[i].cpu().numpy())  # [2048,3]
+                best_gts.append(gt_batch[b].cpu().numpy())  # [N,3]
+
+    save_recon_geoms(best_recons, best_gts, cds, emds, opt, out_dir=out_dir)
 
     cd_mean = np.mean(cds)
     emd_mean = np.mean(emds)
@@ -203,7 +267,7 @@ def main():
 
     loader = make_loader(opt)
 
-    cd, emd = run_reconstruction(model, loader, opt)
+    cd, emd = run_reconstruction(model, loader, opt, out_dir=Path("recons_out"))
 
     print(f"Chamfer Distance (mean): {cd:.6f}")
     print(f"EMD (Sinkhorn)   (mean): {emd:.6f}")

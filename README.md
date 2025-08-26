@@ -40,3 +40,7 @@ Once those two steps are done, the Git hooks will be run automatically at every 
 The Git hooks can also be run manually with `pre-commit run --all-files`, and if needed they can be skipped (not recommended) with `git commit --no-verify`.
 
 **Note:** you may have to run `pre-commit run --all-files` manually a couple of times to make it pass when you commit, as each formatting tool will first format the code and fail the first time but should pass the second time.
+
+## Eval
+
+python3 plot_all.py --db "/run/user/1000/gvfs/smb-share:server=130.194.128.238,share=bryce-rhys/results.db"

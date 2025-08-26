@@ -29,5 +29,8 @@ class KeyGrid(TestBase):
 
     def get_keypoints(self, pcd: np.ndarray) -> np.ndarray:
         data = (torch.Tensor(pcd["orig"])).cuda()
-        # item 2 is keypoints
         return self.model.get_keypoints(data).cpu().numpy()
+
+    def get_reconstruction(self, pcd: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
+        _, reconstruct = self.model(pcd.cuda(), False)
+        return reconstruct.unsqueeze(1), pcd.cuda()

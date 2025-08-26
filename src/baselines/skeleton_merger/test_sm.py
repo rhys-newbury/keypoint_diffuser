@@ -31,3 +31,41 @@ class SM(TestBase):
         data = (torch.Tensor(pcd["orig"])).cuda()
         # item 2 is keypoints
         return self.model.get_keypoints(data).cpu().numpy()
+
+    @torch.no_grad()
+    def get_reconstruction(
+        self,
+        pcd: np.ndarray,
+        thresholds=(0.1, 0.2, 0.3, 0.5, 0.6, 0.7, 0.8, 0.9),
+        min_points: int = 2048,
+    ):
+        device = next(self.model.parameters()).device
+        data = torch.as_tensor(pcd, dtype=torch.float32, device=device)
+
+        RPCD, _, _, _, MA = self.model(
+            data
+        )  # RPCD: list[P] of [B x m x 3], MA: [B x P]
+
+        reconstructions = []
+        for b in range(data.shape[0]):
+            recos_b = []
+            for th in thresholds:
+                keep_ids = (MA[b] > th).nonzero(as_tuple=True)[0]
+                if keep_ids.numel() == 0:
+                    continue  # nothing passes this threshold
+
+                parts = [RPCD[i][b] for i in keep_ids.tolist()]
+                merged = torch.cat(parts, dim=0)  # [M x 3]
+
+                M = merged.shape[0]
+                if min_points > M:
+                    continue  # skip candidates too small
+
+                if min_points < M:
+                    sel = torch.randperm(M, device=merged.device)[:min_points]
+                    merged = merged[sel]
+
+                recos_b.append(merged)  # each candidate is exactly [2048 x 3]
+            reconstructions.append(recos_b)
+
+        return reconstructions, data
