@@ -52,14 +52,16 @@ def table_exists(con: sqlite3.Connection, table: str) -> bool:
     return c.fetchone() is not None
 
 
-def already_evaluated(eval_db: Path, ckpt: Path, model: str, category: str) -> bool:
+def already_evaluated(
+    eval_db: Path, ckpt: Path, model: str, category: str, table_name: str
+) -> bool:
     con = sqlite3.connect(str(eval_db))
     try:
-        if not table_exists(con, "runs"):
+        if not table_exists(con, table_name):
             return False
         cur = con.cursor()
         cur.execute(
-            "SELECT 1 FROM runs WHERE ckpt = ? AND model = ? AND category = ? LIMIT 1;",
+            f"SELECT 1 FROM {table_name} WHERE ckpt = ? AND model = ? AND category = ? LIMIT 1;",
             (str(ckpt), model, category),
         )
         return cur.fetchone() is not None
@@ -75,7 +77,7 @@ def main():
         "--db", type=Path, required=True, help="Path to results.db (has train_runs)"
     )
     ap.add_argument(
-        "--get-das", type=Path, default=Path("get_das.py"), help="Path to get_das.py"
+        "--script", type=Path, default=Path("get_das.py"), help="Path to get_das.py"
     )
     ap.add_argument("--pcd-path", type=Path, default=Path("/app/pcds"))
     ap.add_argument("--batch-size", type=int, default=32)
@@ -89,6 +91,11 @@ def main():
         type=Path,
         default=None,
         help="DB passed to get_das --db-path (default: same as --db)",
+    )
+    ap.add_argument(
+        "--table-name",
+        type=str,
+        default="runs",
     )
     # Optional limits/filters
     ap.add_argument(
@@ -148,13 +155,15 @@ def main():
                 continue
 
             for ckpt_path in ckpt_list:
-                if already_evaluated(eval_db_path, ckpt_path, algo, category):
+                if already_evaluated(
+                    eval_db_path, ckpt_path, algo, category, args.table_name
+                ):
                     continue
 
                 annotation_json = Path("/app/annotations") / f"{category}.json"
                 cmd = [
                     "python3",
-                    str(args.get_das),
+                    str(args.script),
                     algo,  # subcommand: SC3K / SM
                     "--ckpt",
                     str(ckpt_path),

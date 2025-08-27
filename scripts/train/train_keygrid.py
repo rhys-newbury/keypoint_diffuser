@@ -87,11 +87,11 @@ if __name__ == "__main__":
     cfg = arg_parser.parse_args()
     batch = cfg.batch
 
-    wandb.init(project=f"keygrid_{cfg.category}_train", config=cfg)
+    wandb.init(project=f"keygridOrig_{cfg.category}_train", config=cfg)
 
     ckpt_dir = cfg.ckpt_dir / wandb.run.name
     ckpt_dir.mkdir()
-    save_train_run(cfg.db, "KeyGrid", cfg.category, ckpt_dir, cfg.key_points)
+    save_train_run(cfg.db, "KeyGridOrig", cfg.category, ckpt_dir, cfg.key_points)
 
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
     dataset = H5Dataset(
@@ -105,7 +105,7 @@ if __name__ == "__main__":
     )
 
     net = Net(cfg.max_points, cfg.key_points).cuda()
-    optimizer = optim.Adam(net.parameters(), lr=0.1)
+    optimizer = optim.Adadelta(net.parameters(), lr=0.1, eps=1e-2)
 
     for epoch in range(cfg.epochs):
         feed(net, optimizer, loader, True, epoch, cfg)

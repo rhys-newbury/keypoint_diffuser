@@ -17,7 +17,7 @@ def plot_recon_collage(
     gt_color="gray",
     recon_color="red",
     alpha_gt=0.25,
-    worst: bool = True,  # <<< show worst (highest CD) first
+    worst: bool = False,  # <<< show worst (highest CD) first
 ):
     dirs = [
         d

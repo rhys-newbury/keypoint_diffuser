@@ -19,12 +19,12 @@ def gen_grid2d(
     grid_size: int, left_end: float = -1, right_end: float = 1
 ) -> torch.Tensor:
     x = torch.linspace(left_end, right_end, 16)
-    z = torch.linspace(left_end, right_end, 16)
+    z = torch.linspace(left_end, right_end, 8)
     x, y, z = torch.meshgrid([x, x, z])
 
     grid = torch.cat(
         (x.reshape(-1, 1), y.reshape(-1, 1), z.reshape(-1, 1)), dim=1
-    ).reshape(1, 4096, 3)
+    ).reshape(1, 2048, 3)
     return grid
 
 
@@ -73,22 +73,6 @@ class Head(nn.Module):  # Decoder unit, one per line segment
         x = KPA.unsqueeze(-2) * self.f_interp + KPB.unsqueeze(-2) * self.b_interp
         R = self.emb[:count, :].unsqueeze(0) + x  # N x count x 3
         return R.reshape((-1, count, 3)), self.emb
-
-
-def mask_feature(input, mask_rate):
-    if mask_rate > 0:
-        _, N, _ = input.shape
-        _, mask_long = int(mask_rate * N), int((1 - mask_rate) * N)
-        random_N = 1
-        damage_mask = torch.zeros(
-            input.shape[0], input.shape[1], 1, device=input.device
-        )
-        damage_mask[:, random_N : random_N + mask_long] = 1
-        damage_mask = F.interpolate(damage_mask.to(input), size=1, mode="nearest")
-        mask_input = input * damage_mask
-        return mask_input
-    else:
-        return input
 
 
 class Net(nn.Module):

@@ -16,10 +16,16 @@ try:
 except ImportError:
     KeyGrid = None
 
+try:
+    from baselines.diffusion_point_cloud.test_dpm import DPM
+except ImportError:
+    DPM = None
+
 MODEL_CLASSES = {
     "SC3K": SC3K,
     "SM": SM,
     "KPD": KPD,
-    "KeyGrid": KeyGrid
+    "KeyGrid": KeyGrid,
+    "DPM": DPM,
     # Add more models here:
 }

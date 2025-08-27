@@ -163,6 +163,7 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
     best_recons, best_gts = [], []
 
     model.model.eval()
+    model.model.cuda()
     with torch.no_grad():
         for batch in tqdm.tqdm(loader, desc="Reconstruct (best per item)"):
             # recon_list: list of length B; each item is a list of [2048,3] tensors
