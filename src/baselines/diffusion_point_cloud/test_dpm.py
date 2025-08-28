@@ -47,3 +47,6 @@ class DPM(TestBase):  # inherit if you need the same interface
                 code, pcd.shape[1], flexibility=self.flexibility
             )  # [B, N, 3]
         return recons.unsqueeze(1).cpu(), pcd
+
+    def get_keypoints(self, pcd):
+        raise NotImplementedError()

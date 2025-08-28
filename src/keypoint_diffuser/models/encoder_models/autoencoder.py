@@ -15,7 +15,7 @@ class AutoEncoder(Module):
         super().__init__()
         self.args = args
         self.encoder = PointTransformerv2(
-            zdim=args.latent_dim, extra_latent=args.extra_latent
+            zdim=args.key_points, extra_latent=args.extra_latent
         )
 
         self.fc_mu = nn.Sequential(
@@ -32,7 +32,7 @@ class AutoEncoder(Module):
 
         self.diffusion_ = PointwiseNet(
             point_dim=3,
-            context_dim=args.latent_dim * 3 + args.extra_latent,
+            context_dim=args.key_points * 3 + args.extra_latent,
             residual=args.residual,
         )
         self.use_edm = args.use_edm

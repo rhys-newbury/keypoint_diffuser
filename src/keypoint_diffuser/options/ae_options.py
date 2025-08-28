@@ -1,9 +1,8 @@
 from dataclasses import dataclass
+from pathlib import Path
 
 import configargparse
 import numpy as np
-
-from .. import datasets
 
 
 THOUSAND = 1000
@@ -26,10 +25,10 @@ class AEConfig:
     print_options: bool = False
     phase: str = "train"
     iteration: int = None
-    n_iterations: int = 200000
+    epochs: int = 100
     save_interval: int = 100
     log_interval: int = 10
-    latent_dim: int = 8
+    key_points: int = 10
     extra_latent: int = 5
     num_steps: int = 200
     beta_1: float = 1e-4
@@ -50,6 +49,9 @@ class AEConfig:
     ckpt: str = None
     mesh_dir: str = None
     keypoints_dir: str = None
+
+    db: Path = Path("results.db")
+    ckpt_dir: Path = Path(".")
 
     use_old: bool = False
     use_edm: bool = False
@@ -131,11 +133,6 @@ class AEOptions:
 
         opt, _ = parser.parse_known_args(args)
 
-        # if not skip_model:
-
-        dataset_name = opt.dataset
-        dataset_option_setter = datasets.get_option_setter(dataset_name)
-        parser = dataset_option_setter(parser)
         opt, unknown = (
             parser.parse_known_args(args)
             if unknown_ok

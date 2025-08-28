@@ -1,29 +1,24 @@
 import os
 import time
-from datetime import datetime
 from glob import glob
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-import open3d as o3d
 import pytorch3d.io
 import pytorch3d.loss
 import torch
-import torch.distributed as dist
 import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
+from db_utils import save_train_run
 from einops import repeat
 from keypoint_diffuser.datasets.H5Datset import H5Dataset
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.models.encoder_models.common import get_linear_scheduler
 from keypoint_diffuser.options.ae_options import AEConfig, AEOptions
-from keypoint_diffuser.utils.nn import load_network, save_network
-from tensorboardX import SummaryWriter
+from keypoint_diffuser.utils.nn import save_network
 from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
-from torch.nn.parallel import DistributedDataParallel
 from torch.nn.utils import clip_grad_norm_
 
 import wandb
@@ -47,16 +42,6 @@ CHECKPOINTS_DIR = "checkpoints"
 CHECKPOINT_EXT = ".pth"
 
 
-# Initialize distributed environment
-def setup(rank, world_size):
-    if torch.cuda.device_count() > 1:
-        local_rank = int(os.environ["LOCAL_RANK"])
-        print("local_rank", local_rank, "rank: ", rank, "world_size: ", world_size)
-        torch.cuda.set_device(local_rank)
-
-        dist.init_process_group("nccl", rank=rank, world_size=world_size)
-
-
 def get_data(dataset, data):
     data = dataset.uncollate(data)
 
@@ -65,84 +50,6 @@ def get_data(dataset, data):
     target_shape_t = target_shape.transpose(1, 2)
 
     return None, target_shape_t
-
-
-def visualize_point_cloud(
-    points, labels, keypoints, orig_shape, visual=False, icp=True
-):
-    """
-    Visualize a 3D point cloud with color based on labels.
-
-    Args:
-    - points (torch.Tensor): Shape [N, 3], point cloud data.
-    - keypoints (torch.Tensor): Shape [M, 3], point cloud data, which are bigger and blue
-
-    - labels (torch.Tensor): Shape [N], labels for each point.
-    """
-    # Convert tensors to NumPy arrays
-    points_np = points.cpu().numpy()  # Shape: [N, 3]
-    labels_np = labels.cpu().numpy().astype(np.int32)  # Shape: [N]
-    orig_shape = orig_shape.cpu().numpy()
-    keypoints_np = keypoints.cpu().numpy().T  # Shape: [M, 3]
-
-    # Normalize labels to be in range [0, 1] for color mapping
-    max_label = labels_np.max() + 1  # Avoid division by 0
-
-    colors = plt.cm.get_cmap("tab10", max_label)(labels_np / max_label)[
-        :, :3
-    ]  # RGB from colormap
-
-    # Create Open3D point cloud
-    orig_pcd = o3d.geometry.PointCloud()
-    orig_pcd.points = o3d.utility.Vector3dVector(orig_shape)
-    orig_pcd.paint_uniform_color([1, 0, 1])
-
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points_np)
-    pcd.colors = o3d.utility.Vector3dVector(colors)
-
-    if icp:
-        threshold = 0.2  # Distance threshold for ICP
-        np.eye(4)  # Initial transformation (identity matrix)
-
-        theta = 0  # 90 degrees in radians
-        initial_rotation_y = np.array(
-            [
-                [np.cos(theta), 0, np.sin(theta), 0],
-                [0, 1, 0, 0],
-                [-np.sin(theta), 0, np.cos(theta), 0],
-                [0, 0, 0, 1],
-            ]
-        )
-        reg_icp = o3d.pipelines.registration.registration_icp(
-            pcd,
-            orig_pcd,
-            threshold,
-            initial_rotation_y,
-            o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-        )
-
-        pcd.transform(reg_icp.transformation)
-
-    if visual:
-        keypoint_spheres = []
-        for keypoint in keypoints_np:
-            sphere = o3d.geometry.TriangleMesh.create_sphere(
-                radius=0.05
-            )  # Adjust radius as needed
-
-            sphere.translate(keypoint)
-            sphere.paint_uniform_color([0, 0, 1])  # Blue color
-            keypoint_spheres.append(sphere)
-            break
-
-        # Visualize
-        o3d.visualization.draw_geometries(
-            [pcd, orig_pcd, *keypoint_spheres],
-            window_name="Point Cloud with Labels and Keypoints",
-        )
-
-    return np.asarray(pcd.points)
 
 
 def sample_farthest_points(points, num_samples, return_index=False):
@@ -187,10 +94,10 @@ def get_network_data(data: dict[str, Any], key="orig"):
     return d
 
 
-def train(opt: AEConfig, rank, world_size):
-    if rank == 0:
-        log_dir = os.path.join(opt.log_dir, RUN.name)
-        checkpoints_dir = os.path.join(log_dir, CHECKPOINTS_DIR)
+def train(opt: AEConfig):
+    ckpt_dir = opt.ckpt_dir / wandb.run.name
+    ckpt_dir.mkdir()
+    save_train_run(opt.db, "KeyPointDiffuser", opt.category, ckpt_dir, opt.key_points)
 
     t = transforms.Compose(
         [
@@ -231,16 +138,9 @@ def train(opt: AEConfig, rank, world_size):
         transform=t,
     )
 
-    if torch.cuda.device_count() > 1 and world_size > 1:
-        print("Using DistributedSampler for multiple GPUs.")
-        train_sampler = dist.DistributedSampler(
-            dataset, num_replicas=world_size, rank=rank
-        )
-        shuffle = False
-    else:
-        print("Using regular DataLoader (no DistributedSampler).")
-        train_sampler = None
-        shuffle = True  # Only shuffle when not using DistributedSampler
+    print("Using regular DataLoader (no DistributedSampler).")
+    train_sampler = None
+    shuffle = True  # Only shuffle when not using DistributedSampler
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=opt.batch_size,
@@ -253,35 +153,8 @@ def train(opt: AEConfig, rank, world_size):
     )
 
     net = AutoEncoder(opt).cuda()
-
-    if torch.cuda.device_count() > 1:
-        net = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net)
-
-        print(f"Using DistributedDataParallel on {torch.cuda.device_count()}")
-        net = DistributedDataParallel(
-            net, device_ids=[rank], output_device=rank, find_unused_parameters=False
-        )
-
-    if opt.ckpt:
-        ckpt = opt.ckpt
-        if not ckpt.startswith(os.path.sep):
-            ckpt = os.path.join(checkpoints_dir, ckpt + CHECKPOINT_EXT)
-        load_network(net, ckpt)
-
-    # train
     net.train()
     t = 0
-
-    # train
-    if rank == 0:
-        os.makedirs(checkpoints_dir, exist_ok=True)
-        log_path = os.path.join(checkpoints_dir, "training_log.txt")
-        with open(log_path, "a") as log_file:
-            log_file.write(str(net) + "\n")
-        summary_dir = datetime.now().strftime("%y%m%d-%H%M%S")
-        writer = SummaryWriter(
-            logdir=os.path.join(checkpoints_dir, "logs", summary_dir), flush_secs=5
-        )
 
     optimizer = torch.optim.Adam(
         net.parameters(), lr=opt.lr, weight_decay=opt.weight_decay
@@ -299,12 +172,7 @@ def train(opt: AEConfig, rank, world_size):
 
     cur_nimg = 0
 
-    if opt.iteration:
-        t = opt.iteration
-
     iter_time_start = time.time()
-
-    epoch = 0
 
     lambda_0 = opt.lambda_0
     lambda_1 = opt.lambda_1
@@ -314,16 +182,8 @@ def train(opt: AEConfig, rank, world_size):
 
     kl_warmup_steps = opt.kl_warmup_steps
 
-    while t <= opt.n_iterations:
-        print(t)
-        epoch += 1
-        if torch.cuda.device_count() > 1 and world_size > 1:
-            dataloader.sampler.set_epoch(epoch)
-
+    for _e in range(opt.epochs):
         for _, data in enumerate(dataloader):
-            if t > opt.n_iterations:
-                break
-
             target_shape_t = (
                 data["target_shape"]
                 .view(data["orig_offset"].shape[0], -1, 3)
@@ -331,15 +191,11 @@ def train(opt: AEConfig, rank, world_size):
                 .cuda()
             )
 
-            module = (
-                net.module if torch.cuda.device_count() > 1 and world_size > 1 else net
-            )
-
-            diffusion_loss, code, mu, logvar = module.get_loss(
+            diffusion_loss, code, mu, logvar = net.get_loss(
                 get_network_data(data), step=t
             )
 
-            code_ = code[:, : opt.latent_dim * 3].reshape(
+            code_ = code[:, : opt.key_points * 3].reshape(
                 data["orig_offset"].shape[0], -1, 3
             )
 
@@ -349,20 +205,16 @@ def train(opt: AEConfig, rank, world_size):
             lambda_4 = 0 if opt.lambda_4 == 0 else min(1.0, t / kl_warmup_steps)
             kl = kl_divergence(q, p).sum(dim=1).mean()
 
-            if rank == 0:
-                wandb.log({"diffusion_loss": diffusion_loss}, step=t)
-                wandb.log({"kl_divergence": kl}, step=t)
+            wandb.log({"diffusion_loss": diffusion_loss}, step=t)
+            wandb.log({"kl_divergence": kl}, step=t)
 
-            # if t > opt.fps_steps and lambda_0 > 0:
-
-            fps = sample_farthest_points(target_shape_t, opt.latent_dim + 5).transpose(
+            fps = sample_farthest_points(target_shape_t, opt.key_points + 5).transpose(
                 2, 1
             )
 
             fps_loss, _ = pytorch3d.loss.chamfer_distance(fps, code_)
 
-            if rank == 0:
-                wandb.log({"fps_loss": fps_loss}, step=t)
+            wandb.log({"fps_loss": fps_loss}, step=t)
 
             max_schedule = opt.max_schedule
             chamfer_loss, _ = pytorch3d.loss.chamfer_distance(
@@ -388,8 +240,7 @@ def train(opt: AEConfig, rank, world_size):
                 + lambda_4 * kl
             )
 
-            if rank == 0:
-                wandb.log({"chamfer_loss": chamfer_loss, "mse_loss": mse_loss}, step=t)
+            wandb.log({"chamfer_loss": chamfer_loss, "mse_loss": mse_loss}, step=t)
 
             loss = max(0, max_schedule - t) / max_schedule * loss_
 
@@ -397,7 +248,7 @@ def train(opt: AEConfig, rank, world_size):
             loss.backward()
 
             if (t + 1) % accumulation_steps == 0:
-                print(f"Rank {rank}: Gradient step at iteration {t + 1}")
+                print(f"Gradient step at iteration {t + 1}")
                 clip_grad_norm_(net.parameters(), opt.max_grad_norm)
                 optimizer.step()
                 scheduler.step()
@@ -405,40 +256,25 @@ def train(opt: AEConfig, rank, world_size):
 
             cur_nimg += opt.batch_size
 
-            if t % opt.save_interval == 0 and rank == 0:
-                os.path.join(checkpoints_dir, "outputs", "%07d" % t)
-                save_network(net, checkpoints_dir, network_label="net", epoch_label=t)
+            if t % opt.save_interval == 0:
+                os.path.join(ckpt_dir, "outputs", "%07d" % t)
+                save_network(net, ckpt_dir, network_label="net", epoch_label=t)
 
             iter_time = time.time() - iter_time_start
             iter_time_start = time.time()
 
-            if t % opt.log_interval == 0 and rank == 0:
+            if t % opt.log_interval == 0:
                 samples_sec = opt.batch_size / iter_time
                 losses_str = str(loss)
                 log_str = f"{t:d}: iter {iter_time:.1f} sec, {samples_sec:.1f} samples/sec {losses_str}"
                 print(log_str)
-                with open(log_path, "a") as log_file:
-                    log_file.write(log_str + "\n")
-                writer.add_scalar("train/loss", loss, t)
 
             t += 1
 
-        # with torch.no_grad():
-        #     for _, data in enumerate(test_dataloader):
-
-    if rank == 0:
-        save_network(net, checkpoints_dir, network_label="net", epoch_label="final")
+    save_network(net, ckpt_dir, network_label="net", epoch_label="final")
 
 
 if __name__ == "__main__":
-    if torch.cuda.device_count() > 1:
-        rank = int(os.environ["RANK"])
-        world_size = int(os.environ["WORLD_SIZE"])
-        setup(rank, world_size)
-    else:
-        rank = 0
-        world_size = 1
-
     print("SETUP IS COMPLETE!!!!!!!!!!!!!!!!")
 
     parser = AEOptions()
@@ -449,13 +285,9 @@ if __name__ == "__main__":
     np.random.seed(seed)
 
     if opt.phase == "train":
-        print(f"Rank: {rank}, World size: {world_size}")
-
-        if rank == 0:
-            RUN = wandb.init(project="diffuse_keypoints_sweep")
-            wandb.run.log_code(".")
-        train(opt, rank, world_size)
-        print(f"Run name: {wandb.run.name}")
+        RUN = wandb.init(project="diffuse_keypoints_sweep")
+        wandb.run.log_code(".")
+        train(opt)
 
     else:
         raise ValueError()
