@@ -257,9 +257,17 @@ def test(opt):
         ]
     )
 
-    log_dir = os.path.join(opt.log_dir, opt.name)
+    # base the log dir off of the input checkpoint file
+    ckpt = opt.ckpt
+    if ckpt.startswith(os.path.sep):
+        log_dir = os.path.dirname(os.path.dirname(ckpt))
+    else:
+        log_dir = os.path.join(opt.log_dir, opt.name)
+        ckpt = os.path.join(checkpoints_dir, ckpt + CHECKPOINT_EXT)
     checkpoints_dir = os.path.join(log_dir, CHECKPOINTS_DIR)
     # /app/data/keypoints/logs/autumn-waterfall-200/checkpoints/net_final.pth
+    ckpt = torch.load(ckpt)
+
     opt.phase = "test"
     dataset = get_dataset(opt.dataset)(opt, transform=t)
 
@@ -273,17 +281,13 @@ def test(opt):
         worker_init_fn=lambda id_: np.random.seed(np.random.get_state()[1][0] + id_),
     )
 
-    ckpt = opt.ckpt
-    if not ckpt.startswith(os.path.sep):
-        ckpt = os.path.join(checkpoints_dir, ckpt + CHECKPOINT_EXT)
-
-    ckpt = torch.load(ckpt)
 
     ae_model = AutoEncoder(opt).cuda()
     ae_model.load_state_dict(ckpt["states"])
     ae_model.eval()
     all_ref = []
     all_recons = []
+    all_coverage = []
     Timer("step")
     with torch.no_grad():
         closest_labels_ = []
@@ -311,6 +315,8 @@ def test(opt):
                     .cuda()
                 )
 
+            coverage = data["target_coverage"]
+            
             # get reference point cloud (original full points regardless of input type)
             ref_shape_t = (
                 data["target_shape"]
@@ -334,6 +340,7 @@ def test(opt):
 
             all_ref.append(ref_shape_t.detach().cpu())
             all_recons.append(recons.detach().cpu())
+            all_coverage.append(coverage.detach().cpu())
 
             # from point_resampled_labeled.npy
             target_sampled_points = data["target_sampled_points"].view(
@@ -413,8 +420,9 @@ def test(opt):
         all_ref = normalize_point_clouds(all_ref, "shape_bbox")
         all_recons = torch.cat(all_recons, dim=0)
         all_recons = normalize_point_clouds(all_recons, "shape_bbox")
+        all_coverage = torch.cat(all_coverage, dim=0)
         # test metrics calculation
-        metrics = EMD_CD(
+        metrics, cd_list, emd_list = EMD_CD(
             all_recons.to("cuda").double(),
             all_ref.to("cuda").double(),
             opt.batch_size,
@@ -423,6 +431,45 @@ def test(opt):
         for key, value in metrics.items():
             print(f"{key}: {value.item():.10f}")
 
+        # plot metrics with respect to the coverage values
+        all_cd = torch.cat(cd_list, dim=0)
+        all_emd = torch.cat(emd_list, dim=0)
+        
+         # Flatten and move to CPU numpy for plotting
+        cov_np = all_coverage.view(-1).detach().cpu().numpy()
+        cd_np  = all_cd.view(-1).detach().cpu().numpy()
+        emd_np = all_emd.view(-1).detach().cpu().numpy()
+
+        # Sanity check: lengths should match
+        assert len(cov_np) == len(cd_np) == len(emd_np), \
+            f"Length mismatch: coverage={len(cov_np)}, cd={len(cd_np)}, emd={len(emd_np)}"
+
+        # Plot: coverage vs CD and coverage vs EMD
+        import matplotlib.pyplot as plt
+
+        fig, axs = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
+
+        axs[0].scatter(cov_np, cd_np, s=8, alpha=0.6)
+        axs[0].set_title("Chamfer Distance vs Coverage")
+        axs[0].set_xlabel("Coverage")
+        axs[0].set_ylabel("Chamfer Distance")
+        axs[0].grid(True, linestyle="--", alpha=0.3)
+
+        axs[1].scatter(cov_np, emd_np, s=8, alpha=0.6)
+        axs[1].set_title("EMD vs Coverage")
+        axs[1].set_xlabel("Coverage")
+        axs[1].set_ylabel("Earth Mover's Distance")
+        axs[1].grid(True, linestyle="--", alpha=0.3)
+        
+        # Save figure instead of showing
+        out_path = os.path.join(log_dir, "coverage_vs_metrics.png")
+        plt.savefig(out_path, dpi=300)
+        plt.close(fig)
+        
+        # (Optional) Log the figure to W&B if you're already using it
+        if wandb.run is not None:
+            wandb.log({"coverage_vs_metrics": wandb.Image(fig)})
+            plt.close(fig)
 
 def sample_farthest_points(points, num_samples, return_index=False):
     b, c, n = points.shape
@@ -475,7 +522,6 @@ def get_network_data(data: dict[str, Any], key="orig"):
 
 def train(opt, rank, world_size):
     if rank == 0:
-        print(opt.log_dir, RUN.name)
         log_dir = os.path.join(opt.log_dir, RUN.name)
         checkpoints_dir = os.path.join(log_dir, CHECKPOINTS_DIR)
 

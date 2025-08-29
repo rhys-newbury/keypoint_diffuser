@@ -11,6 +11,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+import csv
+import re
 
 from ..utils.io import find_files, read_keypoints, read_pcd
 from ..utils.utils import normalize_to_box_multi
@@ -72,6 +74,15 @@ class ShapesPartial(torch.utils.data.Dataset):
             self.opt.category in self.CATEGORY2SYNSETOFFSET.values()
             and self.opt.test_category is None
         )
+
+        self.available_modes_list = ['default', 'myopia', 'patch', 'tac', 'all']
+        assert (
+            self.opt.partial_view_mode in self.available_modes_list
+        )
+        if self.opt.partial_view_mode == 'all':
+            self.mode_list = [m for m in self.available_modes_list if m != 'all']
+        else:
+            self.mode_list = [self.opt.partial_view_mode]
 
         self.mesh_dir = opt.mesh_dir
 
@@ -312,6 +323,17 @@ class ShapesPartial(torch.utils.data.Dataset):
         )
 
     def _get_partial_pointcloud_path(self, name, category=None):
+        n = random.randint(0, 4)
+        return os.path.join(
+            self.opt.points_dir,
+            (str(category).zfill(8) if category is not None else self.opt.category),
+            name,
+            "models",
+            f"partial_samples_{self.opt.partial_view_mode}_{n}.npy",
+            # different sample numbers are still in the same frame, no need to match
+        ), n
+    
+    def _get_coverage_csv_path(self, name, category=None):
         if self.opt.partial_view_mode is None:
             raise ValueError("Partial view mode is not set.")
         return os.path.join(
@@ -319,10 +341,9 @@ class ShapesPartial(torch.utils.data.Dataset):
             (str(category).zfill(8) if category is not None else self.opt.category),
             name,
             "models",
-            f"partial_samples_{self.opt.partial_view_mode}_{random.randint(0, 4)}.npy",
-            # different sample numbers are still in the same frame, no need to match
+            f"coverage_{self.opt.partial_view_mode}.csv",
         )
-        
+    
     def _get_mesh_path(self, name, category=None):
         return os.path.join(
             self.opt.mesh_dir,
@@ -413,9 +434,29 @@ class ShapesPartial(torch.utils.data.Dataset):
         points = torch.from_numpy(points).float()
 
         # get partial point cloud
-        partial = np.load(self._get_partial_pointcloud_path(name, category))
+        partial_path, n = self._get_partial_pointcloud_path(name, category)
+        partial = np.load(partial_path)
         partial = torch.from_numpy(partial).float()
 
+        # get partial point cloud coverage fraction
+        if is_test:
+            csv_path = self._get_coverage_csv_path(name, category)
+            with open(csv_path, newline="") as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    try:
+                        partial_path, coverage, radius = row
+                    except:
+                        continue
+                    m = re.search(r"_(\d+)\.npy$", partial_path)
+                    if m and int(m.group(1)) == n:
+                        coverage = float(coverage)
+                        radius = float(radius)
+                        break
+        else:
+            coverage = None
+            radius = None
+        
         # normalize point clouds
         points[:, :3], partial[:, :3], center, scale = self.normalize(points[:, :3], partial[:, :3])
         points = points.clone()
@@ -440,6 +481,8 @@ class ShapesPartial(torch.utils.data.Dataset):
             "cat": self.opt.category,
             "file": name,
             "category": category,
+            "coverage": coverage,
+            "radius": radius,
         }
         if pc_path.is_file() and is_test:
             pc = np.load(pc_path)

@@ -94,7 +94,7 @@ def EMD_CD(sample_pcs, ref_pcs, batch_size, reduced=True):
         "MMD-CD": cd,
         "MMD-EMD": emd,
     }
-    return results
+    return results, cd_lst, emd_lst
 
 
 if __name__ == "__main__":
