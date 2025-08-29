@@ -1,7 +1,7 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: kpd
+  name: ours
 spec:
   maxRetry: 1
   minAvailable: 1
@@ -37,7 +37,8 @@ spec:
                 [
                   "bash",
                   "train.sh",
-                  "train_keygrid.py"
+                  "train_keypoint_diffuser.py",
+                  "--batch_size=12"
                 ]
 
               workingDir: /app/scripts/train

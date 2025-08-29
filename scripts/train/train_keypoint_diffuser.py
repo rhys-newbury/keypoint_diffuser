@@ -182,7 +182,7 @@ def train(opt: AEConfig):
 
     kl_warmup_steps = opt.kl_warmup_steps
 
-    for _e in range(opt.epochs):
+    for e in range(opt.epochs):
         for _, data in enumerate(dataloader):
             target_shape_t = (
                 data["target_shape"]
@@ -258,7 +258,9 @@ def train(opt: AEConfig):
 
             if t % opt.save_interval == 0:
                 os.path.join(ckpt_dir, "outputs", "%07d" % t)
-                save_network(net, ckpt_dir, network_label="net", epoch_label=t)
+                save_network(
+                    net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=e
+                )
 
             iter_time = time.time() - iter_time_start
             iter_time_start = time.time()

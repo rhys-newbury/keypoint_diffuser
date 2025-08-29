@@ -207,13 +207,26 @@ class H5Dataset(Dataset):
 
         if self.transform:
             # Keypoint Diffuser wants deformed shapes.
-            transformed, deformed = self.transform(
-                {"coord": pc.cpu().numpy()}
-            )  # Apply transform
-            pc = {
-                "target_shape": pc,
-                **{f"orig_{key}": value.cuda() for key, value in transformed.items()},
-                **{f"deformed_{key}": value.cuda() for key, value in deformed.items()},
-            }
+            result = self.transform({"coord": pc.cpu().numpy()})
+
+            if isinstance(result, tuple) and len(result) == 2:
+                transformed, deformed = result
+                pc = {
+                    "target_shape": pc,
+                    **{
+                        f"orig_{key}": value.cuda()
+                        for key, value in transformed.items()
+                    },
+                    **{
+                        f"deformed_{key}": value.cuda()
+                        for key, value in deformed.items()
+                    },
+                }
+            else:
+                transformed = result
+                pc = {
+                    "target_shape": pc,
+                    **{f"orig_{key}": value for key, value in transformed.items()},
+                }
 
         return pc

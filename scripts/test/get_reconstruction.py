@@ -135,7 +135,7 @@ def make_loader(opt: argparse.Namespace) -> DataLoader:
                 ),
             ]
         )
-        if opt.model == "KeypointDiffuser"
+        if opt.model == "Ours"
         else None
     )
 
@@ -153,7 +153,7 @@ def make_loader(opt: argparse.Namespace) -> DataLoader:
         batch_size=opt.batch_size,
         shuffle=False,
         num_workers=opt.num_workers,
-        collate_fn=collate_fn if opt.model == "KeypointDiffuser" else None,
+        collate_fn=collate_fn if opt.model == "Ours" else None,
         drop_last=False,
     )
 

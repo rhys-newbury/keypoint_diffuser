@@ -43,4 +43,7 @@ The Git hooks can also be run manually with `pre-commit run --all-files`, and if
 
 ## Eval
 
+<!-- Need NFS for database. -->
 python3 plot_all.py --db "/run/user/1000/gvfs/smb-share:server=130.194.128.238,share=bryce-rhys/results.db"
+
+<!--  -->

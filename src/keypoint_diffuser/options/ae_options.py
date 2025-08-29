@@ -92,9 +92,6 @@ class AEConfig:
     max_taper_factor: float = 1.6
     max_rotation_angle: float = np.pi / 6
 
-    pcd_path: str = "/app/pcds"
-    annotation_json = "/app/annotations/cap.json"
-
 
 class AEOptions:
     def __init__(self):

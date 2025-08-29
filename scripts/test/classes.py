@@ -20,12 +20,18 @@ try:
     from baselines.diffusion_point_cloud.test_dpm import DPM
 except ImportError:
     DPM = None
+try:
+    from keypoint_diffuser.test_ours import Ours
+except ImportError:
+    Ours = None
 
 MODEL_CLASSES = {
     "SC3K": SC3K,
     "SM": SM,
     "KPD": KPD,
     "KeyGrid": KeyGrid,
+    "KeyGridOrig": KeyGrid,
     "DPM": DPM,
+    "Ours": Ours
     # Add more models here:
 }
