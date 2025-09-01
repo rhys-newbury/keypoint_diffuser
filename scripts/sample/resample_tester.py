@@ -128,7 +128,7 @@ def look_at(eye, center, up=np.array([0, 1, 0])):
     return model_view_matrix, vis_model_view_matrix
 
 
-def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, start_image_size=512, radius=2.0, max_image_size=2048, max_viewpoint_retries=10):
+def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, start_image_size=512, radius=2.0, max_image_size=2048, max_viewpoint_retries=10, remove_far_points=False):
     """
     Sample at least `num_samples` visible points from a single random view.
     If not enough points are captured, try new views up to `max_viewpoint_retries`.
@@ -144,6 +144,7 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
         # sample from half spherical surface (check coordinate system for which half, probably upper)
         phi = np.random.uniform(0, 2 * np.pi)
         theta = np.random.uniform(0, np.pi)
+        print(f"radius: {radius}")
         x = radius * np.sin(theta) * np.cos(phi)
         y = radius * np.sin(theta) * np.sin(phi)
         z = radius * np.cos(theta)
@@ -197,11 +198,11 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
         
         
         # visualise the scene
-        axis_mesh = pyrender.Mesh.from_trimesh(trimesh.creation.axis(axis_length=2, origin_size=0.001), smooth=False)
-        scene.add(axis_mesh, pose=axis_pose)
-        oaxis = trimesh.creation.axis(axis_length=2)
+        # axis_mesh = pyrender.Mesh.from_trimesh(trimesh.creation.axis(axis_length=2, origin_size=0.001), smooth=False)
+        # scene.add(axis_mesh, pose=axis_pose)
+        # oaxis = trimesh.creation.axis(axis_length=2)
         # oaxis.visual.face_colors = np.array([255, 255, 0, 255])  # yellow
-        origin_mesh = pyrender.Mesh.from_trimesh(oaxis, smooth=False)
+        # origin_mesh = pyrender.Mesh.from_trimesh(oaxis, smooth=False)
         # scene.add(origin_mesh, pose=np.eye(4))  # Add origin axis for reference
         # print("\n\n\ncamera_pose:")
         # print(camera_pose)
@@ -229,6 +230,16 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
             i = i.flatten()
             j = j.flatten()
             z = depth.flatten()
+                            
+            # for tac mode, remove points that are much further away than the closest point
+            if remove_far_points:
+                print(f"Removing far points with tac mode, threshold: {image_size / 2}")
+                min_dist = np.min(z[z > 0])  # Minimum depth value greater than zero
+                print(f"Minimum depth value: {min_dist}")
+                diff_threshold = 0.05
+                far = z > (min_dist + diff_threshold)
+                z[far] = 0.0  # Set far points to zero (not considered by depth image)
+                
             valid = z > 0
             x = (i[valid] - cx) * z[valid] / fx
             y = (j[valid] - cy) * z[valid] / fy
@@ -426,7 +437,8 @@ def process_file(i, data_root_dir, save_root_dir, mode="default"):
                                                                 start_image_size=args['start_image_size'],
                                                                 radius=args['radius'],
                                                                 max_image_size=args['max_image_size'],
-                                                                max_viewpoint_retries=args['max_viewpoint_retries'])
+                                                                max_viewpoint_retries=args['max_viewpoint_retries'],
+                                                                remove_far_points=args['remove_far_points'])
         
         # Sample the mesh for full point clouds, from the same frame
         
@@ -591,7 +603,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--src_dir", type=str, default="data/shape_data_eric", help="Root directory for the source mesh.")
     parser.add_argument("--dst_dir", type=str, default="data/shape_data_eric", help="Root directory for saving the resampled point clouds.")
-    parser.add_argument("--view_mode", type=str, default="default", help="View mode to resample the data. See resample.yaml for options.")
+    parser.add_argument("--mode", type=str, default="default", help="View mode to resample the data. See resample.yaml for options.")
     args = parser.parse_args()
     
     data_root_dir = Path(args.src_dir)
@@ -605,4 +617,4 @@ if __name__ == "__main__":
     shuffle(folders_to_run)
     
     for idx, i in tqdm(enumerate(folders_to_run), total=len(folders_to_run)):
-        process_file(i, data_root_dir, save_root_dir, args.view_mode)
+        process_file(i, data_root_dir, save_root_dir, args.mode)

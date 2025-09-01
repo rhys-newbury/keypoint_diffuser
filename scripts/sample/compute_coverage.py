@@ -13,7 +13,6 @@ from PIL import Image
 import pyrender
 import yaml
 import argparse
-from visualise_pc_data import visualise_file
 
 def estimate_spacing(points, k=36):
     """
@@ -53,10 +52,12 @@ def surface_coverage_pointwise(surface_points, partial_points, radius=None):
 
 
 
-def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default", overwrite=False, visualise=False):
+def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default", overwrite=False, visualise=False, output_csv=True):
+    # initialize
     path_list = []
     coverage_list = []
     radius_list = []
+    failed_list = []
     
     # Original pre-processed model file
     file_path = data_root_dir / Path(f"{i}/models/model_normalized2.obj")
@@ -87,14 +88,18 @@ def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default"
         print(i)
     sampled_points = None
     
-    # Load partial point cloud sampling options from yaml file    
     for n in range(5):
         save_path = save_root_dir / i / "models"
         
         partial_pc_path = save_path / f"partial_samples_{mode}_{n}.npy"
         
         # load the partial point cloud
-        partial_points = np.load(partial_pc_path)
+        try:
+            partial_points = np.load(partial_pc_path, allow_pickle=True)
+        except Exception as e:
+            print(e)
+            failed_list.append(partial_pc_path)
+            continue
         
         # calculate the coverage of the partial point cloud
         coverage, radius, covered_points, not_covered_points = surface_coverage_pointwise(surface_points, partial_points)
@@ -136,11 +141,11 @@ def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default"
     save_path.mkdir(parents=True, exist_ok=True)
     coverage_file = save_path / f"coverage_{mode}.csv"
     with open(coverage_file, "w") as f:
-        f.write("partial_pc_path,coverage\n")
+        f.write("partial_pc_path,coverage,radius\n")
         for path, coverage, radius in zip(path_list, coverage_list, radius_list):
-            f.write(f"{path},{coverage},{radius}\n")    
+            f.write(f"{path},{coverage},{radius}\n")
 
-    return coverage_list
+    return coverage_list, failed_list
 
 folders = {"02691156"}
 # folders = {"02691156", "03636649", "03467517", "02954340", "02958343"}    # airplane, lamp, guitar, cap, car
@@ -168,7 +173,20 @@ if __name__ == "__main__":
     
     coverage_list_list = []
     for idx, i in tqdm(enumerate(folders_to_run), total=len(folders_to_run)):
-        coverage_list = compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode=args.mode, overwrite=args.overwrite)
+        coverage_list, failed_list = compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode=args.mode, overwrite=args.overwrite)
         coverage_list_list.append(coverage_list)
         
+    coverage_list_list = np.array([c for l in coverage_list_list for c in l])
+    
+    plt.figure(figsize=(6,4))
+    plt.hist(coverage_list_list, bins=20, edgecolor='black', alpha=0.7)
+    plt.xlabel("Coverage")
+    plt.ylabel("Frequency")
+    plt.title("Distribution of Coverage Values")
+    plt.grid(alpha=0.3)
+    plt.yscale("log")
+    plt.savefig(f"coverage_distribution_{args.mode}.png", dpi=300, bbox_inches='tight')
+    plt.close()
+    
     print(f"Mean coverage for profile {args.mode}: {np.mean(coverage_list_list):.4f} ± {np.std(coverage_list_list):.4f}")
+    print(f"Failed files: {failed_list}")

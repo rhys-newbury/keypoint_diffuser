@@ -134,7 +134,7 @@ def generate_labels_for_sampled_points(sampled_points, seg_points, seg_labels):
 # from concurrent.futures import ThreadPoolExecutor
 seg_labels_ = None
 # count, total = 0,0
-def visualise_file(i, data_root_dir, mode, nin=None, different_n=False):
+def visualise_file(i, data_root_dir, mode, different_n=False, nin=None):
     for n in range(5):
         if nin is not None:
             n = nin
@@ -252,8 +252,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # manual_i = "02691156/75916f78e72f90984b70ddbaea6e513/"
-    manual_i = "02691156/86099a00dd63ac05aac413eef609e99b/"
-    visualise_file(manual_i, data_root_dir, args.mode, args.different_n)
+    # manual_i = "02691156/86099a00dd63ac05aac413eef609e99b/"
+    # visualise_file(manual_i, data_root_dir, args.mode, args.different_n)
     
     for idx, i in enumerate(folders_to_run):
         visualise_file(i, data_root_dir, args.mode, args.different_n)
