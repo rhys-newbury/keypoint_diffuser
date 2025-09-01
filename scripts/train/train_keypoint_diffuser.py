@@ -97,7 +97,7 @@ def get_network_data(data: dict[str, Any], key="orig"):
 def train(opt: AEConfig):
     ckpt_dir = opt.ckpt_dir / wandb.run.name
     ckpt_dir.mkdir()
-    save_train_run(opt.db, "KeyPointDiffuser", opt.category, ckpt_dir, opt.key_points)
+    save_train_run(opt.db, "Ours2", opt.category, ckpt_dir, opt.key_points)
 
     t = transforms.Compose(
         [
@@ -208,7 +208,7 @@ def train(opt: AEConfig):
             wandb.log({"diffusion_loss": diffusion_loss}, step=t)
             wandb.log({"kl_divergence": kl}, step=t)
 
-            fps = sample_farthest_points(target_shape_t, opt.key_points + 5).transpose(
+            fps = sample_farthest_points(target_shape_t, opt.key_points + 10).transpose(
                 2, 1
             )
 
@@ -277,8 +277,6 @@ def train(opt: AEConfig):
 
 
 if __name__ == "__main__":
-    print("SETUP IS COMPLETE!!!!!!!!!!!!!!!!")
-
     parser = AEOptions()
     opt = parser.parse()
 
@@ -287,7 +285,7 @@ if __name__ == "__main__":
     np.random.seed(seed)
 
     if opt.phase == "train":
-        RUN = wandb.init(project="diffuse_keypoints_sweep")
+        wandb.init(project=f"ours_{opt.category}_train", config=opt)
         wandb.run.log_code(".")
         train(opt)
 

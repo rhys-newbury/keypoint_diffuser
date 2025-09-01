@@ -1,7 +1,7 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: ours
+  name: ours-edm
 spec:
   maxRetry: 1
   minAvailable: 1
@@ -38,7 +38,8 @@ spec:
                   "bash",
                   "train.sh",
                   "train_keypoint_diffuser.py",
-                  "--batch_size=12"
+                  "--batch_size=12",
+                  "--use_edm=True"
                 ]
 
               workingDir: /app/scripts/train
