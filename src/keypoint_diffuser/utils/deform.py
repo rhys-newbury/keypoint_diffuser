@@ -3,17 +3,17 @@ import torch
 
 def apply_general_deformation(
     point_cloud: torch.Tensor,
-    max_stretch_factor: float = 1.2,
-    max_bending_factor: float = 0.8,
-    max_twist_factor: float = 0.9,
-    max_taper_factor: float = 0.6,
-    max_noise_std: float = 0.02,
+    max_stretch_factor: float = 2.2,
+    max_bending_factor: float = 1.8,
+    max_twist_factor: float = 1.9,
+    max_taper_factor: float = 1.6,
+    max_rotation_angle: float = torch.pi / 6,  # 30 degrees max
     *,
     apply_stretch: bool = True,
     apply_bend: bool = True,
     apply_twist: bool = True,
     apply_taper: bool = True,
-    apply_noise: bool = False,
+    apply_rotation: bool = True,
 ):
     """
     Applies a range of deformations (stretch, bend, twist, taper, noise)
@@ -30,7 +30,6 @@ def apply_general_deformation(
         apply_bend: Whether to apply bending.
         apply_twist: Whether to apply twisting.
         apply_taper: Whether to apply tapering.
-        apply_noise: Whether to apply noise.
 
     Returns:
         deformed_cloud: (B, N, 3) tensor of deformed points.
@@ -49,8 +48,10 @@ def apply_general_deformation(
     bending_factors = torch.rand(batch_size, device=device) * max_bending_factor
     twist_factors = torch.rand(batch_size, device=device) * max_twist_factor
     taper_factors = torch.rand(batch_size, device=device) * max_taper_factor
-    noise_std_factors = (
-        torch.rand(batch_size, device=device) * max_noise_std if apply_noise else None
+    rotation_angles = (
+        (torch.rand(batch_size, device=device) - 0.5) * 2 * max_rotation_angle
+        if apply_rotation
+        else torch.zeros(batch_size, device=device)
     )
 
     # 1. Stretching along X-axis
@@ -91,16 +92,21 @@ def apply_general_deformation(
 
         deformation_matrix = torch.bmm(deformation_matrix, taper_matrix)  # Apply taper
 
+    if apply_rotation:
+        cos_angle = torch.cos(rotation_angles)
+        sin_angle = torch.sin(rotation_angles)
+
+        rot_matrix = torch.eye(3, device=device).repeat(batch_size, 1, 1)
+        rot_matrix[:, 0, 0] = cos_angle
+        rot_matrix[:, 0, 2] = sin_angle
+        rot_matrix[:, 2, 0] = -sin_angle
+        rot_matrix[:, 2, 2] = cos_angle
+
+        deformation_matrix = torch.bmm(deformation_matrix, rot_matrix)
+
     # Apply deformation matrix to the point cloud
     deformed_cloud = torch.bmm(
         point_cloud, deformation_matrix.transpose(1, 2)
     )  # Apply transformation
-
-    # 5. Adding Noise (After transformation)
-    if apply_noise:
-        noise = torch.randn_like(deformed_cloud) * noise_std_factors.view(
-            batch_size, 1, 1
-        )
-        deformed_cloud += noise
 
     return deformed_cloud, deformation_matrix

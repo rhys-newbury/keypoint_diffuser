@@ -3,9 +3,6 @@ from collections import OrderedDict
 
 import numpy as np
 import torch
-from torch import nn
-
-from . import logger
 
 
 def load_network(net, path):
@@ -17,7 +14,6 @@ def load_network(net, path):
     From https://github.com/yifita/deep_cage
     """
     if isinstance(path, str):
-        logger.info(f"loading network from {path}")
         if path[-3:] == "pth":
             loaded_state = torch.load(path)
             if "states" in loaded_state:
@@ -33,12 +29,12 @@ def load_network(net, path):
 
     missingkeys, unexpectedkeys = network.load_state_dict(loaded_state, strict=False)
     if len(missingkeys) > 0:
-        logger.warn(
+        print(
             f"load_network {len(missingkeys)} missing keys",
             "\n".join(missingkeys),
         )
     if len(unexpectedkeys) > 0:
-        logger.warn(
+        print(
             f"load_network {len(unexpectedkeys)} unexpected keys",
             "\n".join(unexpectedkeys),
         )
@@ -79,133 +75,3 @@ def weights_init(m):
     elif isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
         torch.nn.init.constant_(m.bias, 0.0)
         torch.nn.init.constant_(m.weight, 1.0)
-
-
-class Conv1d(nn.Module):
-    """
-    1dconvolution with custom normalization and activation
-
-    From https://github.com/yifita/deep_cage
-    """
-
-    def __init__(
-        self,
-        in_channels,
-        out_channels,
-        kernel_size,
-        stride=1,
-        padding=0,
-        bias=True,
-        activation=None,
-        normalization=None,
-        momentum=0.01,
-        conv_params=None,
-    ):
-        super().__init__()
-        self.activation = activation
-        self.normalization = normalization
-        bias = not normalization and bias
-        self.conv = nn.Conv1d(
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride=stride,
-            padding=padding,
-            bias=bias,
-            **(conv_params or {}),
-        )
-
-        if normalization is not None:
-            if self.normalization == "batch":
-                self.norm = nn.BatchNorm1d(
-                    out_channels, affine=True, eps=0.001, momentum=momentum
-                )
-            elif self.normalization == "instance":
-                self.norm = nn.InstanceNorm1d(
-                    out_channels, affine=True, eps=0.001, momentum=momentum
-                )
-            else:
-                raise ValueError('only "batch/instance" normalization permitted.')
-
-        # activation
-        if activation is not None:
-            if self.activation == "relu":
-                self.act = nn.ReLU()
-            elif self.activation == "elu":
-                self.act = nn.ELU(alpha=1.0)
-            elif self.activation == "lrelu":
-                self.act = nn.LeakyReLU(0.1)
-            elif self.activation == "tanh":
-                self.act = nn.Tanh()
-            else:
-                raise ValueError('only "relu/elu/lrelu/tanh" implemented')
-
-    def forward(self, x, epoch=None):
-        x = self.conv(x)
-
-        if self.normalization is not None:
-            x = self.norm(x)
-
-        if self.activation is not None:
-            x = self.act(x)
-
-        return x
-
-
-class Linear(nn.Module):
-    """
-    1dconvolution with custom normalization and activation
-
-    From https://github.com/yifita/deep_cage
-    """
-
-    def __init__(
-        self,
-        in_channels,
-        out_channels,
-        bias=True,
-        activation=None,
-        normalization=None,
-        momentum=0.01,
-    ):
-        super().__init__()
-        self.activation = activation
-        self.normalization = normalization
-        bias = not normalization and bias
-        self.linear = nn.Linear(in_channels, out_channels, bias=bias)
-
-        if normalization is not None:
-            if self.normalization == "batch":
-                self.norm = nn.BatchNorm1d(
-                    out_channels, affine=True, eps=0.001, momentum=momentum
-                )
-            elif self.normalization == "instance":
-                self.norm = nn.InstanceNorm1d(
-                    out_channels, affine=True, eps=0.001, momentum=momentum
-                )
-            else:
-                raise ValueError('only "batch/instance" normalization permitted.')
-
-        # activation
-        if activation is not None:
-            if self.activation == "relu":
-                self.act = nn.ReLU()
-            elif self.activation == "elu":
-                self.act = nn.ELU(alpha=1.0)
-            elif self.activation == "lrelu":
-                self.act = nn.LeakyReLU(0.1)
-            elif self.activation == "tanh":
-                self.act = nn.Tanh()
-            else:
-                raise ValueError('only "relu/elu/lrelu/tanh" implemented')
-
-    def forward(self, x, epoch=None):
-        x = self.linear(x)
-
-        if self.normalization is not None:
-            x = self.norm(x)
-
-        if self.activation is not None:
-            x = self.act(x)
-
-        return x

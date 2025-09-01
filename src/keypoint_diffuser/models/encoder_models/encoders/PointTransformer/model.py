@@ -14,7 +14,7 @@ import spconv.pytorch as spconv
 import torch
 import torch_scatter
 from addict import Dict
-from timm.models.layers import DropPath
+from timm.layers import DropPath
 from torch import nn
 
 

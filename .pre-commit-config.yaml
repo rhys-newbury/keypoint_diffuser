@@ -33,8 +33,7 @@ repos:
     rev: 'v0.0.254'
     hooks:
       - id: ruff
-        args:
-          - --fix
+        args: [ --fix, --config=pyproject.toml ]
   - repo: local
     hooks:
       - id: pyright

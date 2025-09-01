@@ -1,7 +1,4 @@
-import time
-
 import numpy as np
-import pytorch3d.io
 import torch
 from einops import repeat
 
@@ -32,14 +29,6 @@ def sample_farthest_points(points, num_samples, return_index=False):
         return sampled, indexes
     else:
         return sampled
-
-
-def resample_mesh(mesh, n_points):
-    points, normals = pytorch3d.ops.sample_points_from_meshes(
-        mesh, n_points, return_normals=True
-    )
-    points = torch.cat([points[0], normals[0]], dim=-1)
-    return points
 
 
 def normalize_to_box(inp):
@@ -136,44 +125,6 @@ def normalize_to_box_multi(inp, pinp):
         raise ValueError()
 
     return inp, pinp, centroid, furthest_distance
-
-
-class Timer:
-    def __init__(self, name=None, acc=False, avg=False):
-        self.name = name
-        self.acc = acc
-        self.avg = avg
-        self.total = 0.0
-        self.iters = 0
-        self.tstart = time.time()
-
-    def __enter__(self):
-        self.start()
-
-    def __exit__(self, type_, value, traceback):
-        self.stop()
-
-    def start(self):
-        self.tstart = time.time()
-
-    def stop(self):
-        self.iters += 1
-        self.total += time.time() - self.tstart
-        if not self.acc:
-            self.reset()
-
-    def reset(self):
-        name_string = ""
-        if self.name:
-            name_string = "[" + self.name + "] "
-        value = self.total
-        msg = "Elapsed"
-        if self.avg:
-            value /= self.iters
-            msg = "Avg elapsed"
-        print(f"{name_string}{msg}: {value:.4f}")
-        if not self.avg:
-            self.total = 0.0
 
 
 def reparameterize(mu, logvar):

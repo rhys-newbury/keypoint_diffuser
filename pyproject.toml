@@ -12,8 +12,8 @@ authors = [{ name = "Your Name", email = "you@example.com" }]
 requires-python = ">=3.10"
 dependencies = [
     "PyYAML==6.0",
-    "torch==2.0.0",
-    "torchvision==0.15.0",
+    "torch",
+    "torchvision",
     "einops==0.8.1",
     "tqdm==4.64.1",
     "scipy==1.11.4",
@@ -21,11 +21,11 @@ dependencies = [
     "addict==2.4.0",
     "tensorboardX==2.6.2.2",
     "open3d==0.18.0",
-    "timm==1.0.15",
+    "timm",
     "ConfigArgParse==1.4",
     "pytorch3d==0.7.8",
-    "torch-scatter==2.1.2",
-    "spconv-cu116==2.3.6",
+    "torch-scatter",
+    "spconv-cu116",
 ]
 
 
@@ -45,7 +45,10 @@ ignore = [
     "FBT002", "FBT003",
     "N802", "N806", "N812", "NPY002",
     "PLR0913", "SIM115",
-    "S101", "PLR2004"
+    "S101", "PLR2004",
+    "B905", "A002", "N803", "N801", "PD011",
+    "E741", "A001", "FBT001", "S608"
+
 ]
 
 select = [

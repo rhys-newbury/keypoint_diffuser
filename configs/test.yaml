@@ -3,7 +3,7 @@ phase: test
 
 split: test
 
-# ckpt: /app/data/keypoints/logs/airplane-8kpt/checkpoints/net_final.pth
+ckpt: /app/data/keypoints/logs/airplane-8kpt/checkpoints/net_final.pth
 # ckpt: /app/data/keypoints/logs/autumn-waterfall-200/checkpoints/net_final.pth
 # ckpt: /app/data/keypoints/logs/likely-lion-32/checkpoints/net_5400.pth
 # ckpt: /home/worker/keypoint_diffuser/logs/smart-gorge-14/checkpoints/net_final.pth  # default

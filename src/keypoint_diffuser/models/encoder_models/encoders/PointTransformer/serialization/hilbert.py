@@ -154,9 +154,9 @@ def encode(locs, num_dims, num_bits):
 
     # Run the decoding process the other way.
     # Iterate forwards through the bits.
-    for bit in range(0, num_bits):
+    for bit in range(num_bits):
         # Iterate forwards through the dimensions.
-        for dim in range(0, num_dims):
+        for dim in range(num_dims):
             # Identify which ones have this bit active.
             mask = gray[:, dim, bit]
 

@@ -1,0 +1,8 @@
+name: airplane-8kpt
+
+category: airplane
+
+mesh_dir: data/shapenet/shape_data
+log_dir: logs
+
+key_points: 8
