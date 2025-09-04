@@ -6,7 +6,7 @@ ENV TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6+PTX"
 RUN apt-get update && \
     apt-get install -y  software-properties-common && \
     add-apt-repository ppa:ubuntu-toolchain-r/test && \
-    apt-get install -y git gcc g++ libegl1 libgl1 libgomp1 libgl1-mesa-glx libgl1-mesa-dri git rsync gcc-4.8 libstdc++6 libc6 p7zip-full python3-packaging libgl1-mesa-dev libosmesa6-dev
+    apt-get install -y git gcc g++ libegl1 libgl1 libgomp1 libgl1-mesa-glx libgl1-mesa-dri git rsync gcc-4.8 libstdc++6 libc6 p7zip-full python3-packaging libgl1-mesa-dev libosmesa6-dev libglfw3
 
 COPY requirements.txt requirements.txt
 
@@ -23,12 +23,12 @@ WORKDIR /app
 COPY src/keypoint_diffuser/utils/emd_loss /app/src/keypoint_diffuser/utils/emd_loss
 RUN cd /app/src/keypoint_diffuser/utils/emd_loss && python3 setup.py install
 
-RUN groupadd -g 1000 user && useradd -u 1000 -g 1000 -m user
+RUN groupadd -g 1000 user && useradd -s /bin/bash -u 1000 -g 1000 -m user
 
 COPY --chown=user:user . /app
 
 # Install keypoint_diffuser
 RUN cd /app && pip install -e .
 
-WORKDIR app
+WORKDIR /app
 USER user

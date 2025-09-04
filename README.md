@@ -27,6 +27,18 @@ To test the trained model run:
 python scripts/train_ae.py -c configs/airplane-8kpt.yaml -t configs/test.yaml
 ```
 
+## Data processing
+For using ShapeNetCore from [source](https://huggingface.co/datasets/ShapeNet/ShapeNetCore): 
+Get the metadata for object IDs and names by downloading the [full taxonomy file]() and filter for only the first top level object name:
+```
+jq '[ .[]
+      | { synsetId: .metadata.name,
+          name: ( .metadata.label | split(",")[0] | ltrimstr(" ") | rtrimstr(" ") ),
+          numInstances: .metadata.numInstances } ]' \
+   shapenetcore.taxonomy.json > filtered_taxonomy.json
+
+```
+
 ## Contributing
 
 ### Git hooks
@@ -40,10 +52,3 @@ Once those two steps are done, the Git hooks will be run automatically at every 
 The Git hooks can also be run manually with `pre-commit run --all-files`, and if needed they can be skipped (not recommended) with `git commit --no-verify`.
 
 **Note:** you may have to run `pre-commit run --all-files` manually a couple of times to make it pass when you commit, as each formatting tool will first format the code and fail the first time but should pass the second time.
-
-## Eval
-
-<!-- Need NFS for database. -->
-python3 plot_all.py --db "/run/user/1000/gvfs/smb-share:server=130.194.128.238,share=bryce-rhys/results.db"
-
-<!--  -->

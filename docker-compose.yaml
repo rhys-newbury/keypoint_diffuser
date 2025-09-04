@@ -1,24 +1,27 @@
-version: '3.8'
-
 services:
   service:
       volumes:
         - ./:/app
         - /tmp/.X11-unix:/tmp/.X11-unix
         - ~/.Xauthority:/root/.Xauthority
-        - ~/.bash_history:/home/taco/.bash_history
+        - ~/.bash_history:/home/eric/.bash_history
         - ~/.gitconfig:/etc/gitconfig
-        - ~/.ssh:/home/taco/.ssh
+        - ~/.ssh:/home/eric/.ssh
         - /mnt/wslg:/mnt/wslg
-        - /media/taco/shape_data:/app/data/shapenet/shape_data
-        - /media/taco/shape_data/keypoints/logs:/app/data/keypoints
-        - /media/taco/nfs:/app/data/smplx
-
+        # initial data
+        - /mnt/shape_data:/mnt/slow/shape_data
+        # own data
+        - /mnt/smb/shapenetcorev2-source:/mnt/slow/shapenetcorev2-source
+        # new shapnetcorev2
+        - /mnt/smb/shapenetcorev2-h5:/mnt/slow/shapenetcorev2-h5
+        
+      runtime: nvidia
       network_mode: "host"
-      build:
-        dockerfile: Dockerfile
-        context: .
-      image: ${REGISTRY_URL}/keypoint_diffuser:latest
+      # build:
+      #   dockerfile: Dockerfile
+      #   context: .
+      # image: ${REGISTRY_URL}/keypoint:1.0
+      image: keypoint_diffuser:latest
 
       tty: true
       stdin_open: true
@@ -30,8 +33,9 @@ services:
           reservations:
             devices:
               - driver: nvidia
-                count: 1
-                capabilities: [gpu]
+                count: all
+                capabilities: [gpu, compute, utility, graphics]
       environment:
-        - DISPLAY=:0
+        - DISPLAY=$DISPLAY
         - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}
+        - NVIDIA_VISIBLE_DEVICES=all

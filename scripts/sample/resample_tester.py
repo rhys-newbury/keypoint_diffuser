@@ -601,8 +601,8 @@ folders = {"02691156"}
 # folders =   {"03636649", "03467517", "02954340", "02958343"}  # lamp, guitar, cap, car
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--src_dir", type=str, default="data/shape_data_eric", help="Root directory for the source mesh.")
-    parser.add_argument("--dst_dir", type=str, default="data/shape_data_eric", help="Root directory for saving the resampled point clouds.")
+    parser.add_argument("--src_dir", type=str, default="data/shapenetcorev2-source", help="Root directory for the source mesh.")
+    parser.add_argument("--dst_dir", type=str, default="data/shapenetcorev2-source", help="Root directory for saving the resampled point clouds.")
     parser.add_argument("--mode", type=str, default="default", help="View mode to resample the data. See resample.yaml for options.")
     args = parser.parse_args()
     

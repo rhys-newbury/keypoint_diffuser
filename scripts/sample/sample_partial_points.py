@@ -7,12 +7,29 @@ import open3d as o3d
 import trimesh
 import numpy as np
 import pymeshlab
-import matplotlib.pyplot as plt
-from scipy.spatial import cKDTree
 from PIL import Image
 import pyrender
 import yaml
 import argparse
+from synset_utils import names_to_synsets
+from coverage_utils import compute_coverage_for_profile, plot_coverage_histogram
+
+TRAINABLE = [
+    "airplane",
+    "bed",
+    "bottle",
+    "cap",
+    "car",
+    "chair",
+    "guitar",
+    "helmet",
+    "knife",
+    "motorbike",
+    "mug",
+    "table",
+    "vessel",
+]
+
 
 def create_axis_pointcloud(pose=np.eye(4), length=0.1, step=0.01):
     """
@@ -155,7 +172,7 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
                 j = j.flatten()
                 z = depth.flatten()
                             
-                # for tac mode, remove points that are much further away than the closest point
+                # for simulating contact, remove points that are much further away than the closest point
                 if remove_far_points:
                     try:
                         # print(f"Removing far points with tac mode")
@@ -225,30 +242,6 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
     return None, None
     # raise RuntimeError(f"Failed to sample {num_samples} points from any viewpoint after {max_viewpoint_retries} tries.")
 
-def _get_seg_points_path(folder, name):
-    return os.path.join("/mnt/slow/Shapenetcore_benchmark", folder, 'points', name + '.pts')
-
-def _get_seg_labels_path(folder, name):
-    return os.path.join("/mnt/slow/Shapenetcore_benchmark", folder, 'points_label', name + '.seg')
-
-def generate_labels_for_sampled_points(sampled_points, seg_points, seg_labels):
-    """
-    Generate labels for sampled points based on the nearest neighbor in the labeled segmentation points.
-    Args:
-        sampled_points (ndarray): Sampled points from the mesh (shape: [N, 3]).
-        seg_points (ndarray): Points with known labels (shape: [M, 3]).
-        seg_labels (ndarray): Labels for `seg_points` (shape: [M]).
-    Returns:
-        sampled_labels (ndarray): Labels for the sampled points (shape: [N]).
-    """
-    # Build KDTree from segmentation points
-    kdtree = cKDTree(seg_points)
-    # Find the nearest neighbor for each sampled point
-    distances, indices = kdtree.query(sampled_points, k=5)
-    # Assign labels based on the nearest neighbor
-    sampled_labels = seg_labels[indices]
-    return sampled_labels
-
 def sample_surface_points(mesh, num_points):
     # Get the triangles and vertices from the mesh
     triangles = mesh.triangles  # (n, 3, 3) array
@@ -284,9 +277,6 @@ def sample_surface_points(mesh, num_points):
     
     return np.array(sampled_points)
 
-# from concurrent.futures import ThreadPoolExecutor
-seg_labels_ = None
-# count, total = 0,0
 def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=False):
     failed_list = []
     
@@ -406,41 +396,90 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=Fals
         
     # save the failed list to a file
     if failed_list:
-        with open("failed_list.txt", 'a') as f:
+        with open(f"failed_list_resample_{mode}.txt", 'a') as f:
             # log time
             dt = np.datetime64('now') + np.timedelta64(10, 'h')
             f.write(f"{dt}\n")
             for item in failed_list:
                 f.write(f"{item}\n")
 
-# folders = {"02691156", "03797390"}  # airplane, mug
-# folders = {"02691156", "03636649", "03467517", "02954340", "02958343"}    # airplane, lamp, guitar, cap, car
-# folders =   {"03636649", "03467517", "02954340", "02958343"}  # lamp, guitar, cap, car
-# folders = {"02691156", "03636649",}
-# folders = {"02691156", "03467517", "02954340", "02958343", "03797390", "04225987"}    # airplane, lamp, guitar, cap, car, mug, skateboard
-# folders = {"03467517", "02954340", "02958343", "03797390", "04225987"}    # lamp, guitar, cap, car, mug, skateboard
-folders = None    # do everything
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--src_dir", type=str, default="/mnt/slow/shape_data_eric", help="Root directory for the source mesh.")
-    parser.add_argument("--dst_dir", type=str, default="/mnt/slow/shape_data_eric", help="Root directory for saving the resampled point clouds.")
-    parser.add_argument("--mode", type=str, default="default", help="View mode to resample the data. See resample.yaml for options.")
-    parser.add_argument("--overwrite", action='store_true', help="Overwrite existing files if they exist.")
+    parser.add_argument("--src", type=str, default="/mnt/slow/shapenetcorev2-source", help="Root directory for the source mesh.")
+    parser.add_argument("--dst", type=str, default="", help="Root directory for saving the resampled point clouds. Same as src_dir if not specified.")
+    parser.add_argument("--mode", type=str, default="default", help="View mode to resample the data. See resample.yaml for options. 'all' to process all available modes.")
+    parser.add_argument("--taxonomy", type=str, default="filtered_taxonomy.json",
+                    help="Path to taxonomy JSON (has 'synsetId' and 'name').")
+    parser.add_argument("--classes", type=str, default="",
+                    help="Class names to include (comma/space-separated). Example: 'airplane, mug car', leave blank for all default trainable classes.")
+    parser.add_argument("--make_h5", action='store_true', help="Create H5 files from the sampled partial point clouds.")
+    parser.add_argument("--overwrite", action='store_true', help="Overwrite any existing files.")
+
     args = parser.parse_args()
     
-    data_root_dir = Path(args.src_dir)
-    save_root_dir = Path(args.dst_dir)
+    data_root_dir = Path(args.src)
+    save_root_dir = Path(args.dst) if args.dst_dir != "" else Path(args.src_dir)
+    tax_dir = data_root_dir / args.taxonomy
     
+    # determine which classes to run
+    if args.classes == "":
+        classes_list = TRAINABLE
+    elif "," in args.classes:
+        classes_list = [s.strip() for s in args.classes.split(",") if s.strip()]
+    else:
+        classes_list = [args.classes]
+    
+    synset_ids = names_to_synsets(classes_list, tax_dir)
+    folders = set(synset_ids)   # <-- set of synset IDs
+    
+    # gather all folders to run
     folders_to_run = []
     for l in open(data_root_dir / "list.txt"):
-        if folders is None:
-            # resample for everything in the list
+        if l.strip().split("/")[1] in folders:
             folders_to_run.append(l.strip())
-        else:
-            if l.strip().split("/")[1] in folders:
-                folders_to_run.append(l.strip())
-    print(len(folders_to_run))
+            
+    # check all instances of the selected classes exist in folders_to_run
+    instance_count = {synset: 0 for synset in synset_ids}
+    for entry in folders_to_run:
+        synset = entry.split("/")[1]
+        if synset in instance_count:
+            instance_count[synset] += 1
+    if any(count == 0 for count in instance_count.values()):
+        print("Warning: Some classes have zero instances in the dataset:")
+        for synset, count in instance_count.items():
+            if count == 0:
+                print(f" - {synset}")
+    
+    print(f"Total object instances: {len(folders_to_run)}")
     shuffle(folders_to_run)
     
-    for idx, i in tqdm(enumerate(folders_to_run), total=len(folders_to_run)):
-        process_file(i, data_root_dir, save_root_dir, args.mode, args.overwrite)
+    # determine which modes to run
+    mode_list = []
+    if args.mode == "all":
+        with open(data_root_dir / "resample.yaml", 'r') as stream:
+            modes = yaml.safe_load(stream)
+        mode_list = list(modes.keys())
+    elif ',' in args.mode:
+        mode_list = [s.strip() for s in args.mode.split(",") if s.strip()]
+    else:
+        mode_list = [args.mode]
+        # note "surface" is an exception not in the yaml file, it samples from the original mesh surface
+    
+    print(f"Modes to run: {mode_list if mode_list else [args.mode]}")
+    
+    # input("Press Enter to continue...")
+    for mode in mode_list:
+        coverage_list_list = []
+        print(f"Processing mode: {mode}")
+         # loop through each object folder
+        for idx, i in tqdm(enumerate(folders_to_run), total=len(folders_to_run)):
+            # sample partial point clouds
+            process_file(i, data_root_dir, save_root_dir, mode, args.overwrite)
+            # calculate coverage for the sampled point clouds
+            coverage_list = compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode, overwrite=args.overwrite)
+            # collate for plotting
+            coverage_list_list.append(coverage_list)
+            
+        # plot histograms on a per-mode basis (?)
+        coverage_values = np.array([c for l in coverage_list_list for c in l])
+        plot_coverage_histogram(save_root_dir, coverage_values, mode)

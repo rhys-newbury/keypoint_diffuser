@@ -238,7 +238,7 @@ folders = {"02691156"}    # airplane
 # folders = {"03797390"}  # mug
 # folders =   {"02691156", "02954340", "02958343", "03001627", "03467517", "03624134", "03642806", "03790512", "03797390", "04225987", "04379243", "03948459", "02773838", "04099429", "03261776", "03636649"}
 if __name__ == "__main__":
-    data_root_dir = Path("data/shape_data_eric")
+    data_root_dir = Path("data/shapenetcorev2-source")
     folders_to_run = []
     for l in open(data_root_dir / "list.txt"):
         if l.strip().split("/")[1] in folders:
