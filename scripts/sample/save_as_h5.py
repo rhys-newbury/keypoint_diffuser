@@ -30,6 +30,7 @@ def pack_partials_to_h5(
     shard_size: int = 8192,
     taxonomy_path: str = "/mnt/slow/shapenetcorev2-source/filtered_taxonomy.json",
     include_only_names: Optional[List[str]] = None,  # list of class names to include
+    alias_for_names: Optional[Dict[str, str]] = None,  # user-input alias map
 ):
     """
     Creates <dst>/<dataset_name>_hdf5_{num_point}/{split}{k}.h5 plus sidecar JSONs.
@@ -39,7 +40,7 @@ def pack_partials_to_h5(
     name2synset, synset2name = load_taxonomy_maps(taxonomy_path)
     allowed_synsets: Optional[set] = None
     if include_only_names:
-        sel = names_to_synsets(include_only_names, taxonomy_path)
+        sel = names_to_synsets(include_only_names, taxonomy_path, aliases=alias_for_names)
         allowed_synsets = set(sel)
 
     out_root = save_root_dir / f"{dataset_name}_hdf5_{num_point}"
@@ -129,6 +130,23 @@ TRAINABLE = [
     "vessel",
 ]
 
+# map taxonomy names <-> KEYS names (when they differ)
+KEYS_ALIASES = {
+    "motorcycle": "motorbike",
+    "loudspeaker": "speaker",
+    "cell phone": "cellphone",
+    "computer keyboard": "keyboard",
+    "display": "monitor",
+    "can": "tin_can",
+    # also the other direction
+    "motorbike": "motorcycle",
+    "speaker": "loudspeaker",
+    "cellphone": "cell phone",
+    "keyboard": "computer keyboard",
+    "monitor": "display",
+    "tin_can": "can",
+}
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--src", type=str, default="/mnt/slow/shapenetcorev2-source", help="Root directory for the source mesh.")
@@ -171,4 +189,6 @@ if __name__ == "__main__":
         shard_size=args.shard_size,
         taxonomy_path=args.taxonomy,
         include_only_names=TRAINABLE,
+        alias_for_names=KEYS_ALIASES
+
     )

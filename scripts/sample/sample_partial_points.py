@@ -1,5 +1,7 @@
 import os
 os.environ["PYOPENGL_PLATFORM"] = "osmesa"
+os.environ["PYGLET_HEADLESS"] = "True"      # make pyglet headless
+os.environ.setdefault("PYOPENGL_PLATFORM", "osmesa")  # or "egl" if you have EGL/NVIDIA
 from pathlib import Path
 from random import shuffle
 from tqdm import tqdm
@@ -30,6 +32,22 @@ TRAINABLE = [
     "vessel",
 ]
 
+# map taxonomy names <-> KEYS names (when they differ)
+KEYS_ALIASES = {
+    "motorcycle": "motorbike",
+    "loudspeaker": "speaker",
+    "cell phone": "cellphone",
+    "computer keyboard": "keyboard",
+    "display": "monitor",
+    "can": "tin_can",
+    # also the other direction
+    "motorbike": "motorcycle",
+    "speaker": "loudspeaker",
+    "cellphone": "cell phone",
+    "keyboard": "computer keyboard",
+    "monitor": "display",
+    "tin_can": "can",
+}
 
 def create_axis_pointcloud(pose=np.eye(4), length=0.1, step=0.01):
     """
@@ -418,7 +436,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     data_root_dir = Path(args.src)
-    save_root_dir = Path(args.dst) if args.dst_dir != "" else Path(args.src_dir)
+    save_root_dir = Path(args.dst) if args.dst != "" else Path(args.src)
     tax_dir = data_root_dir / args.taxonomy
     
     # determine which classes to run
@@ -428,8 +446,7 @@ if __name__ == "__main__":
         classes_list = [s.strip() for s in args.classes.split(",") if s.strip()]
     else:
         classes_list = [args.classes]
-    
-    synset_ids = names_to_synsets(classes_list, tax_dir)
+    synset_ids = names_to_synsets(classes_list, tax_dir, aliases=KEYS_ALIASES)
     folders = set(synset_ids)   # <-- set of synset IDs
     
     # gather all folders to run
@@ -475,11 +492,13 @@ if __name__ == "__main__":
         for idx, i in tqdm(enumerate(folders_to_run), total=len(folders_to_run)):
             # sample partial point clouds
             process_file(i, data_root_dir, save_root_dir, mode, args.overwrite)
-            # calculate coverage for the sampled point clouds
-            coverage_list = compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode, overwrite=args.overwrite)
-            # collate for plotting
-            coverage_list_list.append(coverage_list)
+            if not mode == "surface":
+                # calculate coverage for the sampled point clouds
+                coverage_list = compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode)
+                # collate for plotting
+                coverage_list_list.append(coverage_list)
             
-        # plot histograms on a per-mode basis (?)
-        coverage_values = np.array([c for l in coverage_list_list for c in l])
-        plot_coverage_histogram(save_root_dir, coverage_values, mode)
+        if not mode == "surface":
+            # plot histograms on a per-mode basis (?)
+            coverage_values = np.array([c for l in coverage_list_list for c in l])
+            plot_coverage_histogram(save_root_dir, coverage_values, mode)

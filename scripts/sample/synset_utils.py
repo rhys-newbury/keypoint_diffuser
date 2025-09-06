@@ -59,13 +59,34 @@ KEYS = {
     "microphone": 35,
 }
 
+# map taxonomy names <-> KEYS names (when they differ)
+KEYS_ALIASES = {
+    "motorcycle": "motorbike",
+    "loudspeaker": "speaker",
+    "cell phone": "cellphone",
+    "computer keyboard": "keyboard",
+    "display": "monitor",
+    "can": "tin_can",
+    # also the other direction
+    "motorbike": "motorcycle",
+    "speaker": "loudspeaker",
+    "cellphone": "cell phone",
+    "keyboard": "computer keyboard",
+    "monitor": "display",
+    "tin_can": "can",
+}
+
 def name_to_label_for_keys(taxonomy_name: str) -> int:
-    """Map taxonomy display name -> KEYS label id."""
+    """Map taxonomy display name -> KEYS label id (with alias fallback)."""
     nm = _norm(taxonomy_name)
     # first try exact (normalized) key
     for k in KEYS.keys():
         if _norm(k) == nm:
             return KEYS[k]
+    # fallback via alias map
+    for tname, keys_name in KEYS_ALIASES.items():
+        if _norm(tname) == nm:
+            return KEYS[keys_name]
     raise KeyError(f"No KEYS label for taxonomy name {taxonomy_name!r}")
 
 def _norm(s: str) -> str:
@@ -83,7 +104,8 @@ def load_taxonomy_maps(taxonomy_path: str) -> Tuple[Dict[str, str], Dict[str, st
     synset2name = {r["synsetId"]: r["name"] for r in rows}
     return name2synset, synset2name
 
-def names_to_synsets(names: List[str], taxonomy_path: str) -> List[str]:
+def names_to_synsets(names: List[str], taxonomy_path: str, 
+                     aliases: Optional[Dict[str, str]] = KEYS_ALIASES) -> List[str]:
     """
     Map a list of class names (user input) to synsetIds using taxonomy.
     """
@@ -91,6 +113,8 @@ def names_to_synsets(names: List[str], taxonomy_path: str) -> List[str]:
     out = []
     for n in names:
         k = _norm(n)
+        if aliases and _norm(n) in {_norm(a) for a in aliases.keys()}:
+            k = _norm(aliases[n])  # map alias to canonical name for taxonomy lookup
         if k not in name2synset:
             raise KeyError(f"Unknown class name: {n!r}")
         out.append(name2synset[k])

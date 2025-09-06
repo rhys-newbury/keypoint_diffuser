@@ -1,0 +1,42 @@
+default: {
+  num_samples: 5000,
+  fov_degrees: 75,
+  start_image_size: 512,
+  radius: 2.0,
+  max_image_size: 2048,
+  max_viewpoint_retries: 10, 
+  remove_far_points: False
+}
+
+
+myopia: {
+  num_samples: 5000,
+  fov_degrees: 20, 
+  start_image_size: 512, 
+  radius: 1.0,
+  max_image_size: 2048, # was 1024 before
+  max_viewpoint_retries: 10, 
+  remove_far_points: False
+}
+
+
+tac: {
+  num_samples: 5000,
+  fov_degrees: 5,
+  start_image_size: 512,
+  radius: 0.5,
+  max_image_size: 2048,
+  max_viewpoint_retries: 10,
+  remove_far_points: True
+}
+
+
+patch: {
+  num_samples: 5000,
+  fov_degrees: 10,
+  start_image_size: 512,
+  radius: 1.0,
+  max_image_size: 2048,
+  max_viewpoint_retries: 10,
+  remove_far_points: True
+}

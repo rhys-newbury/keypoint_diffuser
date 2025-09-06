@@ -57,6 +57,10 @@ def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default"
     Compute the coverage of partial point clouds against the surface point cloud.
     Coverage values are calculated on a per-object instance basis.
     """
+    # if mode is surface then should just skip
+    if mode == "surface":
+        return
+    
     # initialize
     path_list = []
     coverage_list = []
@@ -89,8 +93,7 @@ def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default"
         # load the surface point clouds
         surface_points = np.load(data_root_dir / i / "models" / "surface_samples.npy")
     except Exception:
-        print(i)
-    sampled_points = None
+        print(data_root_dir / i / "models" / "surface_samples.npy")
     
     for n in range(5):
         save_path = save_root_dir / i / "models"
