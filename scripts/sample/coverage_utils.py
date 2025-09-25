@@ -52,7 +52,7 @@ def surface_coverage_pointwise(surface_points, partial_points, radius=None):
 
 
 
-def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default", visualise=False, output_csv=True):
+def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default", visualise=False, max_n=5, output_csv=True):
     """
     Compute the coverage of partial point clouds against the surface point cloud.
     Coverage values are calculated on a per-object instance basis.
@@ -70,6 +70,7 @@ def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default"
     # Original pre-processed model file
     file_path = data_root_dir / Path(f"{i}/models/model_normalized2.obj")
     if not file_path.is_file():
+        tqdm.write(f"{file_path} not found")
         return
     # if all((output_path.parent / f"new_samples_{n}.npy").is_file() for n in range(5)):
     #     return
@@ -93,9 +94,10 @@ def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default"
         # load the surface point clouds
         surface_points = np.load(data_root_dir / i / "models" / "surface_samples.npy")
     except Exception:
-        print(data_root_dir / i / "models" / "surface_samples.npy")
+        tqdm.write("Failed to load surface points")
+        tqdm.write(data_root_dir / i / "models" / "surface_samples.npy")
     
-    for n in range(5):
+    for n in range(max_n):
         save_path = save_root_dir / i / "models"
         
         partial_pc_path = save_path / f"partial_samples_{mode}_{n}.npy"
@@ -104,7 +106,7 @@ def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default"
         try:
             partial_points = np.load(partial_pc_path, allow_pickle=True)
         except Exception as e:
-            print(e)
+            tqdm.write(str(e))
             failed_list.append(partial_pc_path)
             continue
         
@@ -184,7 +186,7 @@ def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default"
 
     return coverage_list
 
-def plot_coverage_histogram(save_root_dir, coverage_values, mode):
+def plot_coverage_histogram(save_root_dir, coverage_values, mode, log_scale=False):
     """
     Plot histogram of coverage values and save to file.
     Meant for values on a per-mode basis.
@@ -195,7 +197,8 @@ def plot_coverage_histogram(save_root_dir, coverage_values, mode):
     plt.ylabel("Frequency")
     plt.title(f"Distribution of Coverage Values: Mean {np.mean(coverage_values):.4f} ± std {np.std(coverage_values):.4f}")
     plt.grid(alpha=0.3)
-    plt.yscale("log")
+    if log_scale:
+        plt.yscale("log")
     plt.savefig(save_root_dir / f"coverage_distribution_{mode}.png", dpi=300, bbox_inches='tight')
     plt.close()
     

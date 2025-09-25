@@ -13,7 +13,7 @@ from PIL import Image
 import pyrender
 import yaml
 import argparse
-from synset_utils import names_to_synsets
+from synset_utils import load_taxonomy_maps, names_to_synsets, synsets_to_names
 from coverage_utils import compute_coverage_for_profile, plot_coverage_histogram
 
 TRAINABLE = [
@@ -30,6 +30,14 @@ TRAINABLE = [
     "mug",
     "table",
     "vessel",
+]
+
+# the added classes compared to the initially used subset
+TRAINABLE_DIFF = [
+    "bed",
+    "bottle",
+    "helmet",
+    "vessel"
 ]
 
 # map taxonomy names <-> KEYS names (when they differ)
@@ -201,7 +209,8 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
                         z[far] = 0.0  # Set far points to zero (not considered by depth image)
                     except Exception as e:
                         # print(e)
-                        print("No valid points to reduce")
+                        # print("No valid points to reduce")
+                        pass
                     
                 valid = z > 0
                 x = (i[valid] - cx) * z[valid] / fx
@@ -249,14 +258,14 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
                         visible_points_world = visible_points_world[indices]
                     return visible_points_world, camera_pose
                 image_size *= 2  # Increase resolution
-            print(f"Attempt {attempt+1}: Max resolution reached, trying new viewpoint...")
+            tqdm.write(f"Attempt {attempt+1}: Max resolution reached, trying new viewpoint...")
             
         # some objects are really small for some reason, sample from a smaller radius
         radius *= 0.5  # Reduce radius for next attempt
-        print(f"Failed to sample {num_samples} points from any viewpoint after {max_viewpoint_retries} tries. Trying smaller radius: {radius}")
+        tqdm.write(f"Failed to sample {num_samples} points from any viewpoint after {max_viewpoint_retries} tries. Trying smaller radius: {radius}")
         
     # failed to sample after all attempts. skip and log the model path causing the error
-    print(f"Failed to sample {num_samples} points from any viewpoint after {max_viewpoint_retries} tries.")
+    tqdm.write(f"Failed to sample {num_samples} points from any viewpoint after {max_viewpoint_retries} tries.")
     return None, None
     # raise RuntimeError(f"Failed to sample {num_samples} points from any viewpoint after {max_viewpoint_retries} tries.")
 
@@ -295,12 +304,13 @@ def sample_surface_points(mesh, num_points):
     
     return np.array(sampled_points)
 
-def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=False):
+def process_file(i, data_root_dir, save_root_dir, mode="default", num_samples=5000, max_n=5, overwrite=False, debug=False):
     failed_list = []
     
     # Original pre-processed model file
     file_path = data_root_dir / Path(f"{i}/models/model_normalized2.obj")
     if not file_path.is_file():
+        tqdm.write(f"{file_path} not found")
         return
     # if all((output_path.parent / f"new_samples_{n}.npy").is_file() for n in range(5)):
     #     return
@@ -309,7 +319,8 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=Fals
         # print(f"File already exists: {simple_path}")
         pass
     else:       
-        input(f"File does not exist: {simple_path}. Press Enter to continue.")
+        # input(f"File does not exist: {simple_path}. Press Enter to continue.")
+        tqdm.write(f"File does not exist: {simple_path}")
         # Filter down the original model to a simpler version
         ms = pymeshlab.MeshSet()
         ms.load_new_mesh(str(file_path))
@@ -321,46 +332,65 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=Fals
                         boundaryweight=1.0)  # High weight to preserve boundaries
         ms.save_current_mesh(simple_path)
     try:
-        # Fill single traingle and single quad holes in the mesh. twice?
-        simplified_trimesh = trimesh.load(simple_path)
-        
-        simplified_trimesh.fill_holes()
-        simplified_trimesh.fill_holes()
-        
         if mode == "surface":
             mesh = trimesh.load(file_path)
             mesh.fill_holes()
             mesh.fill_holes()
+        else:
+            # Fill single traingle and single quad holes in the mesh. twice?
+            simplified_trimesh = trimesh.load(simple_path)
+            
+            simplified_trimesh.fill_holes()
+            simplified_trimesh.fill_holes()
         
     except Exception:
-        print(i)
+        tqdm.write(f"Failed to load simplified mesh under {i}")
+        # redo the mesh simplification then try again
+        # Filter down the original model to a simpler version
+        ms = pymeshlab.MeshSet()
+        ms.load_new_mesh(str(file_path))
+        tqdm.write(f"type of {file_path} is {type(ms)}")
+        # Apply mesh simplification while preserving the boundary
+        ms.apply_filter('meshing_decimation_quadric_edge_collapse',
+                        targetfacenum=2000,  # Target number of faces
+                        preservenormal=True,
+                        preservetopology=True,  # Prevents the creation of holes
+                        boundaryweight=1.0)  # High weight to preserve boundaries
+        ms.save_current_mesh(simple_path)
+        
+        simplified_trimesh = trimesh.load(simple_path)
+        tqdm.write(f"type of simplified mesh is {type(simplified_trimesh)}")
+            
+        simplified_trimesh.fill_holes()
+        simplified_trimesh.fill_holes()
     sampled_points = None
     
     # processing for surface sampling
     if mode == "surface":
-        # sample points from the original mesh instead of the simplified mesh
-        surface_points = sample_surface_points(mesh, num_points=20000)
         save_path = save_root_dir / i / "models"
         surface_pc_path = save_path / f"surface_samples.npy"
         # skip if the file already exists
         if surface_pc_path.is_file():
-            # print(f"File already exists: {surface_pc_path}")
+            tqdm.write(f"File already exists: {surface_pc_path}")
             if not overwrite:
                 return
-        # print(f"Processing: {surface_pc_path}")
+        # sample points from the original mesh instead of the simplified mesh
+        surface_points = sample_surface_points(mesh, num_points=10000)
+        tqdm.write(f"Processing: {surface_pc_path}")
         # save the points
         save_path.mkdir(parents=True, exist_ok=True)
-        np.save(surface_pc_path, surface_points)
+        if not debug:
+            np.save(surface_pc_path, surface_points)
         return
             
     # Load partial point cloud sampling options from yaml file
     with open(data_root_dir / "resample.yaml", 'r') as stream:
         args = yaml.safe_load(stream)[mode]
     
-    for n in range(5):
+    for n in range(max_n):
         save_path = save_root_dir / i / "models"
         
-        partial_pc_path = save_path / f"partial_samples_{mode}_{n}.npy"
+        partial_pc_path = save_path / f"partial_samples_{mode}_{num_samples}_{n}.npy"
         
         # skip if the file already exists
         if partial_pc_path.is_file():
@@ -372,7 +402,7 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=Fals
         
         # Sample the mesh for partial point clouds
         sampled_points, camera_pose = sample_visible_points_from_single_view(simplified_trimesh,
-                                                                num_samples=args['num_samples'],
+                                                                num_samples=num_samples,
                                                                 fov_degrees=args['fov_degrees'],
                                                                 start_image_size=args['start_image_size'],
                                                                 radius=args['radius'],
@@ -382,7 +412,7 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=Fals
         
         # if no points were sampled successfully then both outputs will be None
         if sampled_points is None or camera_pose is None:
-            print(f"Failed to sample points for {save_root_dir / i}. Skipping...")
+            tqdm.write(f"Failed to sample points for {save_root_dir / i}. Skipping...")
             failed_list.append(save_root_dir / i)
             break
         
@@ -409,8 +439,9 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", overwrite=Fals
         # print(f"Saving to: {save_path / f'partial_samples_{mode}_{n}.npy'}')")
         
         # save the points
-        save_path.mkdir(parents=True, exist_ok=True)
-        np.save(save_path / f"partial_samples_{mode}_{n}.npy", sampled_points)
+        if not debug:
+            save_path.mkdir(parents=True, exist_ok=True)
+            np.save(save_path / f"partial_samples_{mode}_{n}.npy", sampled_points)
         
     # save the failed list to a file
     if failed_list:
@@ -430,8 +461,12 @@ if __name__ == "__main__":
                     help="Path to taxonomy JSON (has 'synsetId' and 'name').")
     parser.add_argument("--classes", type=str, default="",
                     help="Class names to include (comma/space-separated). Example: 'airplane, mug car', leave blank for all default trainable classes.")
-    parser.add_argument("--make_h5", action='store_true', help="Create H5 files from the sampled partial point clouds.")
+    parser.add_argument("--num_samples", type=int, default=5000,
+                        help="Number of points to sample for each point cloud")
+    parser.add_argument("--n", type=int, default=5, 
+                    help="Number of point clouds to sample for each instance")
     parser.add_argument("--overwrite", action='store_true', help="Overwrite any existing files.")
+    parser.add_argument("--debug", action='store_true', help="Run without saving for debug.")
 
     args = parser.parse_args()
     
@@ -446,29 +481,37 @@ if __name__ == "__main__":
         classes_list = [s.strip() for s in args.classes.split(",") if s.strip()]
     else:
         classes_list = [args.classes]
+    name2synset, synset2name = load_taxonomy_maps(tax_dir)
+        
     synset_ids = names_to_synsets(classes_list, tax_dir, aliases=KEYS_ALIASES)
-    folders = set(synset_ids)   # <-- set of synset IDs
+    folders = synset_ids   # <-- list of synset IDs
     
     # gather all folders to run
-    folders_to_run = []
+    folders_dict = {entry: [] for entry in classes_list}
+    # list contains dirs using synset ids
     for l in open(data_root_dir / "list.txt"):
         if l.strip().split("/")[1] in folders:
-            folders_to_run.append(l.strip())
+            # get index of id and convert to class name
+            i = folders.index(l.strip().split("/")[1])
+            # write dir into list with class name as key
+            folders_dict[classes_list[i]].append(l.strip())
             
     # check all instances of the selected classes exist in folders_to_run
-    instance_count = {synset: 0 for synset in synset_ids}
-    for entry in folders_to_run:
-        synset = entry.split("/")[1]
-        if synset in instance_count:
-            instance_count[synset] += 1
+    instance_count = {entry: 0 for entry in classes_list}
+    for entry in folders_dict.keys():
+        if entry in classes_list:
+            instance_count[entry] += 1
     if any(count == 0 for count in instance_count.values()):
         print("Warning: Some classes have zero instances in the dataset:")
-        for synset, count in instance_count.items():
+        for entry, count in instance_count.items():
             if count == 0:
-                print(f" - {synset}")
+                print(f" - {entry}")
     
-    print(f"Total object instances: {len(folders_to_run)}")
-    shuffle(folders_to_run)
+    total_len = 0
+    for l in folders_dict.values():
+        total_len += len(l)
+    print(f"Classes to run: {list(folders_dict.keys())}")
+    print(f"Total object instances: {total_len}")
     
     # determine which modes to run
     mode_list = []
@@ -485,20 +528,28 @@ if __name__ == "__main__":
     print(f"Modes to run: {mode_list if mode_list else [args.mode]}")
     
     # input("Press Enter to continue...")
-    for mode in mode_list:
-        coverage_list_list = []
-        print(f"Processing mode: {mode}")
-         # loop through each object folder
-        for idx, i in tqdm(enumerate(folders_to_run), total=len(folders_to_run)):
-            # sample partial point clouds
-            process_file(i, data_root_dir, save_root_dir, mode, args.overwrite)
-            if not mode == "surface":
-                # calculate coverage for the sampled point clouds
-                coverage_list = compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode)
-                # collate for plotting
-                coverage_list_list.append(coverage_list)
-            
-        if not mode == "surface":
-            # plot histograms on a per-mode basis (?)
-            coverage_values = np.array([c for l in coverage_list_list for c in l])
-            plot_coverage_histogram(save_root_dir, coverage_values, mode)
+    for c in classes_list:
+        print(f"Processing class: {c}")
+        folders_to_run = folders_dict[c]
+        for mode in mode_list:
+            coverage_list_list = []
+            print(f"Processing mode: {mode}")
+            # loop through each object folder
+            for idx, i in tqdm(enumerate(folders_to_run), total=len(folders_to_run)):
+                # sample partial point clouds
+                process_file(i, data_root_dir, save_root_dir, mode, max_n=args.n, overwrite=args.overwrite, debug=args.debug)
+                if mode != "surface":
+                    # calculate coverage for the sampled point clouds
+                    coverage_list = compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode, max_n=args.n, output_csv=(not args.debug))
+                    # collate for plotting
+                    if not coverage_list is None:
+                        coverage_list_list.append(coverage_list)
+                
+            if mode != "surface":
+                # plot histograms on a per-mode basis (?)
+                try:
+                    coverage_values = np.array([c for l in coverage_list_list for c in l])
+                    plot_coverage_histogram(save_root_dir, coverage_values, mode)
+                except Exception as e:
+                    tqdm.write(str(e))
+                    tqdm.write(f"Skipping plotting for class {c} mode {mode}")

@@ -119,3 +119,21 @@ def names_to_synsets(names: List[str], taxonomy_path: str,
             raise KeyError(f"Unknown class name: {n!r}")
         out.append(name2synset[k])
     return out
+
+def synsets_to_names(
+    synsets: List[str],
+    taxonomy_path: str,
+) -> List[str]:
+    """
+    Reverse of names_to_synsets: map a list of synsetIds to taxonomy display names.
+    """
+    _, synset2name = load_taxonomy_maps(taxonomy_path)
+    out: List[str] = []
+    for s in synsets:
+        sid = str(s).strip()
+        name = synset2name.get(sid)
+        if name is None:
+            raise KeyError(f"Unknown synsetId: {sid!r}")
+        else:
+            out.append(name)
+    return out
