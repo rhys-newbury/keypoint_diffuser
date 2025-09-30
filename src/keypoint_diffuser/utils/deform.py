@@ -45,7 +45,6 @@ def apply_general_deformation(
     stretch_factors = 1.0 + (
         torch.rand(batch_size, device=device) * (max_stretch_factor - 1.0)
     )
-    bending_factors = torch.rand(batch_size, device=device) * max_bending_factor
     twist_factors = torch.rand(batch_size, device=device) * max_twist_factor
     taper_factors = torch.rand(batch_size, device=device) * max_taper_factor
     rotation_angles = (
@@ -56,16 +55,43 @@ def apply_general_deformation(
 
     # 1. Stretching along X-axis
     if apply_stretch:
-        deformation_matrix[:, 0, 0] = stretch_factors  # Stretch X-axis
+        rand_dir = torch.randn(batch_size, 3, device=device)
+        rand_dir = rand_dir / rand_dir.norm(dim=1, keepdim=True)  # normalize
+
+        # Outer products v ⊗ v for each batch element → (B,3,3)
+        outer = rand_dir.unsqueeze(2) @ rand_dir.unsqueeze(1)
+
+        # Identity matrices for each batch → (B,3,3)
+        I = torch.eye(3, device=device).expand(batch_size, 3, 3)
+
+        # Scale factor per batch → (B,1,1)
+        scale = (stretch_factors - 1.0).view(batch_size, 1, 1)
+
+        I = torch.eye(3, device=device).expand(batch_size, 3, 3)
+        scale = (stretch_factors - 1.0).view(batch_size, 1, 1)  # (B,1,1)
+        S = I + scale * outer  # (B,3,3)
+        deformation_matrix = torch.bmm(S, deformation_matrix)  # compose
 
     # 2. Bending (Modify Y-coordinates using sinusoidal function)
     if apply_bend:
-        bending_offsets = bending_factors.view(batch_size, 1) * torch.sin(
-            point_cloud[:, :, 0] * 3.14
-        )
-        deformation_matrix[:, 1, 0] = bending_offsets.mean(
-            dim=1
-        )  # Apply bending in Y direction
+        # pick random in/out axes (distinct)
+        bend_axis_in = torch.randint(0, 3, (batch_size,), device=device)
+        bend_axis_out = (
+            bend_axis_in + torch.randint(1, 3, (batch_size,), device=device)
+        ) % 3
+
+        # sample a bend coefficient per batch (e.g., U[-max_bend, max_bend])
+        bend_coeff = (
+            torch.rand(batch_size, device=device) * 2 - 1
+        ) * max_bending_factor  # (B,)
+
+        # build B = I + bend_coeff * E_{out,in}
+        I = torch.eye(3, device=device).expand(batch_size, 3, 3).clone()
+        mask = torch.zeros(batch_size, 3, 3, device=device)
+        mask[torch.arange(batch_size, device=device), bend_axis_out, bend_axis_in] = 1.0
+        Bmat = I + bend_coeff.view(batch_size, 1, 1) * mask  # (B,3,3)
+
+        deformation_matrix = torch.bmm(Bmat, deformation_matrix)  # compose
 
     # 3. Twisting (Rotation about X-axis)
     if apply_twist:

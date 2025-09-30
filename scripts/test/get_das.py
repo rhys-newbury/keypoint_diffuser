@@ -118,6 +118,7 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
             entry = kpn_ds[i + j]
             cid = entry["class_id"]
             mid = entry["model_id"]
+
             pc_path = opt.pcd_path / cid / f"{mid}.pcd"
             pc = naive_read_pcd(pc_path)
 
@@ -164,6 +165,8 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
 
 def fwd_alignment_scores(kpn_ds, predicted):
     preds = []
+    assignments = []  # store GT indices for each pred
+
     for entry, kpcd, nfact in zip(kpn_ds, predicted["kpcd"], predicted["nfact"]):
         dmax, dmin = nfact
 
@@ -171,16 +174,21 @@ def fwd_alignment_scores(kpn_ds, predicted):
         for kp in entry["keypoints"]:
             nkp = (kp["xyz"] - dmin) / (dmax - dmin)
             nkp = 2.0 * (nkp - 0.5)
-
             ground_truths.append(nkp)
+
         ground_truths = np.array(ground_truths)
+
         dist = np.sum(
             (np.expand_dims(kpcd, 1) - np.expand_dims(ground_truths, 0)) ** 2, axis=-1
         )
+
         argminfwd = np.argmin(dist, -1)
         preds.append([entry["keypoints"][argm]["semantic_id"] for argm in argminfwd])
-    acc = [np.mean(np.array(pa) == np.array(pb)) for pa in preds for pb in preds]
-    return np.mean(acc)
+        assignments.append(argminfwd)
+
+    preds_arr = np.array(preds)  # shape (B, K)
+    eq = preds_arr[:, None, :] == preds_arr[None, :, :]
+    return eq.mean(), assignments
 
 
 def bwd_alignment_scores(kpn_ds, predicted):
@@ -255,14 +263,22 @@ def mIoU_curve_plot(kpn_ds, predicted, pcd_path):
 
 
 def save_numpy_geoms(
-    kpn_ds, predicted, out_Q, opt, out_dir: Path = Path("geom_np"), vis_max=1000
+    kpn_ds,
+    predicted,
+    out_Q,
+    opt,
+    out_dir: Path = Path("geom_np"),
+    vis_max=1000,
+    scores=None,  # (B,) per-entry scores
+    assignments=None,  # list of arrays, each (K,) mapping pred→gt
 ):
     """
     Saves raw numpy arrays for each sample:
       - pc.npy        : normalized point cloud
       - pred_kp.npy   : predicted keypoints (normalized)
       - gt_kp.npy     : ground truth keypoints (normalized)
-    Also dumps meta.json with ids + config.
+      - assign.npy    : assignment indices (len=K, each entry = gt index)
+    Also dumps meta.json with ids, config, and optional score.
     """
 
     out_dir.mkdir(exist_ok=True)
@@ -272,28 +288,29 @@ def save_numpy_geoms(
     for idx, (entry, kpcd_norm, nfact) in enumerate(
         zip(kpn_ds, predicted["kpcd"], predicted["nfact"])
     ):
-        if saved >= vis_max or idx >= len(flat_Q):
-            break
-
         pc = np.asarray(flat_Q[idx], dtype=np.float32)  # normalized pc
         pred = np.asarray(kpcd_norm, dtype=np.float32)  # normalized preds
+
         # normalize GT with nfact
+        pcmax, pcmin = nfact
         gt = []
         for kp in entry["keypoints"]:
             xyz = np.asarray(kp["xyz"], dtype=np.float32)
-            pcmax, pcmin = nfact
             nkp = (xyz - pcmin) / (pcmax - pcmin)
             nkp = 2.0 * (nkp - 0.5)
-
             gt.append(nkp)
         gt = np.asarray(gt, dtype=np.float32)
 
         # save per-sample folder
         dst = out_dir / opt.category / entry["model_id"]
-        dst.mkdir(exist_ok=True)
+        dst.mkdir(exist_ok=True, parents=True)
         np.save(dst / "pc.npy", pc)
         np.save(dst / "pred_kp.npy", pred)
         np.save(dst / "gt_kp.npy", gt)
+
+        # save assignments if available
+        if assignments is not None:
+            np.save(dst / "assign.npy", np.asarray(assignments[idx], dtype=np.int64))
 
         meta = {
             "model": opt.model,
@@ -304,6 +321,8 @@ def save_numpy_geoms(
             "num_pred": int(pred.shape[0]),
             "num_gt": int(gt.shape[0]),
         }
+        if scores is not None:
+            meta["score"] = float(scores[idx])
         with open(dst / "meta.json", "w") as f:
             json.dump(meta, f, indent=2)
 
@@ -381,15 +400,34 @@ if __name__ == "__main__":
     model.load_model(opt.ckpt, opt)
 
     kpn_ds, predicted, out_Q = run_prediction(model, opt)
-    if opt.save:
-        save_numpy_geoms(
-            kpn_ds, predicted, out_Q, opt, out_dir=Path("output") / opt.model
-        )
 
-    fwd = fwd_alignment_scores(kpn_ds, predicted)
+    fwd, assignments = fwd_alignment_scores(kpn_ds, predicted)
+
+    preds_arr = np.array(
+        [
+            [entry["keypoints"][j]["semantic_id"] for j in assign]
+            for entry, assign in zip(kpn_ds, assignments)
+        ]
+    )
+    eq = preds_arr[:, None, :] == preds_arr[None, :, :]
+    pairwise = eq.mean(axis=-1)
+    np.fill_diagonal(pairwise, 1.0)
+    entry_scores = pairwise.mean(axis=1)  # (B,)
+
     bwd = bwd_alignment_scores(kpn_ds, predicted)
     dual = (fwd + bwd) / 2.0
     miou_at_01 = mIoU_curve_plot(kpn_ds, predicted, opt.pcd_path)
+
+    if opt.save:
+        save_numpy_geoms(
+            kpn_ds,
+            predicted,
+            out_Q,
+            opt,
+            out_dir=Path("geom_np"),
+            scores=entry_scores,
+            assignments=assignments,
+        )
 
     print("Forward Alignment Score:", fwd)
     print("Backward Alignment Score:", bwd)

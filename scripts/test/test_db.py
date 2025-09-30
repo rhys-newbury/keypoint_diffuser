@@ -5,8 +5,6 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
-from classes import MODEL_CLASSES
-
 
 EPOCH_RE = re.compile(r"(?P<k>\d+)kp_(?P<epoch>\d+)\.pth$", re.IGNORECASE)
 
@@ -81,7 +79,7 @@ def main():
     )
     ap.add_argument("--pcd-path", type=Path, default=Path("/app/pcds"))
     ap.add_argument("--batch-size", type=int, default=32)
-    ap.add_argument("--only-algo", choices=MODEL_CLASSES.keys())
+    ap.add_argument("--only-algo")
     ap.add_argument("--only-category")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--keep-going", action="store_true")
@@ -164,7 +162,7 @@ def main():
                 cmd = [
                     "python3",
                     str(args.script),
-                    algo,  # subcommand: SC3K / SM
+                    "Ours",  # subcommand: SC3K / SM
                     "--ckpt",
                     str(ckpt_path),
                     "--annotation-json",
