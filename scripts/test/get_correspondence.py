@@ -56,6 +56,9 @@ for model_name, model_cls in MODEL_CLASSES.items():
     )
     try_add_arg(subparser, "--db-path", type=Path, default=Path("results.db"))
     try_add_arg(subparser, "--save", action="store_true")
+    try_add_arg(
+        subparser, "--label_path", type=Path, default=Path("../../copied_points")
+    )
 
 # ----------------------------
 # Utilities
@@ -108,8 +111,6 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
 
     kpn_ds = json.load(open(opt.annotation_json))
     out_kpcd = []
-    out_nfact = []
-    out_Q = []
     labels = []
 
     for i in tqdm.tqdm(
@@ -124,10 +125,7 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
             mid = entry["model_id"]
 
             pc_path = (
-                Path("../../copied_points")
-                / mid
-                / "models"
-                / "point_resampled_labeled.npy"
+                opt.label_path / cid / mid / "models" / "point_resampled_labeled.npy"
             )
             if not pc_path.exists():
                 continue
@@ -151,17 +149,14 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
             T, _, _, pc_aligned = icp_align_identity(pcn, orig_pcn)
             pc_aligned = np.concatenate([pc_aligned, pc_labels[:, None]], axis=1)
 
-            out_nfact.append([pcmax, pcmin])
             Q.append(orig_pcn)
             labels.append(pc_aligned)
 
         if len(Q) == 1:
             Q.append(Q[-1])
-            out_nfact.append(out_nfact[-1])
 
         with torch.no_grad():
             Q = np.array(Q)
-            out_Q.append(Q)
             T_nb = []
             for i in range(Q.shape[0]):
                 data = {"coord": Q[i]}

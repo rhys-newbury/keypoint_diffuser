@@ -26,8 +26,7 @@ def list_ckpts(path_str: str) -> list[Path]:
         raise FileNotFoundError(f"No .pth files found under {p}")
 
     # Try epoch-aware sort first
-    with_epochs = []
-    others = []
+    with_epochs, others = [], []
     for f in pths:
         m = EPOCH_RE.search(f.name)
         if m:
@@ -39,7 +38,6 @@ def list_ckpts(path_str: str) -> list[Path]:
     if with_epochs:
         with_epochs.sort(key=lambda x: x[0])  # earliest -> latest
         result.extend([f for _, f in with_epochs])
-    # Append the rest ordered by mtime
     result.extend(sorted(others, key=lambda f: f.stat().st_mtime))
     return result
 
@@ -69,32 +67,61 @@ def already_evaluated(
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Loop train_runs and call get_das for all checkpoints."
+        description="Loop train_runs and evaluate checkpoints (DAS and/or Correlation)."
     )
     ap.add_argument(
         "--db", type=Path, required=True, help="Path to results.db (has train_runs)"
     )
-    ap.add_argument(
-        "--script", type=Path, default=Path("get_das.py"), help="Path to get_das.py"
-    )
     ap.add_argument("--pcd-path", type=Path, default=Path("/app/pcds"))
+    ap.add_argument("--label-path", type=Path, default=Path("/mnt/slow2/shape-data"))
+
     ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--only-algo")
     ap.add_argument("--only-category")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--keep-going", action="store_true")
-    # DB that get_das writes into (defaults to same file as --db)
+
+    # What to run
+    ap.add_argument(
+        "--mode",
+        choices=["das", "corr", "both"],
+        default="both",
+        help="Which evaluation(s) to run per checkpoint.",
+    )
+
+    # Scripts
+    ap.add_argument(
+        "--das-script", type=Path, default=Path("get_das.py"), help="Path to DAS script"
+    )
+    ap.add_argument(
+        "--corr-script",
+        type=Path,
+        default=Path("get_correspondence.py"),
+        help="Path to Correlation script",
+    )
+
+    # DB passed through to the child script(s)
     ap.add_argument(
         "--eval-db-path",
         type=Path,
         default=None,
-        help="DB passed to get_das --db-path (default: same as --db)",
+        help="DB path passed to child scripts via --db-path (default: same as --db)",
     )
+
+    # Table names (for existence checks / child overrides)
     ap.add_argument(
-        "--table-name",
+        "--das-table",
         type=str,
         default="runs",
+        help="Table name to check/populate for DAS (default: runs)",
     )
+    ap.add_argument(
+        "--corr-table",
+        type=str,
+        default="runs_correlation",
+        help="Table name to check/populate for correlation (default: runs_correlation)",
+    )
+
     # Optional limits/filters
     ap.add_argument(
         "--start-epoch",
@@ -106,11 +133,11 @@ def main():
         "--limit", type=int, default=None, help="Process at most N checkpoints per row"
     )
     args = ap.parse_args()
+
     eval_db_path = args.eval_db_path or args.db
 
     con = sqlite3.connect(str(args.db))
     cur = con.cursor()
-
     # Expect columns: id, algo, category, ckpt_dir, key_points
     q = "SELECT id, algo, category, ckpt_dir, key_points FROM train_runs"
     clauses, params = [], []
@@ -130,6 +157,21 @@ def main():
     if not rows:
         print("No matching rows.")
         return
+
+    def run_cmd(cmd, rid, label):
+        print("→", " ".join(cmd))
+        if args.dry_run:
+            print(f"[run_id={rid}] (dry-run) {label} OK")
+            return 0
+        rc = subprocess.run(cmd).returncode
+        if rc != 0:
+            msg = f"[run_id={rid}] {label} failed code {rc}"
+            if args.keep_going:
+                print("!!", msg)
+                return rc
+            raise SystemExit(msg)
+        print(f"[run_id={rid}] ✓ {label} done")
+        return rc
 
     for rid, algo, category, ckpt_dir, key_points in rows:
         try:
@@ -153,46 +195,65 @@ def main():
                 continue
 
             for ckpt_path in ckpt_list:
-                if already_evaluated(
-                    eval_db_path, ckpt_path, algo, category, args.table_name
+                # DAS
+                if args.mode in ("das", "both") and not already_evaluated(
+                    eval_db_path, ckpt_path, algo, category, args.das_table
                 ):
-                    continue
+                    annotation_json = Path("/app/annotations") / f"{category}.json"
+                    cmd_das = [
+                        "python3",
+                        str(args.das_script),
+                        algo,
+                        "--ckpt",
+                        str(ckpt_path),
+                        "--annotation-json",
+                        str(annotation_json),
+                        "--pcd-path",
+                        str(args.pcd_path),
+                        "--batch-size",
+                        str(args.batch_size),
+                        "--key-points",
+                        str(key_points),
+                        "--category",
+                        str(category),
+                        "--db-path",
+                        str(eval_db_path),
+                        "--table-name",
+                        args.das_table,
+                    ]
+                    run_cmd(cmd_das, rid, "get_das")
+                    # else: already done; skip
 
-                annotation_json = Path("/app/annotations") / f"{category}.json"
-                cmd = [
-                    "python3",
-                    str(args.script),
-                    "Ours",  # subcommand: SC3K / SM
-                    "--ckpt",
-                    str(ckpt_path),
-                    "--annotation-json",
-                    str(annotation_json),
-                    "--pcd-path",
-                    str(args.pcd_path),
-                    "--batch-size",
-                    str(args.batch_size),
-                    "--key-points",
-                    str(key_points),
-                    "--category",
-                    str(category),
-                    "--db-path",
-                    str(eval_db_path),
-                ]
-
-                print("→", " ".join(cmd))
-                if args.dry_run:
-                    print(f"[run_id={rid}] (dry-run) OK")
-                    continue
-
-                rc = subprocess.run(cmd).returncode
-                if rc != 0:
-                    msg = f"[run_id={rid}] get_das failed ({ckpt_path}) code {rc}"
-                    if args.keep_going:
-                        print("!!", msg)
-                        continue
-                    raise SystemExit(msg)
-
-                print(f"[run_id={rid}] ✓ done {ckpt_path}")
+                # Correlation
+                if args.mode in ("corr", "both") and not already_evaluated(
+                    eval_db_path, ckpt_path, algo, category, args.corr_table
+                ):
+                    annotation_json = Path("/app/annotations") / f"{category}.json"
+                    cmd_corr = [
+                        "python3",
+                        str(args.corr_script),
+                        algo,
+                        "--ckpt",
+                        str(ckpt_path),
+                        "--annotation-json",
+                        str(annotation_json),
+                        "--pcd-path",
+                        str(args.pcd_path),
+                        "--batch-size",
+                        str(args.batch_size),
+                        "--key-points",
+                        str(key_points),
+                        "--category",
+                        str(category),
+                        "--db-path",
+                        str(eval_db_path),
+                        "--table-name",
+                        args.corr_table,
+                        "--label-path",
+                        str(args.label_path),
+                    ]
+                    run_cmd(cmd_corr, rid, "get_correspondence")
+                    # else: already done; skip
 
         except Exception as e:
             if args.keep_going:
