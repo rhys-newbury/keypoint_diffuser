@@ -57,7 +57,7 @@ for model_name, model_cls in MODEL_CLASSES.items():
     try_add_arg(subparser, "--db-path", type=Path, default=Path("results.db"))
     try_add_arg(subparser, "--save", action="store_true")
     try_add_arg(
-        subparser, "--label_path", type=Path, default=Path("../../copied_points")
+        subparser, "--label-path", type=Path, default=Path("../../copied_points")
     )
 
 # ----------------------------

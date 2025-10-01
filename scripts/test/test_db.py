@@ -247,8 +247,6 @@ def main():
                         str(category),
                         "--db-path",
                         str(eval_db_path),
-                        "--table-name",
-                        args.corr_table,
                         "--label-path",
                         str(args.label_path),
                     ]
