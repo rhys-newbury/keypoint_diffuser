@@ -52,13 +52,19 @@ def surface_coverage_pointwise(surface_points, partial_points, radius=None):
 
 
 
-def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default", visualise=False, max_n=5, output_csv=True):
+def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default", visualise=False, max_n=5, overwrite=False, output_csv=True):
     """
     Compute the coverage of partial point clouds against the surface point cloud.
+    Partial point clouds are read from file.
     Coverage values are calculated on a per-object instance basis.
     """
     # if mode is surface then should just skip
     if mode == "surface":
+        return
+    
+    # check for existing
+    coverage_file_path = save_root_dir / i / "models" / f"coverage_{mode}.csv"
+    if coverage_file_path.is_file() and not overwrite:
         return
     
     # initialize
@@ -66,15 +72,16 @@ def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default"
     coverage_list = []
     radius_list = []
     failed_list = []
+    file_path = data_root_dir / Path(f"{i}/models/model_normalized2.obj")
+    simple_path = str(file_path).replace('model_normalized2', "simplified_mesh")
+    
     
     # Original pre-processed model file
-    file_path = data_root_dir / Path(f"{i}/models/model_normalized2.obj")
     if not file_path.is_file():
         tqdm.write(f"{file_path} not found")
         return
     # if all((output_path.parent / f"new_samples_{n}.npy").is_file() for n in range(5)):
     #     return
-    simple_path = str(file_path).replace('model_normalized2', "simplified_mesh")
     if Path(simple_path).is_file():
         # print(f"File already exists: {simple_path}")
         pass
@@ -90,6 +97,7 @@ def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default"
                         preservetopology=True,  # Prevents the creation of holes
                         boundaryweight=1.0)  # High weight to preserve boundaries
         ms.save_current_mesh(simple_path)
+    
     try:
         # load the surface point clouds
         surface_points = np.load(data_root_dir / i / "models" / "surface_samples.npy")
@@ -103,12 +111,20 @@ def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default"
         partial_pc_path = save_path / f"partial_samples_{mode}_{n}.npy"
         
         # load the partial point cloud
-        try:
-            partial_points = np.load(partial_pc_path, allow_pickle=True)
-        except Exception as e:
-            tqdm.write(str(e))
-            failed_list.append(partial_pc_path)
-            continue
+        for idx in range(5):  # try max of 5 times, sometimes the file is still being saved and need to be loaded again
+            try:
+                partial_points = np.load(partial_pc_path, allow_pickle=True)
+                break
+            except Exception as e:
+                pass
+                # tqdm.write(f"Error when loading {partial_pc_path}, trying again")
+                # tqdm.write(str(e))
+                # continue
+            if idx == 4:
+                failed_list.append(partial_pc_path)
+                tqdm.write(f"Partial point cloud at {partial_pc_path} does not exist.")
+                return
+
         
         # calculate the coverage of the partial point cloud
         coverage, radius, covered_points, not_covered_points = surface_coverage_pointwise(surface_points, partial_points)

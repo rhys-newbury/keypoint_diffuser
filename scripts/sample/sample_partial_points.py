@@ -257,10 +257,13 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
                         indices = np.random.choice(visible_points_world.shape[0], num_samples, replace=False)
                         visible_points_world = visible_points_world[indices]
                     return visible_points_world, camera_pose
-                image_size *= 2  # Increase resolution
-            tqdm.write(f"Attempt {attempt+1}: Max resolution reached, trying new viewpoint...")
+                # Increase resolution and try again with same view point if not enough points
+                image_size *= 2
+            # if not enough points with max resolution, try another viewpoint
+            # tqdm.write(f"Attempt {attempt+1}: Max resolution reached, trying new viewpoint...")
             
         # some objects are really small for some reason, sample from a smaller radius
+        # this is a failsafe to prevent skipping and shouldn't be triggered normally
         radius *= 0.5  # Reduce radius for next attempt
         tqdm.write(f"Failed to sample {num_samples} points from any viewpoint after {max_viewpoint_retries} tries. Trying smaller radius: {radius}")
         
@@ -390,7 +393,8 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", num_samples=50
     for n in range(max_n):
         save_path = save_root_dir / i / "models"
         
-        partial_pc_path = save_path / f"partial_samples_{mode}_{num_samples}_{n}.npy"
+        partial_pc_path = save_path / f"partial_samples_{mode}_{n}.npy"
+        # partial_pc_path = save_path / f"partial_samples_{mode}_{num_samples}_{n}.npy"
         
         # skip if the file already exists
         if partial_pc_path.is_file():
@@ -441,7 +445,7 @@ def process_file(i, data_root_dir, save_root_dir, mode="default", num_samples=50
         # save the points
         if not debug:
             save_path.mkdir(parents=True, exist_ok=True)
-            np.save(save_path / f"partial_samples_{mode}_{n}.npy", sampled_points)
+            np.save(partial_pc_path, sampled_points)
         
     # save the failed list to a file
     if failed_list:
@@ -467,6 +471,7 @@ if __name__ == "__main__":
                     help="Number of point clouds to sample for each instance")
     parser.add_argument("--overwrite", action='store_true', help="Overwrite any existing files.")
     parser.add_argument("--debug", action='store_true', help="Run without saving for debug.")
+    parser.add_argument("--coverage_only", action='store_true', help="Only calculate the coverage value from saved samples")
 
     args = parser.parse_args()
     
@@ -537,15 +542,20 @@ if __name__ == "__main__":
             # loop through each object folder
             for idx, i in tqdm(enumerate(folders_to_run), total=len(folders_to_run)):
                 # sample partial point clouds
-                process_file(i, data_root_dir, save_root_dir, mode, max_n=args.n, overwrite=args.overwrite, debug=args.debug)
+                if not args.coverage_only:
+                    process_file(i, data_root_dir, save_root_dir, mode, max_n=args.n, overwrite=args.overwrite, debug=args.debug)
+                    
                 if mode != "surface":
                     # calculate coverage for the sampled point clouds
-                    coverage_list = compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode, max_n=args.n, output_csv=(not args.debug))
+                    coverage_list = compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode, max_n=args.n, overwrite=args.overwrite, output_csv=(not args.debug))
                     # collate for plotting
                     if not coverage_list is None:
                         coverage_list_list.append(coverage_list)
+                # early escape for debugging
+                # if idx == 100:
+                #     break
                 
-            if mode != "surface":
+            if mode != "surface" and not args.coverage_only:
                 # plot histograms on a per-mode basis (?)
                 try:
                     coverage_values = np.array([c for l in coverage_list_list for c in l])
