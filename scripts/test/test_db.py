@@ -79,12 +79,13 @@ def main():
     ap.add_argument(
         "--script", type=Path, default=Path("get_das.py"), help="Path to get_das.py"
     )
-    ap.add_argument("--pcd-path", type=Path, default=Path("/app/pcds"))
+    ap.add_argument("--pcd-path", type=Path, default=Path("/mnt/shape-data/newdata/pcds"))
     ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--only-algo", choices=MODEL_CLASSES.keys())
     ap.add_argument("--only-category")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--keep-going", action="store_true")
+    ap.add_argument("--epoch-interval", type=int, default=10)
     # DB that get_das writes into (defaults to same file as --db)
     ap.add_argument(
         "--eval-db-path",
@@ -134,9 +135,12 @@ def main():
         return
 
     for rid, algo, category, ckpt_dir, key_points in rows:
+        if algo == "Ours2": # hack
         try:
             ckpt_list = list_ckpts(ckpt_dir)
-
+            for f in ckpt_list:
+                if "net_final" in str(f):
+                    final_path = f
             # apply optional epoch filter
             if args.start_epoch is not None:
                 filtered = []
@@ -147,8 +151,21 @@ def main():
                     filtered.append(f)
                 ckpt_list = filtered
 
+            if args.epoch_interval != 1:
+                filtered2 = []
+                for f in ckpt_list:
+                    m = EPOCH_RE.search(f.name)
+                    if m and int(m.group("epoch")) % args.epoch_interval == 0:
+                        filtered2.append(f)
+                    else:
+                        continue
+                ckpt_list = filtered2
+
             if args.limit is not None:
                 ckpt_list = ckpt_list[: args.limit]
+
+            # append the final model net_final as well
+            ckpt_list.append(final_path)
 
             if not ckpt_list:
                 print(f"[run_id={rid}] !! no checkpoints to process after filtering")
@@ -160,26 +177,45 @@ def main():
                 ):
                     continue
 
-                annotation_json = Path("/app/annotations") / f"{category}.json"
-                cmd = [
-                    "python3",
-                    str(args.script),
-                    algo,  # subcommand: SC3K / SM
-                    "--ckpt",
-                    str(ckpt_path),
-                    "--annotation-json",
-                    str(annotation_json),
-                    "--pcd-path",
-                    str(args.pcd_path),
-                    "--batch-size",
-                    str(args.batch_size),
-                    "--key-points",
-                    str(key_points),
-                    "--category",
-                    str(category),
-                    "--db-path",
-                    str(eval_db_path),
-                ]
+                annotation_json = Path("/mnt/shape-data/newdata/annotations") / f"{category}.json"
+                if "get_das" in str(args.script):
+                    cmd = [
+                        "python3",
+                        str(args.script),
+                        algo,  # subcommand: SC3K / SM
+                        "--ckpt",
+                        str(ckpt_path),
+                        "--annotation-json",
+                        str(annotation_json),
+                        "--pcd-path",
+                        str(args.pcd_path),
+                        "--batch-size",
+                        str(args.batch_size),
+                        "--key-points",
+                        str(key_points),
+                        "--category",
+                        str(category),
+                        "--db-path",
+                        str(eval_db_path),
+                    ]
+                elif "get_reconstruction" in str(args.script):
+                    cmd = [
+                        "python3",
+                        str(args.script),
+                        algo,  # subcommand: SC3K / SM
+                        "--ckpt",
+                        str(ckpt_path),
+                        "--batch-size",
+                        str(args.batch_size),
+                        "--key-points",
+                        str(key_points),
+                        "--category",
+                        str(category),
+                        "--db-path",
+                        str(eval_db_path),
+                    ]
+                else:
+                    raise SystemExit(f"Unknown script: {args.script}")
 
                 print("→", " ".join(cmd))
                 if args.dry_run:
@@ -188,7 +224,7 @@ def main():
 
                 rc = subprocess.run(cmd).returncode
                 if rc != 0:
-                    msg = f"[run_id={rid}] get_das failed ({ckpt_path}) code {rc}"
+                    msg = f"[run_id={rid}] script failed ({ckpt_path}) code {rc}"
                     if args.keep_going:
                         print("!!", msg)
                         continue
