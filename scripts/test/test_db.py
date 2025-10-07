@@ -136,6 +136,7 @@ def main():
 
     for rid, algo, category, ckpt_dir, key_points in rows:
         if algo == "Ours2": # hack
+            algo = "Ours"
         try:
             ckpt_list = list_ckpts(ckpt_dir)
             for f in ckpt_list:
