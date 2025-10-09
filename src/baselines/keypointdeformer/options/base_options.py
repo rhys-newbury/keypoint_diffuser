@@ -2,6 +2,7 @@ from pathlib import Path
 
 import configargparse
 from baselines.keypointdeformer.models.cage_skinning import CageSkinning
+from datasets.discovery import discover_datasets
 
 
 class BaseOptions:
@@ -18,7 +19,18 @@ class BaseOptions:
         )
 
         # basic parameters
-        parser.add_argument("--category", required=True, type=str, help="object name")
+        AVAILABLE_DATASETS = discover_datasets()
+        dataset_choices = sorted(AVAILABLE_DATASETS.keys())
+
+        parser.add_argument(
+            "--dataset",
+            type=str,
+            choices=dataset_choices,
+            default=dataset_choices[0] if dataset_choices else None,
+            help=f"Dataset class to use. Choices: {', '.join(dataset_choices)}",
+        )
+
+        parser.add_argument("--category", required=False, type=str, help="object name")
         parser.add_argument("--db", type=Path, help="Database path")
 
         parser.add_argument("--batch_size", type=int, help="batch size", default=16)

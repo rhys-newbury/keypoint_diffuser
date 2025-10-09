@@ -9,16 +9,29 @@ import torch.utils.data.distributed
 from baselines.diffusion_point_cloud.autoencoder import AutoEncoder
 from baselines.diffusion_point_cloud.common import get_linear_scheduler
 from db_utils import save_train_run
-from keypoint_diffuser.datasets.H5Datset import H5Dataset
-from utils import DATASET
+from discovery import discover_datasets
+from utils import DATA_DIR, DATASET
 
 import wandb
+
+
+AVAILABLE_DATASETS = discover_datasets()
+dataset_choices = sorted(AVAILABLE_DATASETS.keys())
 
 
 # Arguments
 parser = argparse.ArgumentParser()
 # Model arguments
 parser.add_argument("--key-points", type=int, default=10)
+
+parser.add_argument(
+    "--dataset",
+    type=str,
+    choices=dataset_choices,
+    default=dataset_choices[0] if dataset_choices else None,
+    help=f"Dataset class to use. Choices: {', '.join(dataset_choices)}",
+)
+
 
 parser.add_argument("--num_steps", type=int, default=200)
 parser.add_argument("--beta_1", type=float, default=1e-4)
@@ -63,8 +76,11 @@ if __name__ == "__main__":
     save_train_run(args.db, "DPM", args.category, ckpt_dir, args.key_points)
 
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
-    dataset = H5Dataset(
-        h5_files,
+
+    DatasetClass = AVAILABLE_DATASETS[args.dataset]
+    dataset = DatasetClass(
+        h5_files=h5_files,
+        root_dir=DATA_DIR,
         normalize=True,
         include_label=False,
         object_name=args.category,

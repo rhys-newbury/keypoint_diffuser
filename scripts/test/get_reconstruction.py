@@ -29,7 +29,7 @@ import numpy as np
 import torch
 import tqdm
 from classes import MODEL_CLASSES
-from keypoint_diffuser.datasets.H5Datset import H5Dataset
+from datasets.H5Datset import H5Dataset
 from keypoint_diffuser.utils.eval_metrics import EMD_CD_recon
 from keypoint_diffuser.utils.pc_utils import collate_fn
 from keypoint_diffuser.utils.transforms import (

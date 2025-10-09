@@ -12,47 +12,57 @@ from pathlib import Path
 import torch
 from baselines.key_grid.composed_chamfer import loss_all
 from baselines.key_grid.merger_net import Net
+from datasets.discovery import discover_datasets
 from db_utils import save_train_run
-from keypoint_diffuser.datasets.H5Datset import H5Dataset
 from torch import optim
 from tqdm import tqdm
-from utils import DATASET
+from utils import DATA_DIR, DATASET
 
 import wandb
 
 
-arg_parser = argparse.ArgumentParser(
+AVAILABLE_DATASETS = discover_datasets()
+dataset_choices = sorted(AVAILABLE_DATASETS.keys())
+
+
+parser = argparse.ArgumentParser(
     description="Training Key_Grid for the PointNet++ on the ClothesNet dataset."
 )
+parser.add_argument(
+    "--dataset",
+    type=str,
+    choices=dataset_choices,
+    default=dataset_choices[0] if dataset_choices else None,
+    help=f"Dataset class to use. Choices: {', '.join(dataset_choices)}",
+)
 
-arg_parser.add_argument(
+
+parser.add_argument(
     "-k",
     "--key_points",
     type=int,
     default=10,
     help="Requested number of keypoints to detect.",
 )
-arg_parser.add_argument("--db", type=Path, help="Database path")
+parser.add_argument("--db", type=Path, help="Database path")
 
-arg_parser.add_argument("-b", "--batch", type=int, default=8, help="Batch size.")
+parser.add_argument("-b", "--batch", type=int, default=8, help="Batch size.")
 
-arg_parser.add_argument(
+parser.add_argument(
     "-e", "--epochs", type=int, default=100, help="Number of epochs to train."
 )
-arg_parser.add_argument(
+parser.add_argument(
     "--max-points",
     type=int,
     default=2048,
     help="Indicates maximum points in each input point cloud.",
 )
-arg_parser.add_argument("--keynumber", type=int, help="", default=14)
-arg_parser.add_argument("--chamfer", type=int, help="", default=20)
-arg_parser.add_argument("--lambda_init_points", type=float, help="", default=1.0)
-arg_parser.add_argument("--lambda_chamfer", type=float, help="", default=1.0)
-arg_parser.add_argument(
-    "--category", type=str, help="Category of objects", default="chair"
-)
-arg_parser.add_argument("--ckpt-dir", type=Path, default=Path("."))
+parser.add_argument("--keynumber", type=int, help="", default=14)
+parser.add_argument("--chamfer", type=int, help="", default=20)
+parser.add_argument("--lambda_init_points", type=float, help="", default=1.0)
+parser.add_argument("--lambda_chamfer", type=float, help="", default=1.0)
+parser.add_argument("--category", type=str, help="Category of objects", default="chair")
+parser.add_argument("--ckpt-dir", type=Path, default=Path("."))
 
 
 def feed(net, optimizer, loader, train, epoch, ns):
@@ -84,7 +94,7 @@ def feed(net, optimizer, loader, train, epoch, ns):
 
 
 if __name__ == "__main__":
-    cfg = arg_parser.parse_args()
+    cfg = parser.parse_args()
     batch = cfg.batch
 
     wandb.init(project=f"keygridOrig_{cfg.category}_train", config=cfg)
@@ -94,12 +104,16 @@ if __name__ == "__main__":
     save_train_run(cfg.db, "KeyGridOrig", cfg.category, ckpt_dir, cfg.key_points)
 
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
-    dataset = H5Dataset(
-        h5_files,
+    DatasetClass = AVAILABLE_DATASETS[cfg.dataset]
+
+    dataset = DatasetClass(
+        h5_files=h5_files,
+        root_dir=DATA_DIR,
         normalize=True,
         include_label=False,
         object_name=cfg.category,
     )
+
     loader = torch.utils.data.DataLoader(
         dataset, batch_size=batch, shuffle=True, num_workers=0
     )

@@ -3,6 +3,11 @@ from pathlib import Path
 
 import configargparse
 import numpy as np
+from datasets.discovery import discover_datasets
+
+
+AVAILABLE_DATASETS = discover_datasets()
+dataset_choices = sorted(AVAILABLE_DATASETS.keys())
 
 
 THOUSAND = 1000
@@ -93,6 +98,7 @@ class AEConfig:
     max_rotation_angle: float = np.pi / 3
 
 
+
 class AEOptions:
     def __init__(self):
         self.initialized = False
@@ -112,7 +118,18 @@ class AEOptions:
             is_config_file=True,
             help="test config file path",
         )
+        parser.add_argument(
+            "--dataset",
+            type=str,
+            choices=dataset_choices,
+            default=dataset_choices[0] if dataset_choices else None,
+            help=f"Dataset class to use. Choices: {', '.join(dataset_choices)}",
+        )
+
         for field_name, field_def in AEConfig.__dataclass_fields__.items():
+            if field_name == "dataset":
+                continue
+
             parser.add_argument(
                 f"--{field_name}", type=field_def.type, default=field_def.default
             )

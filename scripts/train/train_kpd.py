@@ -7,11 +7,15 @@ import torch.utils.data
 from baselines.keypointdeformer.models.cage_skinning import CageSkinning
 from baselines.keypointdeformer.options.base_options import BaseOptions
 from baselines.keypointdeformer.utils.nn import save_network, weights_init
+from datasets.discovery import discover_datasets
 from db_utils import save_train_run
-from keypoint_diffuser.datasets.H5Datset import H5Dataset
-from utils import DATASET
+from utils import DATA_DIR, DATASET
 
 import wandb
+
+
+AVAILABLE_DATASETS = discover_datasets()
+dataset_choices = sorted(AVAILABLE_DATASETS.keys())
 
 
 def get_data(data):
@@ -31,13 +35,17 @@ def train(opt):
     save_train_run(opt.db, "KPD", opt.category, ckpt_dir, opt.key_points)
 
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
-    dataset = H5Dataset(
-        h5_files,
+    DatasetClass = AVAILABLE_DATASETS[opt.dataset]
+
+    dataset = DatasetClass(
+        h5_files=h5_files,
+        root_dir=DATA_DIR,
         normalize=True,
         include_label=False,
         object_name=opt.category,
         get_two=True,
     )
+
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=opt.batch_size,

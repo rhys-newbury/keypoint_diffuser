@@ -13,57 +13,67 @@ from pathlib import Path
 import torch
 from baselines.skeleton_merger.composed_chamfer import composed_sqrt_chamfer
 from baselines.skeleton_merger.merger_net import Net
+from datasets.discovery import discover_datasets
 from db_utils import save_train_run
-from keypoint_diffuser.datasets.H5Datset import H5Dataset
 from torch import optim
 from tqdm import tqdm
-from utils import DATASET, TESTSET
+from utils import DATA_DIR, DATASET
 
 import wandb
 
 
-arg_parser = argparse.ArgumentParser(
+AVAILABLE_DATASETS = discover_datasets()
+dataset_choices = sorted(AVAILABLE_DATASETS.keys())
+
+parser = argparse.ArgumentParser(
     description="Training Skeleton Merger. Valid .h5 files must contain a 'data' array of shape (N, n, 3) and a 'label' array of shape (N, 1).",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
+parser.add_argument(
+    "--dataset",
+    type=str,
+    choices=dataset_choices,
+    default=dataset_choices[0] if dataset_choices else None,
+    help=f"Dataset class to use. Choices: {', '.join(dataset_choices)}",
+)
 
-arg_parser.add_argument("--category", type=str, help="Category of objects")
-arg_parser.add_argument("--db", type=Path, help="Database path")
+parser.add_argument("--category", type=str, help="Category of objects")
+parser.add_argument("--db", type=Path, help="Database path")
 
-arg_parser.add_argument(
+parser.add_argument(
     "-k",
     "--key-points",
     type=int,
     default=10,
     help="Requested number of keypoints to detect.",
 )
-arg_parser.add_argument(
+parser.add_argument(
     "-d", "--device", type=str, default="cuda", help="Pytorch device for training."
 )
-arg_parser.add_argument("-b", "--batch", type=int, default=8, help="Batch size.")
-arg_parser.add_argument(
+parser.add_argument("-b", "--batch", type=int, default=8, help="Batch size.")
+parser.add_argument(
     "-e", "--epochs", type=int, default=80, help="Number of epochs to train."
 )
-arg_parser.add_argument(
+parser.add_argument(
     "--max-points",
     type=int,
     default=2048,
     help="Indicates maximum points in each input point cloud.",
 )
-arg_parser.add_argument("--ckpt-dir", type=Path, default=Path("."))
+parser.add_argument("--ckpt-dir", type=Path, default=Path("."))
 
 
 def L2(embed):
     return 0.01 * (torch.sum(embed**2))
 
 
-def feed(net, optimizer, loader, train, epoch):
+def feed(net, optimizer, loader, epoch):
     running_loss = 0.0
     running_lrc = 0.0
     running_ldiv = 0.0
-    net.train(train)
+    net.train(True)
 
-    with contextlib.nullcontext() if train else torch.no_grad():
+    with contextlib.nullcontext():
         running_lrc = 0.0
         running_ldiv = 0.0
         running_loss = 0.0
@@ -78,8 +88,7 @@ def feed(net, optimizer, loader, train, epoch):
 
             batch_x = batch_x.to(next(net.parameters()).device)
 
-            if train:
-                optimizer.zero_grad()
+            optimizer.zero_grad()
             try:
                 RPCD, KPCD, KPA, LF, MA = net(batch_x)
             except ValueError:
@@ -88,9 +97,8 @@ def feed(net, optimizer, loader, train, epoch):
             blrc = composed_sqrt_chamfer(batch_x, RPCD, MA)
             bldiv = L2(LF)
             loss = blrc + bldiv
-            if train:
-                loss.backward()
-                optimizer.step()
+            loss.backward()
+            optimizer.step()
 
             running_lrc += blrc.item()
             running_ldiv += bldiv.item()
@@ -99,7 +107,7 @@ def feed(net, optimizer, loader, train, epoch):
             batch_time = time.time() - start
             total_time += batch_time
 
-            prefix = "train" if train else "val"
+            prefix = "train"
 
             wandb.log(
                 {
@@ -114,7 +122,7 @@ def feed(net, optimizer, loader, train, epoch):
 
 
 if __name__ == "__main__":
-    ns = arg_parser.parse_args()
+    ns = parser.parse_args()
 
     batch = ns.batch
     wandb.init(project=f"skeleton_merger_{ns.category}_train", config=ns)
@@ -125,12 +133,16 @@ if __name__ == "__main__":
     save_train_run(ns.db, "SM", ns.category, ckpt_dir, ns.key_points)
 
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
-    dataset = H5Dataset(
-        h5_files,
+    DatasetClass = AVAILABLE_DATASETS[ns.dataset]
+
+    dataset = DatasetClass(
+        h5_files=h5_files,
+        root_dir=DATA_DIR,
         normalize=True,
         include_label=False,
         object_name=ns.category,
     )
+
     loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch,
@@ -138,25 +150,10 @@ if __name__ == "__main__":
         num_workers=0,
     )
 
-    h5_files_test = glob(f"{TESTSET}**/*.h5", recursive=True)
-    dataset_test = H5Dataset(
-        h5_files_test,
-        normalize=True,
-        include_label=False,
-        object_name=ns.category,
-    )
-    loader_test = torch.utils.data.DataLoader(
-        dataset_test,
-        batch_size=batch,
-        shuffle=False,
-        num_workers=0,
-    )
-
     net = Net(ns.max_points, ns.key_points).to(ns.device)
     optimizer = optim.Adadelta(net.parameters(), eps=1e-2)
     for epoch in range(ns.epochs):
         feed(net, optimizer, loader, True, epoch)
-        feed(net, optimizer, loader_test, False, epoch)
         torch.save(
             {
                 "epoch": epoch,

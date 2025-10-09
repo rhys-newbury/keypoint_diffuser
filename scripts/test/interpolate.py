@@ -8,7 +8,7 @@ import torch.distributed as dist
 import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
-from keypoint_diffuser.datasets import get_dataset
+from datasets import get_dataset
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.options.ae_options import AEOptions
 from keypoint_diffuser.utils.utils import reparameterize

@@ -10,9 +10,9 @@ import torch
 import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
+from datasets.discovery import discover_datasets
 from db_utils import save_train_run
 from einops import repeat
-from keypoint_diffuser.datasets.H5Datset import H5Dataset
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.models.encoder_models.common import get_linear_scheduler
 from keypoint_diffuser.options.ae_options import AEConfig, AEOptions
@@ -20,6 +20,13 @@ from keypoint_diffuser.utils.nn import save_network
 from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
 from torch.nn.utils import clip_grad_norm_
+from utils import DATA_DIR, DATASET
+
+import wandb
+
+
+AVAILABLE_DATASETS = discover_datasets()
+dataset_choices = sorted(AVAILABLE_DATASETS.keys())
 
 import wandb
 
@@ -85,6 +92,7 @@ def get_network_data(data: dict[str, Any], key="orig"):
 
     d = {}
     for k, v in data.items():
+        v = v.cuda()
         if k.startswith(opp):
             continue
         elif k.startswith(key):
@@ -128,10 +136,13 @@ def train(opt: AEConfig):
         ]
     )
 
-    DATASET = "/app/shapenetcorev2_hdf5_2048/train/"
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
-    dataset = H5Dataset(
-        h5_files,
+
+    DatasetClass = AVAILABLE_DATASETS[opt.dataset]
+
+    dataset = DatasetClass(
+        h5_files=h5_files,
+        root_dir=DATA_DIR,
         normalize=True,
         include_label=False,
         object_name=opt.category,
@@ -224,7 +235,7 @@ def train(opt: AEConfig):
 
             deformed_matrix = data["deformed_transformation"].view(
                 data["orig_offset"].shape[0], -1, 3
-            )
+            ).cuda()
 
             kp_orig = code_.reshape(code.shape[0], -1, 3)
             deformed_code, _, _ = net(get_network_data(data, "deformed"))
