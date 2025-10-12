@@ -14,6 +14,7 @@ class AEConfig:
     category: str
     dataset: str = "shapes"
     partial_view_mode: str = None
+    n_partial_samples: int = 2
     test_partial_samples: bool = False
     num_point: int = 2048
     points_dir: str = None
@@ -30,8 +31,8 @@ class AEConfig:
     phase: str = "train"
     iteration: int = None
     epochs: int = 100
-    save_interval: int = 100
-    log_interval: int = 10
+    save_interval: int = 10
+    log_interval: int = 5
     key_points: int = 10
     extra_latent: int = 5
     num_steps: int = 200
@@ -50,13 +51,15 @@ class AEConfig:
     normalization: str = "none"
     seed: int = 0
     n_workers: int = 0
-    ckpt: str = None
     mesh_dir: str = None
     keypoints_dir: str = None
     freeze_decoder: bool = False
+    pretrained_root: Path = Path("db/train/")
+    pretrained_epoch: int = None
 
+    db_root: Path = Path("./db/train")
     db: Path = Path("results.db")
-    ckpt_dir: Path = Path(".")
+    ckpt_dir: Path = Path("./logs")
 
     use_old: bool = False
     use_edm: bool = False
