@@ -1,4 +1,3 @@
-import os
 import time
 from glob import glob
 from typing import Any
@@ -10,7 +9,7 @@ import torch
 import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
-from datasets.discovery import discover_datasets
+from datasets.H5Datset import H5Dataset
 from db_utils import save_train_run
 from einops import repeat
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
@@ -20,13 +19,6 @@ from keypoint_diffuser.utils.nn import save_network
 from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
 from torch.nn.utils import clip_grad_norm_
-from utils import DATA_DIR, DATASET
-
-import wandb
-
-
-AVAILABLE_DATASETS = discover_datasets()
-dataset_choices = sorted(AVAILABLE_DATASETS.keys())
 
 import wandb
 
@@ -47,6 +39,17 @@ from torchvision import transforms
 
 CHECKPOINTS_DIR = "checkpoints"
 CHECKPOINT_EXT = ".pth"
+
+
+def cosine_schedule(step, total_steps, start, end):
+    """
+    Cosine annealing from start -> end over total_steps using torch ops.
+    Returns a torch scalar (same device as inputs).
+    """
+    step = torch.clamp(torch.tensor(step, dtype=torch.float32), 0, total_steps)
+    t = step / total_steps
+    value = end + 0.5 * (start - end) * (1 + torch.cos(torch.pi * t))
+    return value
 
 
 def get_data(dataset, data):
@@ -87,12 +90,59 @@ def sample_farthest_points(points, num_samples, return_index=False):
         return sampled
 
 
+def kp_proximity_constraints(
+    code_: torch.Tensor,
+    target_bn3: torch.Tensor,
+    t: int,
+    eps: float = 0.05,
+    w_hinge: float = 100.0,
+):
+    """
+    Enforce every keypoint in `code_` to be within `eps` of `target_bn3`.
+
+    code_:  (B, K, 3)   predicted keypoints
+    target_bn3: (B, N, 3) target points
+    eps:   distance tolerance
+    w_hinge: weight for hinge penalty beyond eps (per-kp)
+    w_max:   extra weight on stragglers (max / worst-k)
+    worst_frac: fraction of worst KPs penalized (e.g., 0.2 = worst 20%)
+    """
+    # L2 distances to nearest target point per keypoint
+    d = torch.cdist(code_, target_bn3)  # (B, K, N)
+    dmin = d.min(dim=2).values  # (B, K)
+
+    # Hinge penalty: only violations contribute
+    viol = (dmin - eps).clamp_min_(0.0)  # (B, K)
+    loss_hinge = (viol[viol > 0] ** 2).mean()
+
+    # Total constraint loss
+    constraint_loss = w_hinge * loss_hinge
+
+    # Useful diagnostics
+    diag = {
+        "kp/viol_min": viol.min().detach(),
+        "kp/viol_med": viol.median().detach(),
+        "kp/viol_max": viol.max().detach(),
+        "kp/far_frac(@eps)": (dmin > eps).float().mean().detach(),
+        "kp/dmin_rms": torch.sqrt((dmin**2).mean().detach()),
+    }
+
+    wandb.log(
+        {
+            "kp_constraint/loss": constraint_loss,
+            **{k: v.item() for k, v in diag.items()},
+        },
+        step=t,
+    )
+
+    return constraint_loss
+
+
 def get_network_data(data: dict[str, Any], key="orig"):
     opp = "deformed" if key == "orig" else "orig"
 
     d = {}
     for k, v in data.items():
-        v = v.cuda()
         if k.startswith(opp):
             continue
         elif k.startswith(key):
@@ -136,20 +186,16 @@ def train(opt: AEConfig):
         ]
     )
 
+    DATASET = "/app/shapenetcorev2_hdf5_2048/train/"
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
-
-    DatasetClass = AVAILABLE_DATASETS[opt.dataset]
-
-    dataset = DatasetClass(
-        h5_files=h5_files,
-        root_dir=DATA_DIR,
+    dataset = H5Dataset(
+        h5_files,
         normalize=True,
         include_label=False,
         object_name=opt.category,
         transform=t,
     )
 
-    print("Using regular DataLoader (no DistributedSampler).")
     train_sampler = None
     shuffle = True  # Only shuffle when not using DistributedSampler
     dataloader = torch.utils.data.DataLoader(
@@ -201,9 +247,12 @@ def train(opt: AEConfig):
                 .transpose(1, 2)
                 .cuda()
             )
+            temp_t = cosine_schedule(
+                t, len(dataloader) * opt.epochs, start=0.2, end=0.01
+            )
 
             diffusion_loss, code, mu, logvar = net.get_loss(
-                get_network_data(data), step=t
+                get_network_data(data), step=t, temperature=temp_t
             )
 
             code_ = code[:, : opt.key_points * 3].reshape(
@@ -229,13 +278,14 @@ def train(opt: AEConfig):
 
             max_schedule = opt.max_schedule
             chamfer_loss, _ = pytorch3d.loss.chamfer_distance(
-                code_, target_shape_t.transpose(2, 1)
+                code_, target_shape_t.transpose(2, 1), single_directional=True
             )
+
             data["deformed_shape"].view(data["orig_offset"].shape[0], -1, 3)
 
             deformed_matrix = data["deformed_transformation"].view(
                 data["orig_offset"].shape[0], -1, 3
-            ).cuda()
+            )
 
             kp_orig = code_.reshape(code.shape[0], -1, 3)
             deformed_code, _, _ = net(get_network_data(data, "deformed"))
@@ -267,12 +317,6 @@ def train(opt: AEConfig):
 
             cur_nimg += opt.batch_size
 
-            if t % opt.save_interval == 0:
-                os.path.join(ckpt_dir, "outputs", "%07d" % t)
-                save_network(
-                    net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=e
-                )
-
             iter_time = time.time() - iter_time_start
             iter_time_start = time.time()
 
@@ -284,6 +328,7 @@ def train(opt: AEConfig):
 
             t += 1
 
+        save_network(net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=e)
     save_network(net, ckpt_dir, network_label="net", epoch_label="final")
 
 

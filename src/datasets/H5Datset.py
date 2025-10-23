@@ -86,7 +86,7 @@ KEYS = {
 class H5Dataset(Dataset):
     def __init__(
         self,
-        h5_paths,
+        h5_files,
         normalize=False,
         include_label=False,
         object_name="chair",
@@ -95,7 +95,7 @@ class H5Dataset(Dataset):
         random_rotate=False,
         **kwargs,
     ):
-        self.files = h5_paths
+        self.files = h5_files
         self.normalize = normalize
         self.include_label = include_label
         self.object_name = object_name

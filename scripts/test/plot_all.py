@@ -44,19 +44,48 @@ def fetch_rows_runs(db_path: Path, model_filter: str | None) -> list[tuple]:
 
 
 def fetch_rows_corr(db_path: Path, model_filter: str | None) -> list[tuple]:
-    if not table_exists(db_path, "runs_correlation"):
-        return []
+    """
+    Fetch correlation results:
+      - Always include 'Ours' from runs_correlation2.
+      - Include other models from runs_correlation.
+      - If model_filter is set, limit results accordingly.
+    """
+    rows = []
     con = sqlite3.connect(str(db_path))
     cur = con.cursor()
-    q = (
-        "SELECT id, model, ckpt, annotation_json, pcd_path, batch_size, key_points, "
-        "category, correlation FROM runs_correlation"
-    )
-    params = ()
+
+    # Helper to safely query a table if it exists
+    def safe_fetch(table: str, query: str, params: tuple = ()):
+        if not table_exists(db_path, table):
+            return []
+        return cur.execute(query, params).fetchall()
+
     if model_filter:
-        q += " WHERE model = ?"
-        params = (model_filter,)
-    rows = cur.execute(q, params).fetchall()
+        if model_filter == "Ours":
+            q = (
+                "SELECT id, model, ckpt, annotation_json, pcd_path, batch_size, "
+                "key_points, category, correlation FROM runs_correlation2 WHERE model = ?"
+            )
+            rows.extend(safe_fetch("runs_correlation2", q, (model_filter,)))
+        else:
+            q = (
+                "SELECT id, model, ckpt, annotation_json, pcd_path, batch_size, "
+                "key_points, category, correlation FROM runs_correlation WHERE model = ?"
+            )
+            rows.extend(safe_fetch("runs_correlation", q, (model_filter,)))
+    else:
+        # No filter: fetch ours from correlation2 and others from correlation
+        q_ours = (
+            "SELECT id, model, ckpt, annotation_json, pcd_path, batch_size, "
+            "key_points, category, correlation FROM runs_correlation2 WHERE model = 'Ours'"
+        )
+        q_others = (
+            "SELECT id, model, ckpt, annotation_json, pcd_path, batch_size, "
+            "key_points, category, correlation FROM runs_correlation WHERE model != 'Ours'"
+        )
+        rows.extend(safe_fetch("runs_correlation2", q_ours))
+        rows.extend(safe_fetch("runs_correlation", q_others))
+
     con.close()
     return rows
 

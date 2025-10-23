@@ -59,7 +59,7 @@ class AEConfig:
     ckpt_dir: Path = Path(".")
 
     use_old: bool = False
-    use_edm: bool = False
+    use_edm: bool = True
 
     segmentations_dir: str = None
     seg_split_dir: str = None
@@ -96,7 +96,6 @@ class AEConfig:
     max_twist_factor: float = 0.7
     max_taper_factor: float = 0.35
     max_rotation_angle: float = np.pi / 3
-
 
 
 class AEOptions:

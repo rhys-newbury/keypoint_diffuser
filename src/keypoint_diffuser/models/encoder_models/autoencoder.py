@@ -7,14 +7,14 @@ from keypoint_diffuser.utils.utils import reparameterize
 
 from .diffusion import DiffusionPoint, PointwiseNet, VarianceSchedule
 from .edm_model import EDMPrecond
-from .encoders.point_transformer import PointTransformerv2
+from .encoders.convex_transformer import ConvexTransformer
 
 
 class AutoEncoder(Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.encoder = PointTransformerv2(
+        self.encoder = ConvexTransformer(
             zdim=args.key_points, extra_latent=args.extra_latent
         )
 
@@ -74,11 +74,22 @@ class AutoEncoder(Module):
             num_points, code, flexibility=flexibility, ret_traj=ret_traj
         )
 
-    def get_loss(self, x, step):
+    def soft_project(self, pred, surface_points, temperature=0.05, eps=1e-8):
+        # pred: (B,K,3), surface_points: (B,N,3)
+        d = torch.cdist(pred, surface_points)  # (B,K,N)
+        w = torch.softmax(-d / max(temperature, 1e-8), dim=-1)  # (B,K,N)
+        nearest_soft = w @ surface_points  # (B,K,3)
+        return nearest_soft
+
+    def get_loss(self, x, step, temperature=0.05):
         z0, mu, logvar = self.encode(x)
 
+        z0_ = self.soft_project(
+            z0, x["target_shape"].view(-1, 2048, 3).cuda(), temperature=temperature
+        )
+
         z_aux = reparameterize(mu, logvar)
-        code = torch.cat([z0.reshape((z0.shape[0], -1)), z_aux], dim=1)
+        code = torch.cat([z0_.reshape((z0_.shape[0], -1)), z_aux], dim=1)
 
         t = x["target_shape"].view(-1, 2048, 3).cuda()
         if self.use_edm:

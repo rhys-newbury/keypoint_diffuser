@@ -203,7 +203,7 @@ def main():
                     cmd_das = [
                         "python3",
                         str(args.das_script),
-                        algo,
+                        algo_,
                         "--ckpt",
                         str(ckpt_path),
                         "--annotation-json",
@@ -225,14 +225,17 @@ def main():
                     # else: already done; skip
 
                 # Correlation
-                if args.mode in ("corr", "both") and not already_evaluated(
-                    eval_db_path, ckpt_path, algo, category, args.corr_table
-                ):
+                if args.mode in ("corr", "both"):
+                # and not already_evaluated(
+                #     eval_db_path, ckpt_path, algo, category, args.corr_table
+                # ):
+                    algo_ = "Ours" if algo == "Ours2" else algo
+
                     annotation_json = Path("/app/annotations") / f"{category}.json"
                     cmd_corr = [
                         "python3",
                         str(args.corr_script),
-                        algo,
+                        algo_,
                         "--ckpt",
                         str(ckpt_path),
                         "--annotation-json",

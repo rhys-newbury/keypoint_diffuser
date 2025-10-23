@@ -45,7 +45,7 @@ for model_name, model_cls in MODEL_CLASSES.items():
         subparser,
         "--annotation-json",
         type=Path,
-        default="/app/annotations/airplane.json",
+        default="/app/annotations/table.json",
     )
     try_add_arg(subparser, "--pcd-path", type=Path, default="/app/pcds")
     try_add_arg(subparser, "--batch-size", type=int, default=32)
@@ -183,6 +183,32 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
 # ----------------------------
 
 
+def project_to_surface(pred, surface_points, eps=0.05):
+    """
+    Hard project keypoints so they lie within `eps` distance of surface.
+    If already closer than eps, no change.
+
+    pred: (K, 3)
+    surface_points: (N, 3)
+    eps: allowed max distance
+    """
+    # Compute nearest surface point for each keypoint
+    dists = torch.cdist(pred[None, ...], surface_points[None, ...])  # (1, K, N)
+    idx = dists.argmin(dim=-1)  # (1, K)
+    nearest = surface_points[idx]  # (K, 3)
+
+    # Vector from keypoint → nearest surface
+    vec = nearest - pred
+    dist = vec.norm(dim=-1, keepdim=True) + 1e-8
+
+    # If farther than eps, pull it just enough to reach eps
+    overshoot = dist > eps
+    scale = torch.where(overshoot, (dist - eps) / dist, torch.zeros_like(dist))
+    pred_clamped = pred + vec * scale
+
+    return pred_clamped.squeeze(0)
+
+
 @torch.no_grad()
 def keypoint_label_correlation(
     out_kpcd,  # List[ArrayLike] or (B, K*3) / (B, K, 3)
@@ -225,6 +251,7 @@ def keypoint_label_correlation(
             labels[b][:, 3], dtype=torch.long, device=d
         )  # (N,)
 
+        kp = project_to_surface(kp, seg_points)
         # pairwise distances KP x SEG
         distances = torch.cdist(kp, seg_points)  # (K,N), float64
         within = distances <= float(threshold)  # boolean (K,N)
@@ -271,7 +298,7 @@ def init_corr_db(db_path: Path):
     cur = con.cursor()
     cur.execute(
         """
-        CREATE TABLE IF NOT EXISTS runs_correlation (
+        CREATE TABLE IF NOT EXISTS runs_correlation2 (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             model TEXT NOT NULL,
@@ -287,10 +314,10 @@ def init_corr_db(db_path: Path):
     )
     # optional: helpful indexes
     cur.execute(
-        "CREATE INDEX IF NOT EXISTS idx_runs_corr_model ON runs_correlation(model);"
+        "CREATE INDEX IF NOT EXISTS idx_runs_corr_model ON runs_correlation2(model);"
     )
     cur.execute(
-        "CREATE INDEX IF NOT EXISTS idx_runs_corr_time ON runs_correlation(created_at);"
+        "CREATE INDEX IF NOT EXISTS idx_runs_corr_time ON runs_correlation2(created_at);"
     )
     con.commit()
     return con
@@ -301,7 +328,7 @@ def save_corr_run(db_path: Path, opt, correlation: float) -> int:
     cur = con.cursor()
     cur.execute(
         """
-        INSERT INTO runs_correlation (
+        INSERT INTO runs_correlation2 (
             model, ckpt, annotation_json, pcd_path, batch_size, key_points, category, correlation
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
         """,
