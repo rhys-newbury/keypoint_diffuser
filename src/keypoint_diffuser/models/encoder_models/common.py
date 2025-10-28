@@ -31,28 +31,27 @@ class FiLMResidualMLP(nn.Module):
         # Normalization
         self.norm1 = nn.LayerNorm(hidden_dim)
 
-        # Shortcut if needed
+        # Shortcut for residual
         self.shortcut = (
             nn.Identity() if dim_in == dim_out else nn.Linear(dim_in, dim_out)
         )
 
     def forward(self, x, ctx):
         """
-        x: (B, N, D)
-        ctx: (B, C) or (B, 1, C)
+        x:   (B, N, D_in)
+        ctx: (B, C)  (global context per batch, no N dim)
         """
         B, N, _ = x.shape
 
-        # Apply FiLM to hidden layer
-        gamma, beta = self.film(ctx).chunk(2, dim=-1)  # (B, H), (B, H)
-        gamma = gamma.unsqueeze(1)  # (B, 1, H)
-        beta = beta.unsqueeze(1)  # (B, 1, H)
+        gamma, beta = self.film(ctx).chunk(2, dim=-1)  # (B,H),(B,H)
+        gamma = gamma.unsqueeze(1)  # (B,1,H)
+        beta = beta.unsqueeze(1)  # (B,1,H)
 
-        out = self.linear1(x)  # (B, N, H)
+        out = self.linear1(x)  # (B,N,H)
         out = self.norm1(out)
-        out = F.leaky_relu(gamma * out + beta)
+        out = F.leaky_relu(gamma * out + beta, negative_slope=0.2)
 
-        out = self.linear2(out)  # (B, N, D_out)
+        out = self.linear2(out)  # (B,N,D_out)
         return self.shortcut(x) + out
 
 

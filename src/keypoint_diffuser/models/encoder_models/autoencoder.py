@@ -5,13 +5,13 @@ from torch.nn import Module
 from keypoint_diffuser.utils.loss import EDMLossCurriculum
 from keypoint_diffuser.utils.utils import reparameterize
 
-from .diffusion import DiffusionPoint, PointwiseNet, VarianceSchedule
+from .diffusion import DiffusionPoint, PointwiseNetV2, VarianceSchedule
 from .edm_model import EDMPrecond
 from .encoders.convex_transformer import ConvexTransformer
 
 
 class AutoEncoder(Module):
-    def __init__(self, args):
+    def __init__(self, args, max_steps=20000):
         super().__init__()
         self.args = args
         self.encoder = ConvexTransformer(
@@ -30,7 +30,7 @@ class AutoEncoder(Module):
             nn.Linear(64, args.extra_latent),
         )
 
-        self.diffusion_ = PointwiseNet(
+        self.diffusion_ = PointwiseNetV2(
             point_dim=3,
             context_dim=args.key_points * 3 + args.extra_latent,
             residual=args.residual,
@@ -39,7 +39,7 @@ class AutoEncoder(Module):
 
         if self.use_edm:
             self.diffusion = EDMPrecond(self.diffusion_)
-            self.loss = EDMLossCurriculum(max_steps=20000)
+            self.loss = EDMLossCurriculum(max_steps=int(max_steps * 0.8))
         else:
             self.diffusion = DiffusionPoint(
                 net=self.diffusion_,
@@ -57,6 +57,10 @@ class AutoEncoder(Module):
             x:  Point clouds to be encoded, (B, N, d).
         """
         z_kp, z_aux_raw = self.encoder(x)
+        key = "orig" if "orig" in x else "target_shape"
+        self.soft_project(
+            z_kp, torch.tensor(x[key]).view(-1, 2048, 3).cuda(), temperature=0.01
+        )
 
         mu = self.fc_mu(z_aux_raw)
         logvar = self.fc_logvar(z_aux_raw)

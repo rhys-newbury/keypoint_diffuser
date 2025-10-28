@@ -40,7 +40,7 @@ class AEConfig:
     beta_t: float = 0.05
     sched_mode: str = "linear"
     flexibility: float = 0.0
-    residual: bool = True
+    residual: bool = False
     resume: str = None
     lr: float = 1e-3
     weight_decay: float = 0
@@ -129,9 +129,33 @@ class AEOptions:
             if field_name == "dataset":
                 continue
 
-            parser.add_argument(
-                f"--{field_name}", type=field_def.type, default=field_def.default
-            )
+            arg = f"--{field_name}"
+            ftype = field_def.type
+            default = field_def.default
+
+            # special handling for booleans
+            if ftype is bool:
+                # e.g. --residual / --no-residual
+                parser.add_argument(
+                    arg,
+                    dest=field_name,
+                    action="store_true",
+                    default=default,
+                    help=f"set {field_name}=True",
+                )
+                parser.add_argument(
+                    f"--no-{field_name}",
+                    dest=field_name,
+                    action="store_false",
+                    help=f"set {field_name}=False",
+                )
+            else:
+                parser.add_argument(
+                    arg,
+                    type=ftype,
+                    default=default,
+                )
+
         self.initialized = True
         return parser
 

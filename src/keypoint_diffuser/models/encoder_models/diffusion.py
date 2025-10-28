@@ -66,6 +66,7 @@ class CrossAttentionLayer(nn.Module):
         super().__init__()
         self.attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
         self.norm1 = nn.LayerNorm(embed_dim)
+
         self.ff = nn.Sequential(
             nn.Linear(embed_dim, embed_dim * 4),
             nn.GELU(),
@@ -114,16 +115,16 @@ class CrossAttentionBlock(nn.Module):
         """
         x:       (B, N, point_dim)
         context: (B, 1, context_dim)
+        returns: (B, N, point_dim)
         """
-        # Project inputs
-        q = self.point_proj(x)  # (B, N, embed_dim)
-        k = self.context_proj(context)  # (B, 1, embed_dim)
-        v = k  # context-only keys/values
+        q = self.point_proj(x)  # (B,N,E)
+        k = self.context_proj(context)  # (B,1,E)
+        v = k
 
         for layer in self.layers:
-            q = layer(q, k, v)  # (B, N, embed_dim)
+            q = layer(q, k, v)  # (B,N,E)
 
-        return self.out_proj(q)  # Project back to (B, N, point_dim)
+        return self.out_proj(q)  # (B,N,point_dim)
 
 
 class MLP(nn.Module):
@@ -140,6 +141,151 @@ class MLP(nn.Module):
 
     def forward(self, x):
         return self.c_proj(self.gelu(self.c_fc(x)))
+
+
+class PointwiseNetV2(nn.Module):
+    def __init__(self, point_dim, context_dim, residual):
+        super().__init__()
+        self.act = F.leaky_relu
+        init_scale = 0.25
+
+        self.width = 512
+
+        # Time embedding MLP (EDM timestep conditioning)
+        self.time_embed = MLP(
+            device="cuda",
+            dtype=torch.float32,
+            width=self.width,
+            init_scale=init_scale * math.sqrt(1.0 / self.width),
+        )
+
+        # Latent/context projection MLP
+        self.ctx_embed = MLP(
+            device="cuda",
+            dtype=torch.float32,
+            width=context_dim,
+            init_scale=init_scale * math.sqrt(1.0 / context_dim),
+        )
+
+        # Cross-attention from per-point coords to (time+latent) context
+        # We'll feed context_dim + self.width as the "context" size, same as your code.
+        self.cross_attn = CrossAttentionBlock(
+            point_dim=point_dim,
+            context_dim=context_dim + self.width,
+            embed_dim=128,
+            num_heads=8,
+            n_layers=12,
+            init_scale=init_scale,
+        )
+
+        #
+        # Stage A FiLM MLPs (local per-point refinement)
+        #
+        # We'll output a high-dim per-point feature (512 channels).
+        self.stageA = nn.ModuleList(
+            [
+                FiLMResidualMLP(point_dim, 512, context_dim + self.width),
+                FiLMResidualMLP(512, 512, context_dim + self.width),
+                FiLMResidualMLP(512, 512, context_dim + self.width),
+            ]
+        )
+
+        #
+        # Stage B fusion:
+        # 1. Global pool of the per-point 512-dim features -> (B,1,512)
+        # 2. Concatenate [local_feat(512) || global_feat(512)] -> (B,N,1024)
+        # 3. FiLMResidualMLP(s) to map 1024 -> 512 -> 3
+        #
+        self.fuse_local_global_1 = FiLMResidualMLP(
+            dim_in=512 + 512,
+            dim_out=512,
+            dim_ctx=context_dim + self.width,
+            hidden_dim=512,
+        )
+        self.fuse_local_global_2 = FiLMResidualMLP(
+            dim_in=512,
+            dim_out=point_dim,
+            dim_ctx=context_dim + self.width,
+            hidden_dim=512,
+        )
+
+    def timestep_embedding(self, timesteps, dim, max_period=10000):
+        """
+        Create sinusoidal timestep embeddings.
+        timesteps: (B,) or (B,1)
+        returns: (B, dim)
+        """
+        if timesteps.ndim > 1:
+            timesteps = timesteps.view(-1)  # (B,)
+        half = dim // 2
+        freqs = torch.exp(
+            -math.log(max_period)
+            * torch.arange(
+                start=0, end=half, dtype=torch.float32, device=timesteps.device
+            )
+            / half
+        )  # (half,)
+        args = timesteps[:, None].to(torch.float32) * freqs[None]  # (B,half)
+        embedding = torch.cat(
+            [torch.cos(args), torch.sin(args)], dim=-1
+        )  # (B,dim or dim-1)
+        if dim % 2:
+            embedding = torch.cat(
+                [embedding, torch.zeros_like(embedding[:, :1])], dim=-1
+            )
+        return embedding  # (B,dim)
+
+    def forward(self, x, beta, context):
+        """
+        x:        (B, N, 3)  noisy point cloud at timestep beta
+        beta:     (B,)       noise level (sigma)
+        context:  (B, F)     latent keypoint code
+        returns:  denoised coords (B, N, 3)
+        """
+
+        B, N, _ = x.shape
+
+        # ---- 1. build conditioning ----
+        # timestep embedding from beta (prefer log sigma behavior for stability)
+        # we'll pass log(beta) into timestep_embedding to behave like "time"
+        beta = beta.view(B)  # (B,)
+        t_embed_raw = self.timestep_embedding(beta, self.width)  # (B, width)
+        t_embed = self.time_embed(
+            t_embed_raw
+        )  # shape depends on your MLP; assume (B, width)
+
+        # project context latent
+        c_project = self.ctx_embed(context)  # (B, context_dim)
+
+        # concat -> global conditioning vector per batch
+        ctx_vec = torch.cat([t_embed, c_project], dim=-1)
+
+        # keep both (B, C) and (B,1,C) views handy
+        ctx_vec_expanded = ctx_vec.unsqueeze(1)  # (B,1,context_dim+width)
+
+        # ---- 2. cross-attention from points to latent/time context ----
+        # cross_attn returns a point-wise delta we add to x
+        out = x + self.cross_attn(x, ctx_vec_expanded)  # (B,N,3)
+
+        # ---- 3. Stage A: local FiLMResidualMLPs ----
+        # pass ctx_vec (B,C) to each FiLMResidualMLP
+        for layer in self.stageA:
+            out = layer(
+                out, ctx_vec
+            )  # (B,N,512) after first, stays 512 after next ones
+
+        # ---- 4. Global pooling + broadcast ----
+        global_feat, _ = torch.max(out, dim=1, keepdim=True)  # (B,1,512)
+        out = torch.cat([out, global_feat.expand(-1, N, -1)], dim=-1)  # (B,N,1024)
+
+        # ---- 5. Stage B: fuse local+global and go to 3D ----
+        out = self.fuse_local_global_1(out, ctx_vec)  # (B,N,512)
+        out = F.leaky_relu(out, negative_slope=0.2)
+
+        out = self.fuse_local_global_2(out, ctx_vec)  # (B,N,3)
+
+        # EDM-style x0 prediction
+        return out
 
 
 class PointwiseNet(Module):

@@ -209,7 +209,10 @@ def train(opt: AEConfig):
         worker_init_fn=lambda id_: np.random.seed(np.random.get_state()[1][0] + id_),
     )
 
-    net = AutoEncoder(opt).cuda()
+    max_steps = len(dataloader) * opt.epochs
+    print(f"training with max_steps=  {max_steps}")
+    net = AutoEncoder(opt, max_steps=max_steps).cuda()
+
     net.train()
     t = 0
 
@@ -247,9 +250,7 @@ def train(opt: AEConfig):
                 .transpose(1, 2)
                 .cuda()
             )
-            temp_t = cosine_schedule(
-                t, len(dataloader) * opt.epochs, start=0.2, end=0.01
-            )
+            temp_t = cosine_schedule(t, max_steps, start=0.2, end=0.01)
 
             diffusion_loss, code, mu, logvar = net.get_loss(
                 get_network_data(data), step=t, temperature=temp_t
