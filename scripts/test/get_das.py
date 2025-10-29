@@ -44,9 +44,9 @@ for model_name, model_cls in MODEL_CLASSES.items():
     try_add_arg(subparser, "--ckpt", type=Path)
     try_add_arg(
         subparser,
-        "--annotation-json",
+        "--annotations",
         type=Path,
-        default="/app/annotations/airplane.json",
+        default="/app/annotations",
     )
     try_add_arg(subparser, "--pcd-path", type=Path, default="/app/pcds")
     try_add_arg(subparser, "--batch-size", type=int, default=32)
@@ -103,7 +103,9 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
         ]
     )
 
-    kpn_ds = json.load(open(opt.annotation_json))
+    annotation_json = opt.annotations / f"{opt.category}.json"
+
+    kpn_ds = json.load(open(annotation_json))
     out_kpcd = []
     out_nfact = []
     out_Q = []
@@ -372,7 +374,7 @@ def save_run(db_path, opt, fwd, bwd, das, miou_at_0_1):
         (
             opt.model,
             str(opt.ckpt) if opt.ckpt is not None else None,
-            str(opt.annotation_json),
+            str(opt.annotations),
             str(opt.pcd_path),
             int(opt.batch_size),
             int(opt.key_points),

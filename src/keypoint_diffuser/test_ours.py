@@ -38,7 +38,9 @@ class Ours(TestBase):
                 d[k] = v.cuda()
         return d
 
-    def get_reconstruction(self, pcd: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_reconstruction(
+        self, pcd: np.ndarray
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         z0, mu, logvar = self.model.encode(self.get_network_data(pcd))
         z_aux = reparameterize(mu, logvar)  # sampled from q(z|x)
         z0 = z0.reshape(z0.shape[0], -1)
@@ -48,4 +50,41 @@ class Ours(TestBase):
         return (
             recons.unsqueeze(1),
             pcd["target_shape"].reshape(z0.shape[0], -1, 3).cuda(),
+            z0,
         )
+
+    @torch.no_grad()
+    def interpolate_latent(
+        self, pcd_a: dict, pcd_b: dict, n_steps: int = 10, batch_size: int = 12
+    ):
+        """
+        Interpolate between two input point clouds in latent space.
+        Returns a list of decoded reconstructions.
+        """
+        # Encode both point clouds
+        z0_a, mu_a, logvar_a = self.model.encode(self.get_network_data(pcd_a))
+        z_aux_a = reparameterize(mu_a, logvar_a)
+        z_a = torch.cat([z0_a.reshape(z0_a.shape[0], -1), z_aux_a], dim=1)
+
+        z0_b, mu_b, logvar_b = self.model.encode(self.get_network_data(pcd_b))
+        z_aux_b = reparameterize(mu_b, logvar_b)
+        z_b = torch.cat([z0_b.reshape(z0_b.shape[0], -1), z_aux_b], dim=1)
+
+        # Precompute interpolation coefficients
+        t_values = torch.linspace(0, 1, n_steps, device=z_a.device)
+        z_interps = [(1 - t) * z_a + t * z_b for t in t_values]
+
+        k_a = z0_a[0].reshape(-1, 3)
+        k_b = z0_b[0].reshape(-1, 3)
+        k_interps = [(1 - t) * k_a + t * k_b for t in t_values]
+
+        # Decode in batches
+        recons = []
+        for i in range(0, len(z_interps), batch_size):
+            z_batch = torch.cat(z_interps[i : i + batch_size], dim=0)
+            recon_batch = self.model.decode(z_batch, 2048).detach().cpu()
+            recons.extend(recon_batch.split(1))  # keep consistent shape list
+
+        k_interps = [k.cpu() for k in k_interps]
+
+        return recons, k_interps

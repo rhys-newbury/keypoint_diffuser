@@ -49,7 +49,7 @@ TESTSET = "/app/shapenetcorev2_hdf5_2048/val"
 
 
 def save_recon_geoms(
-    best_recons, best_gts, cds, emds, opt, out_dir: Path = Path("output")
+    best_recons, best_gts, cds, emds, opt, kps, out_dir: Path = Path("output")
 ):
     """
     Save best reconstructions and ground truths as numpy arrays.
@@ -62,13 +62,16 @@ def save_recon_geoms(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     saved = 0
-    for idx, (recon, gt, cd, emd) in enumerate(zip(best_recons, best_gts, cds, emds)):
+    for idx, (recon, gt, cd, emd, kp) in enumerate(
+        zip(best_recons, best_gts, cds, emds, kps)
+    ):
         # recon: [M, 3], gt: [N, 3]
         dst = out_dir / f"sample_{idx:05d}"
         dst.mkdir(parents=True, exist_ok=True)
 
         np.save(dst / "recon.npy", np.asarray(recon, dtype=np.float32))
         np.save(dst / "gt.npy", np.asarray(gt, dtype=np.float32))
+        np.save(dst / "kp.npy", np.asarray(kp.cpu(), dtype=np.float32))
 
         meta = {
             "model": opt.model,
@@ -160,14 +163,14 @@ def make_loader(opt: argparse.Namespace) -> DataLoader:
 
 def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output")):
     cds, emds = [], []
-    best_recons, best_gts = [], []
+    best_recons, best_gts, kps = [], [], []
 
     model.model.eval()
     model.model.cuda()
     with torch.no_grad():
         for batch in tqdm.tqdm(loader, desc="Reconstruct (best per item)"):
             # recon_list: list of length B; each item is a list of [2048,3] tensors
-            recon_list, pc = model.get_reconstruction(batch)
+            recon_list, pc, kp = model.get_reconstruction(batch)
             gt_batch = pc.float()
             B = gt_batch.shape[0]
 
@@ -197,8 +200,9 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
 
                 best_recons.append(preds[i].cpu().numpy())  # [2048,3]
                 best_gts.append(gt_batch[b].cpu().numpy())  # [N,3]
+                kps.append(kp[b].reshape(-1, 3))
 
-    save_recon_geoms(best_recons, best_gts, cds, emds, opt, out_dir=out_dir)
+    save_recon_geoms(best_recons, best_gts, cds, emds, opt, kps, out_dir=out_dir)
 
     cd_mean = np.mean(cds)
     emd_mean = np.mean(emds)
