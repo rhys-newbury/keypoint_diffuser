@@ -20,8 +20,10 @@ def estimate_spacing(points, k=36):
     points: (N, 3) numpy array of XYZ coords
     """
     tree = cKDTree(points)
+    # get the distance between each point and its k closest neighbours
     dists, _ = tree.query(points, k=k)  # shape: (N, k)
     # Take median of distances to the 2nd neighbor (index 1, since index 0 is the point itself)
+    # nearest neighbour of every point, then find the largest distance
     return np.max(dists[:, 1])
 
 def surface_coverage_pointwise(surface_points, partial_points, radius=None):
@@ -37,6 +39,7 @@ def surface_coverage_pointwise(surface_points, partial_points, radius=None):
         coverage_fraction, radius_used
     """
     if radius is None:
+        # use the largest distance between individual surface points
         spacing = estimate_spacing(surface_points)
         radius = 1.5 * spacing if spacing > 0 else 0.01
 

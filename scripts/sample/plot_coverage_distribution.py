@@ -239,7 +239,7 @@ def plot_kde_overlay(
             common_norm=False,        # normalize each curve independently
             gridsize=max(50, int(grid_pts)),
             linewidth=2.0,
-            alpha=0.2,
+            alpha=0.1,
             label=f"{label} (n={a.size}, μ={a.mean():.3f})",
         )
         any_plotted = True

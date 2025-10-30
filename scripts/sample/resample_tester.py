@@ -14,6 +14,8 @@ import pyrender
 import yaml
 import argparse
 
+from compute_coverage import *
+
 def create_axis_pointcloud(pose=np.eye(4), length=0.1, step=0.01):
     """
     Create an axis-aligned RGB pointcloud centered at the origin, transformed by a pose.
@@ -95,8 +97,8 @@ def look_at(eye, center, up=np.array([0, 1, 0])):
     right = np.cross(up, backward)
     right /= np.linalg.norm(right)
     up = np.cross(backward, right)
-    print(f"up: {up}")
-    print(f"forward: {backward}")
+    # print(f"up: {up}")
+    # print(f"forward: {backward}")
     # special pyrender/opengl camera coordinates convention: eye is looking down the negative z-axis
     rotation_matrix = np.array([
         [right[0], up[0], backward[0], 0],
@@ -164,8 +166,8 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
         # vp = np.array([2., 0, 2.])
         # camera_pose, axis_pose = look_at(eye=vp, center=np.array([0, 0, 0]), up=np.array([0, 1, 0]))
         
-        print("camera pose inside sample function:")
-        print(camera_pose)
+        # print("camera pose inside sample function:")
+        # print(camera_pose)
         
         # # use a fixed camera pose for test
         # camera_pose = np.array([
@@ -311,13 +313,13 @@ def sample_visible_points_from_single_view(mesh, num_samples, fov_degrees=75, st
             # visible_points_world = (np.linalg.inv(camera_R) @ (visible_points_hom @ np.eye(4)).T).T[:, :3]
             # visible_points_world += camera_t  # Add translation
             
-            print(f"camera_pose:\n{camera_pose}")
-            print(f"camera_pose inverse:\n{np.linalg.inv(camera_pose)}")
-            print(f"camera_R:\n{camera_R}")
-            print(f"camera_t:\n{camera_t}")
-            print(f"camera_R inverse:\n{np.linalg.inv(camera_R)}")
-            print(f"cam_inv_t_hom:\n{cam_inv_t_hom}")
-            print(f"R @ inv_pose:\n{R @ np.linalg.inv(camera_pose)}")
+            # print(f"camera_pose:\n{camera_pose}")
+            # print(f"camera_pose inverse:\n{np.linalg.inv(camera_pose)}")
+            # print(f"camera_R:\n{camera_R}")
+            # print(f"camera_t:\n{camera_t}")
+            # print(f"camera_R inverse:\n{np.linalg.inv(camera_R)}")
+            # print(f"cam_inv_t_hom:\n{cam_inv_t_hom}")
+            # print(f"R @ inv_pose:\n{R @ np.linalg.inv(camera_pose)}")
             
             # visible_points_world = visible_points_hom[:, :3]
             # visible_points_world = (np.linalg.inv(camera_pose) @ visible_points_hom.T).T[:, :3]
@@ -385,7 +387,7 @@ def generate_labels_for_sampled_points(sampled_points, seg_points, seg_labels):
 # from concurrent.futures import ThreadPoolExecutor
 seg_labels_ = None
 # count, total = 0,0
-def process_file(i, data_root_dir, save_root_dir, mode="default"):
+def process_file(i, data_root_dir, save_root_dir, mode="default", visualize=False):
     # Original pre-processed model file
     file_path = data_root_dir / Path(f"{i}/models/model_normalized2.obj")
     if not file_path.is_file():
@@ -419,6 +421,15 @@ def process_file(i, data_root_dir, save_root_dir, mode="default"):
         print(i)
     sampled_points = None
     
+    # load the surface points
+    try:
+        # load the surface point clouds
+        surface_points = np.load(data_root_dir / i / "models" / "surface_samples.npy")
+    except Exception:
+        print(i)
+        
+    coverage_list = []
+        
     # Sample 5 total meshes, each with one full point cloud and one partial point cloud
     for n in range(5):
         save_path = save_root_dir / i / "models"
@@ -442,7 +453,9 @@ def process_file(i, data_root_dir, save_root_dir, mode="default"):
         
         # Sample the mesh for full point clouds, from the same frame
         
-        
+        # calculate the coverage of the partial point cloud
+        coverage, radius, covered_points, not_covered_points = surface_coverage_pointwise(surface_points, sampled_points)
+        coverage_list.append(coverage)
         
         # Visualise with open3d
         # visualise the resampled points and the original full point cloud
@@ -512,11 +525,10 @@ def process_file(i, data_root_dir, save_root_dir, mode="default"):
         # print(f"The transform: ")
         # print(o3Tpyr)
         
-        print()
-        
         ############################
 
-        o3d.visualization.draw_geometries([pcd, full_pcd, axis_pcd, origin_pcd])
+        if visualize:
+            o3d.visualization.draw_geometries([pcd, full_pcd, axis_pcd, origin_pcd])
 
         
         
@@ -529,11 +541,13 @@ def process_file(i, data_root_dir, save_root_dir, mode="default"):
         # # If we end up with more points than needed, trim the array
         # sampled_points = sampled_points[:num_samples]
         
-        print(f"Saving to: {save_path / f'partial_samples_{mode}_{n}.npy'}')")
+        # print(f"Saving to: {save_path / f'partial_samples_{mode}_{n}.npy'}')")
         
         # save the points
         save_path.mkdir(parents=True, exist_ok=True)
         # np.save(save_path / f"partial_samples_{mode}_{n}.npy", sampled_points)
+        
+    return coverage_list
     
     # if sampled_points is None:
     #     sampled_points = np.load(output_path.parent / f"new_samples_{n}.npy")
@@ -601,9 +615,10 @@ folders = {"02691156"}
 # folders =   {"03636649", "03467517", "02954340", "02958343"}  # lamp, guitar, cap, car
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--src_dir", type=str, default="data/shapenetcorev2-source", help="Root directory for the source mesh.")
-    parser.add_argument("--dst_dir", type=str, default="data/shapenetcorev2-source", help="Root directory for saving the resampled point clouds.")
+    parser.add_argument("--src_dir", type=str, default="/mnt/slow/shapenetcorev2-source", help="Root directory for the source mesh.")
+    parser.add_argument("--dst_dir", type=str, default="/mnt/slow/shapenetcorev2-source", help="Root directory for saving the resampled point clouds.")
     parser.add_argument("--mode", type=str, default="default", help="View mode to resample the data. See resample.yaml for options.")
+    parser.add_argument("--visualize", action='store_true', help="Visualize sampled point clouds")
     args = parser.parse_args()
     
     data_root_dir = Path(args.src_dir)
@@ -616,5 +631,23 @@ if __name__ == "__main__":
     print(len(folders_to_run))
     shuffle(folders_to_run)
     
+    coverage_list_list = []
     for idx, i in tqdm(enumerate(folders_to_run), total=len(folders_to_run)):
-        process_file(i, data_root_dir, save_root_dir, args.mode)
+        coverage_list = process_file(i, data_root_dir, save_root_dir, args.mode)
+        coverage_list_list.append(coverage_list)
+        if idx == 1000:
+            break
+        
+    coverage_list_list = np.array([c for l in coverage_list_list for c in l])
+    
+    plt.figure(figsize=(6,4))
+    plt.hist(coverage_list_list, bins=20, edgecolor='black', alpha=0.7)
+    plt.xlabel("Coverage")
+    plt.ylabel("Frequency")
+    plt.title("Distribution of Coverage Values")
+    plt.grid(alpha=0.3)
+    plt.yscale("log")
+    plt.savefig(f"coverage_distribution_{args.mode}.png", dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"Mean coverage for profile {args.mode}: {np.mean(coverage_list_list):.4f} ± {np.std(coverage_list_list):.4f}")
