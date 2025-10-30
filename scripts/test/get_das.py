@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import tqdm
+import random
+from typing import Dict, List, Literal, Tuple
 from baselines.test_base import TestBase
 from classes import MODEL_CLASSES
 from keypoint_diffuser.utils.pc_utils import collate_fn
@@ -22,7 +24,7 @@ from torchvision import transforms
 
 CHECKPOINTS_DIR = "checkpoints"
 CHECKPOINT_EXT = ".pth"
-
+PARTIAL_VIEW_MODES = ["default", "myopia", "patch", "tac"]
 
 def try_add_arg(p: argparse.ArgumentParser, arg, type=None, default=None, **kwargs):
     with contextlib.suppress(argparse.ArgumentError):
@@ -42,26 +44,113 @@ for model_name, model_cls in MODEL_CLASSES.items():
         subparser
     )  # pass the subparser in instead of creating inside get_parser
     try_add_arg(subparser, "--ckpt", type=Path)
+    try_add_arg(subparser, "--points-dir", type=Path, default=Path("/mnt/shape-data/newdata/pcds"))
+    try_add_arg(subparser, "--input-type", type=str, default="full", choices=["full", *PARTIAL_VIEW_MODES, "all"])
+    try_add_arg(subparser, "--n-partial-samples", type=int, default=2)
+
     try_add_arg(
         subparser,
         "--annotation-json",
         type=Path,
-        default="/app/annotations/airplane.json",
+        default="/mnt/shape-data/newdata/annotations/airplane.json",
     )
-    try_add_arg(subparser, "--pcd-path", type=Path, default="/app/pcds")
+    try_add_arg(subparser, "--pcd-path", type=Path, default="/mnt/shape-data/newdata/pcds")
     try_add_arg(subparser, "--batch-size", type=int, default=32)
     try_add_arg(subparser, "--key-points", type=int, default=10)
 
     try_add_arg(
         subparser, "--category", type=str, help="Category of objects", default="chair"
     )
-    try_add_arg(subparser, "--db-path", type=Path, default=Path("results.db"))
+    try_add_arg(subparser, "--db-path", type=Path, default=Path(f"das_results.db"))
     try_add_arg(subparser, "--save", action="store_true")
+    try_add_arg(subparser, "--output-dir", type=Path, default=Path("kps_out"))
 
 # ----------------------------
 # Utilities
 # ----------------------------
 
+def _load_partial(points_dir: Path, cid: str, mid: str, mode: str, n: int) -> Tuple[np.ndarray, Path]:
+    p = points_dir / cid / mid / "models" / f"partial_samples_{mode}_{n}.npy"
+    arr = np.load(p)
+    if arr.ndim != 2 or arr.shape[1] < 3:
+        raise ValueError(f"Unexpected partial npy shape at {p}: {arr.shape}")
+    return arr[:, :3].astype(np.float32), p
+
+
+def read_partial_npy(
+    points_dir: Path,
+    cid: str,
+    mid: str,
+    mode: str,
+    n_partial_samples: int,
+    iterate: bool = True,
+    rng: random.Random | None = None,
+    strict: bool = False,
+):
+    """
+    Flexible partial loader.
+
+    Parameters
+    ----------
+    points_dir : root dir (…/<cid>/<mid>/models/partial_samples_{mode}_{n}.npy)
+    cid, mid   : class_id and model_id
+    mode       : a specific mode (e.g. "default") OR "all"
+    n_partial_samples : number of available indices for 'n' (interpreted as range(0, n_partial_samples))
+    iterate    : whether to loop over all modes × all n, or pick a single (mode, n) at random
+    rng        : optional random.Random to make selection deterministic
+    strict     : if False, skip missing files instead of raising (some meshes and point clouds are missing)
+
+    Returns
+    -------
+    If iterate == "none":
+        (pc: np.ndarray, meta: dict)
+    Else:
+        (pcs: List[np.ndarray], metas: List[dict])
+    """
+    if rng is None:
+        rng = random
+
+    modes = PARTIAL_VIEW_MODES if mode == "all" else [mode]
+
+    # Iterate over combinations
+    if iterate:
+        pcs: List[np.ndarray] = []
+        metas: List[Dict] = []
+        for m in modes:
+            for n in range(int(n_partial_samples)):
+                try:
+                    pc, p = _load_partial(points_dir, cid, mid, m, n)
+                except FileNotFoundError as e:
+                    if strict:
+                        raise
+                    # skip missing silently
+                    continue
+                pcs.append(pc)
+                metas.append({"mode": m, "n": n, "path": str(p)})
+        return pcs, metas
+
+    # Single random selection
+    m = rng.choice(modes)
+    n = rng.randint(0, max(0, int(n_partial_samples) - 1))
+    pc, p = _load_partial(points_dir, cid, mid, m, n)
+    return pc, {"mode": m, "n": n, "path": str(p)}
+
+
+# def read_partial_npy(points_dir: Path, cid: str, mid: str, mode: str, n_partial_samples: int) -> np.ndarray:
+#     """
+#     Load a partial point cloud like ShapesPartial:
+#       {points_dir}/{cid}/{mid}/models/partial_samples_{mode}_{n}.npy
+#     with a random n in [0, n_partial_samples).
+#     """
+#     if mode == "all":
+#         mode = random.choice(PARTIAL_VIEW_MODES)
+#     n = random.randint(0, max(0, n_partial_samples - 1))
+#     p = points_dir / cid / mid / "models" / f"partial_samples_{mode}_{n}.npy"
+#     arr = np.load(p)
+#     # Expect N×3 or N×>=3; keep first 3 cols if extra exist
+#     if arr.ndim != 2 or arr.shape[1] < 3:
+#         raise ValueError(f"Unexpected partial npy shape at {p}: {arr.shape}")
+#     return arr[:, :3].astype(np.float32)
 
 def naive_read_pcd(path):
     with open(path) as f:
@@ -103,24 +192,41 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
         ]
     )
 
-    kpn_ds = json.load(open(opt.annotation_json))
+    # reads from annotation file
+    kpn_ds = json.load(open(opt.annotation_json))   # gt keypoints
     out_kpcd = []
     out_nfact = []
     out_Q = []
 
+    # loops through annotations
     for i in tqdm.tqdm(
         range(0, len(kpn_ds), opt.batch_size), unit_scale=opt.batch_size
     ):
+        # gather point clouds into Q
         Q = []
+        # loops through batch
         for j in range(opt.batch_size):
             if i + j >= len(kpn_ds):
                 continue
             entry = kpn_ds[i + j]
             cid = entry["class_id"]
             mid = entry["model_id"]
-            pc_path = opt.pcd_path / cid / f"{mid}.pcd"
-            pc = naive_read_pcd(pc_path)
+            # loads the pcd file 
+            if opt.input_type == "full":
+                # original full .pcd path
+                pc_path = opt.pcd_path / cid / f"{mid}.pcd"
+                pc = naive_read_pcd(pc_path)
+            else:
+                # read partial point cloud from npy, similar to ShapesPartial
+                pc = read_partial_npy(
+                    points_dir=opt.points_dir,
+                    cid=cid,
+                    mid=mid,
+                    mode=opt.input_type,
+                    n_partial_samples=opt.n_partial_samples,
+                )
 
+            # normalize pcd
             pcmax = pc.max()
             pcmin = pc.min()
             pcn = (pc - pcmin) / (pcmax - pcmin)
@@ -135,6 +241,7 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
             Q = np.array(Q)
             out_Q.append(Q)
             T_nb = []
+            # convert point cloud data to dataset format
             for i in range(Q.shape[0]):
                 data = {"coord": Q[i]}
                 T_nb.append(t(data))
@@ -208,6 +315,10 @@ def bwd_alignment_scores(kpn_ds, predicted):
 
 
 def mIoU(kpn_ds, predicted, pcd_path):
+    """
+    calculates the mean Intersection over Union (mIoU) for the predicted keypoints against the ground truth keypoints.
+    predicted keypoints are projected back on to the original cloud surface before distance calculation, to measure geometric alignment.
+    """
     thresholds = np.linspace(0.0, 0.1)
     kps = []
     gts = []
@@ -265,7 +376,7 @@ def save_numpy_geoms(
     Also dumps meta.json with ids + config.
     """
 
-    out_dir.mkdir(exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
     flat_Q = [q for qb in out_Q for q in qb]  # flatten batches
 
     saved = 0
@@ -290,7 +401,7 @@ def save_numpy_geoms(
 
         # save per-sample folder
         dst = out_dir / opt.category / entry["model_id"]
-        dst.mkdir(exist_ok=True)
+        dst.mkdir(parents=True, exist_ok=True)
         np.save(dst / "pc.npy", pc)
         np.save(dst / "pred_kp.npy", pred)
         np.save(dst / "gt_kp.npy", gt)
@@ -381,9 +492,10 @@ if __name__ == "__main__":
     model.load_model(opt.ckpt, opt)
 
     kpn_ds, predicted, out_Q = run_prediction(model, opt)
+    print(opt.save)
     if opt.save:
         save_numpy_geoms(
-            kpn_ds, predicted, out_Q, opt, out_dir=Path("output") / opt.model
+            kpn_ds, predicted, out_Q, opt, out_dir=opt.output_dir / opt.model
         )
 
     fwd = fwd_alignment_scores(kpn_ds, predicted)

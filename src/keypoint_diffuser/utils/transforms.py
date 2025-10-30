@@ -237,7 +237,7 @@ class Deform:
         original = copy.deepcopy(data_dict)
 
         new_pc, transformation = apply_general_deformation(
-            torch.Tensor(data_dict["coord"][None, :, :]).cuda(),
+            torch.Tensor(data_dict["coord"][None, :, :]),
             max_stretch_factor=self.max_stretch_factor,
             max_bending_factor=self.max_bending_factor,
             max_twist_factor=self.max_twist_factor,

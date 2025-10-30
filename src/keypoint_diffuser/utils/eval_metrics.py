@@ -72,13 +72,14 @@ def EMD_CD_recon(sample_pcs, ref_pcs, batch_size=8, reduced=True):
 
     B = sample_pcs.shape[0]
     for b_start in range(0, B, batch_size):
+        # import pdb; pdb.set_trace()
         b_end = min(B, b_start + batch_size)
         samp_batch = sample_pcs[b_start:b_end]
         ref_batch = ref_pcs[b_start:b_end]
-        cd, _ = pytorch3d.loss.chamfer_distance(samp_batch, ref_batch)
+        cd, _ = pytorch3d.loss.chamfer_distance(samp_batch, ref_batch, batch_reduction=None, point_reduction="mean")
         emd = emd_approx(samp_batch, ref_batch)  # per-sample EMD
 
-        cd_lst.append(cd.reshape(1))
+        cd_lst.append(cd)
         emd_lst.append(emd)
 
     cd_all = torch.cat(cd_lst)

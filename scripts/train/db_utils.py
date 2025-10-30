@@ -42,7 +42,7 @@ def save_train_run(
     return rid
 
 
-def find_checkpoint_from_db_dir(db_root, category, epoch, also_filter_table_by_category=True):
+def find_checkpoint_from_db_dir(db_root, category, epoch, use_max_epoch=False, also_filter_table_by_category=True):
     """
     Look through .db files in `db_root` whose *filename* contains `category`;
     read `train_runs.ckpt_dir` from each; then verify that directory contains
@@ -66,6 +66,8 @@ def find_checkpoint_from_db_dir(db_root, category, epoch, also_filter_table_by_c
         Class/category string that must appear in the DB *filename* (case-insensitive).
     epoch : int
         Target epoch number to look for in checkpoint filenames.
+    use_max_epoch : bool
+        If True, ignore `epoch` and instead return the checkpoint named 'net_final.pth' if found.
     also_filter_table_by_category : bool
         If True, also filter rows by 'category' in the train_runs table when present.
 
@@ -157,7 +159,11 @@ def find_checkpoint_from_db_dir(db_root, category, epoch, also_filter_table_by_c
                 if not ckpt_dir_str:
                     continue
                 ckpt_dir = Path(ckpt_dir_str)
-                best = scan_ckpt_dir_for_best(ckpt_dir, epoch)
+                if use_max_epoch:
+                    # look for net_final.pth instead
+                    best = ckpt_dir / "net_final.pth"
+                else: 
+                    best = scan_ckpt_dir_for_best(ckpt_dir, epoch)
                 if best is not None:
                     return best
         finally:

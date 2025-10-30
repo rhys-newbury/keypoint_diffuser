@@ -83,9 +83,10 @@ def main():
     ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--only-algo", choices=MODEL_CLASSES.keys())
     ap.add_argument("--only-category")
+    ap.add_argument("--input-type", type=str, default="full")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--keep-going", action="store_true")
-    ap.add_argument("--epoch-interval", type=int, default=10)
+    ap.add_argument("--output-dir", type=Path, default=None)
     # DB that get_das writes into (defaults to same file as --db)
     ap.add_argument(
         "--eval-db-path",
@@ -108,6 +109,9 @@ def main():
     ap.add_argument(
         "--limit", type=int, default=None, help="Process at most N checkpoints per row"
     )
+    ap.add_argument("--epoch-interval", type=int, default=None)
+    ap.add_argument("--only-epoch", type=int, default=None)
+    
     args = ap.parse_args()
     eval_db_path = args.eval_db_path or args.db
 
@@ -142,8 +146,22 @@ def main():
             for f in ckpt_list:
                 if "net_final" in str(f):
                     final_path = f
-            # apply optional epoch filter
-            if args.start_epoch is not None:
+            # apply optional epoch filters
+            epoch_num_list = []
+            
+            if args.only_epoch is not None:
+                for f in ckpt_list:
+                    m = EPOCH_RE.search(f.name)
+                    if m and (int(m.group("epoch")) == args.only_epoch):
+                        ckpt_list = [f]
+                        epoch_num_list.append(int(m.group("epoch")))
+                        break
+                    elif "net_final.pth" in f.name:
+                        final_f = f
+                # if the only_epoch was not found, use the final epoch
+                ckpt_list = [final_f]
+                epoch_num_list.append(args.only_epoch)
+            elif arg.start_epoch is not None:
                 filtered = []
                 for f in ckpt_list:
                     m = EPOCH_RE.search(f.name)
@@ -151,16 +169,33 @@ def main():
                         continue
                     filtered.append(f)
                 ckpt_list = filtered
+                
+                all_ms = []
 
-            if args.epoch_interval != 1:
-                filtered2 = []
-                for f in ckpt_list:
-                    m = EPOCH_RE.search(f.name)
-                    if m and int(m.group("epoch")) % args.epoch_interval == 0:
-                        filtered2.append(f)
-                    else:
-                        continue
-                ckpt_list = filtered2
+                if args.epoch_interval is not None:
+                    filtered_int = []
+                    for f in ckpt_list:
+                        # print(f"f: {f.name}")
+                        m = EPOCH_RE.search(f.name)
+                        if m: 
+                            all_ms.append(int(m.group("epoch")))
+                            mint = int(m.group("epoch"))
+                        elif "net_final.pth" in f.name:
+                            ms_interval = all_ms[-1] - all_ms[-2]
+                            mint = all_ms[-1] + ms_interval
+                        else:
+                            print(f"what is this f: {f.name}")
+                        # print(f"mint: {mint}")
+                        if mint % args.epoch_interval == 0:
+                            filtered_int.append(f)
+                            epoch_num_list.append(mint)
+                        else:
+                            continue
+                    ckpt_list = filtered_int
+                    # failsafe adding the final epoch number (only applies if the ckpt_list length does not match the epoch_num_list length)
+                    if epoch_num_list and (len(ckpt_list) != len(epoch_num_list)):
+                        epoch_num_list.append(epoch_num_list[-1] + args.epoch_interval)
+
 
             if args.limit is not None:
                 ckpt_list = ckpt_list[: args.limit]
@@ -176,6 +211,7 @@ def main():
                 if already_evaluated(
                     eval_db_path, ckpt_path, algo, category, args.table_name
                 ):
+                    print(f"{eval_db_path} already exists. Skipping...")
                     continue
 
                 annotation_json = Path("/mnt/shape-data/newdata/annotations") / f"{category}.json"
@@ -198,6 +234,11 @@ def main():
                         str(category),
                         "--db-path",
                         str(eval_db_path),
+                        "--input-type",
+                        str(args.input_type), 
+                        "--output-dir",
+                        str(args.output_dir / f"epoch_{epoch_num_list.pop(0)}"), 
+                        "--save", 
                     ]
                 elif "get_reconstruction" in str(args.script):
                     cmd = [
@@ -214,6 +255,11 @@ def main():
                         str(category),
                         "--db-path",
                         str(eval_db_path),
+                        "--output-dir",
+                        str(args.output_dir / f"epoch_{epoch_num_list.pop(0)}"),
+                        "--input-type",
+                        str(args.input_type),
+                        "--save-kps",
                     ]
                 else:
                     raise SystemExit(f"Unknown script: {args.script}")

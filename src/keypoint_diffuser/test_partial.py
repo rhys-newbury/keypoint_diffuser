@@ -22,8 +22,8 @@ class Partial(TestBase):
         load_network(self.model, str(model_path))
         self.model.eval()  # optional: set to evaluation mode
 
-    def get_keypoints(self, pcd: np.ndarray) -> np.ndarray:
-        return self.model.encode(pcd)[0].cpu().numpy()
+    def get_keypoints(self, data: dict[str, Any]) -> np.ndarray:
+        return self.model.encode(data)[0].cpu().numpy()
 
     def get_network_data(self, data: dict[str, Any], key="orig"):
         # key is the subset 
@@ -41,18 +41,28 @@ class Partial(TestBase):
             elif k.startswith(key):
                 d[k[len(key) + 1 :]] = v
             # shared data, keep
+            elif type(v) == list:
+                d[k] = v
             else:
                 d[k] = v
         return d
 
-    def get_reconstruction(self, pcd: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
-        z0, mu, logvar = self.model.encode(self.get_network_data(pcd))
+    def get_reconstruction(self, data: dict[str, Any], key="orig") -> tuple[torch.Tensor, torch.Tensor]:
+        z0, mu, logvar = self.model.encode(self.get_network_data(data, key=key))
         z_aux = reparameterize(mu, logvar)  # sampled from q(z|x)
         z0 = z0.reshape(z0.shape[0], -1)
         z_full = torch.cat([z0, z_aux], dim=1)
 
+        if key=="orig":
+            input_pc = data["target_shape"].reshape(z0.shape[0], -1, 3).cuda()
+            full_pc = data["target_shape"].reshape(z0.shape[0], -1, 3).cuda()
+        elif key == "partial_orig":
+            input_pc = data["target_partial_shape"].reshape(z0.shape[0], -1, 3).cuda()
+            full_pc = data["target_shape"].reshape(z0.shape[0], -1, 3).cuda()
+
         recons = self.model.decode(z_full, 2048).detach()
         return (
             recons.unsqueeze(1),
-            pcd["target_shape"].reshape(z0.shape[0], -1, 3).cuda(),
+            input_pc,
+            full_pc
         )

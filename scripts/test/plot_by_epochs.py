@@ -19,7 +19,7 @@ import re
 import sqlite3
 from pathlib import Path
 from typing import Dict, List, Tuple
-
+from cycler import cycler
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -71,6 +71,14 @@ def parse_args():
     p.add_argument(
         "--max-epoch", type=int, default=100,
         help="the max epoch corresponding to the model net_final"
+    )
+    p.add_argument(
+        "--start-epoch", type=int, default=None,
+        help="If filenames have '<K>kp_<E>.pth', skip checkpoints with epoch < E",
+    )
+    p.add_argument(
+        "--logy", action="store_true", 
+        help="Use log-scale on Y axis."
     )
     return p.parse_args()
 
@@ -148,6 +156,7 @@ def gather_metric_by_category(
     runs_rows: List[Tuple[str, str, float, float]],
     recon_rows: List[Tuple[str, str, float, float]],
     max_epoch: int,
+    start_epoch: int, 
 ) -> Dict[str, List[Tuple[int, float]]]:
     """Build: category -> list of (epoch, metric_value)."""
     cat2vals: Dict[str, List[Tuple[int, float]]] = collections.defaultdict(list)
@@ -166,6 +175,8 @@ def gather_metric_by_category(
             if "net_final" in str(ckpt):
                 epoch = max_epoch
             if epoch is None:
+                continue
+            if start_epoch and (epoch < start_epoch):
                 continue
             val = float(cd) if metric == "cd_recon" else float(emd)
             cat2vals[category].append((epoch, val))
@@ -189,6 +200,7 @@ def average_duplicate_epochs(pairs: List[Tuple[int, float]]) -> Tuple[np.ndarray
 # ----------------------------
 
 def main():
+    # import pdb; pdb.set_trace()
     args = parse_args()
 
     db_paths = expand_db_paths(args.db, args.recursive)
@@ -204,7 +216,7 @@ def main():
     if args.metric in ("cd_recon", "emd_recon") and not recon_rows:
         raise SystemExit("No 'reconstruction' rows found for metrics cd_recon/emd_recon.")
 
-    by_cat = gather_metric_by_category(args.metric, runs_rows, recon_rows, args.max_epoch)
+    by_cat = gather_metric_by_category(args.metric, runs_rows, recon_rows, args.max_epoch, args.start_epoch)
     if not by_cat:
         raise SystemExit("No (category, epoch, value) pairs found after parsing ckpt epochs.")
 
@@ -220,6 +232,10 @@ def main():
 
     if not cats:
         raise SystemExit("No categories to plot.")
+
+    # Make a 13-color cycle from tab20 (which has up to 20 distinct qualitative colors)
+    colors = plt.cm.get_cmap('tab20', 13).colors
+    plt.rcParams['axes.prop_cycle'] = cycler(color=colors)
 
     # plot
     plt.figure(figsize=(9, 5))
@@ -248,10 +264,42 @@ def main():
     plt.ylabel(ylabels[args.metric])
     ttl = args.title or f"{ylabels[args.metric]} vs Epoch"
     plt.title(ttl)
+    if args.logy:
+        plt.yscale("log")
     plt.axvline(x=50, color='k')
     plt.grid(True, alpha=0.35)
     plt.legend(title="Category", ncol=2, fontsize=9)
     plt.tight_layout()
+    
+        # ---- Print metric at the final epoch per class ----
+    print("\n# Final-epoch metrics")
+    label = ylabels[args.metric]
+    for cat in cats:
+        pairs = by_cat.get(cat, [])
+        if not pairs:
+            print(f"[FINAL] {cat}: (no data)")
+            continue
+
+        # sort by epoch and get the maximum epoch for this category
+        pairs_sorted = sorted(pairs, key=lambda x: x[0])
+        max_e = max(e for e, _ in pairs_sorted)
+
+        # values recorded at that final epoch (could be multiple runs)
+        finals = [v for e, v in pairs_sorted if e == max_e]
+        if not finals:
+            print(f"[FINAL] {cat}: (no data at epoch {max_e})")
+            continue
+
+        # if user requested averaging of duplicates, average at the final epoch too
+        if args.average_duplicates and len(finals) > 1:
+            val = float(np.mean(finals))
+        else:
+            # otherwise take the last one encountered at that epoch
+            val = float(finals[-1])
+
+        print(f"[FINAL] {cat}: epoch {max_e} -> {label} = {val:.6g}")
+
+    
     plt.savefig(args.output, dpi=200)
     print(f"[✓] Saved plot to {args.output}")
     if args.show:

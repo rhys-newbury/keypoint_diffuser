@@ -372,6 +372,8 @@ class ShapesPartial(torch.utils.data.Dataset):
 
         result = {"source_" + k: v for k, v in source_data.items()}
         result.update({"target_" + k: v for k, v in target_data.items()})
+        result.update({"source_name": name})
+        result.update({"target_name": name_2})
 
         return result
 
@@ -414,15 +416,15 @@ class ShapesPartial(torch.utils.data.Dataset):
                 sample = {
                     **sample,
                     **{
-                        f"orig_{key}": value.cuda()
+                        f"orig_{key}": value#.cuda()
                         for key, value in transformed.items()
                     },
                     **{
-                        f"deformed_{key}": value.cuda()
+                        f"deformed_{key}": value#.cuda()
                         for key, value in deformed.items()
                     },
                     **{
-                        f"partial_orig_{key}": value.cuda()
+                        f"partial_orig_{key}": value#.cuda()
                         for key, value in partial.items()
                     },
                     # **{

@@ -24,6 +24,10 @@ try:
     from keypoint_diffuser.test_ours import Ours
 except ImportError:
     Ours = None
+try:
+    from keypoin_diffuser.test_partial import Partial
+except ImportError:
+    Partial = None
 
 MODEL_CLASSES = {
     "SC3K": SC3K,
@@ -32,6 +36,7 @@ MODEL_CLASSES = {
     "KeyGrid": KeyGrid,
     "KeyGridOrig": KeyGrid,
     "DPM": DPM,
-    "Ours": Ours
+    "Ours": Ours,
     # Add more models here:
+    "Partial": Partial,
 }
