@@ -96,41 +96,89 @@ def EMD_CD_recon(sample_pcs, ref_pcs, batch_size=8, reduced=True):
         }
 
 
-def EMD_CD(sample_pcs, ref_pcs, batch_size, reduced=True):
-    N_sample = sample_pcs.shape[0]
-    N_ref = ref_pcs.shape[0]
-    assert N_sample == N_ref, "REF:%d SMP:%d" % (N_ref, N_sample)
+def MMD_CD_EMD(
+    gen_pcs: torch.Tensor,  # (Ns, P, 3) e.g. generated
+    ref_pcs: torch.Tensor,     # (Nr, P, 3) e.g. real
+    batch_size: int = 16,
+    reduced: bool = True,
+    ref_chunk_size: int = 32,
+    symmetric: bool = False,
+):
+    """
+    True MMD but in two levels of batching:
+      - outer over query (gen or ref), size <= batch_size
+      - inner over reference chunks, size <= ref_chunk_size
 
-    cd_lst = []
-    emd_lst = []
-    iterator = range(0, N_sample, batch_size)
+    For each query point cloud q:
+       best_cd[q] = min_j CD(q, ref_j)
+       best_emd[q] = min_j EMD(q, ref_j)
+    """
+    device = gen_pcs.device
+    ref_pcs = ref_pcs.to(device)
 
-    for b_start in tqdm(iterator, desc="EMD-CD"):
-        b_end = min(N_sample, b_start + batch_size)
-        sample_batch = sample_pcs[b_start:b_end]
-        ref_batch = ref_pcs[b_start:b_end]
+    def one_direction(query: torch.Tensor, target: torch.Tensor):
+        Nq = query.shape[0]
+        Nt = target.shape[0]
+        all_best_cd = []
+        # all_best_emd = []
 
-        cd, _ = pytorch3d.loss.chamfer_distance(sample_batch, ref_batch)
-        cd_lst.append(cd.reshape(1))
+        for q_start in tqdm(range(0, Nq, batch_size), desc="MMD query batches"):
+            q_batch = query[q_start : q_start + batch_size]  # (B, P, 3)
+            B = q_batch.shape[0]
+            # start with +inf best
+            best_cd = torch.full((B,), float("inf"), device=device)
+            # best_emd = torch.full((B,), float("inf"), device=device)
 
-        emd_batch = emd_approx(sample_batch, ref_batch)
-        emd_lst.append(emd_batch)
+            for t_start in range(0, Nt, ref_chunk_size):
+                t_batch = target[t_start : t_start + ref_chunk_size]  # (C, P, 3)
+                C = t_batch.shape[0]
 
-    if reduced:
-        cd = torch.cat(cd_lst).mean()
-        emd = torch.cat(emd_lst).mean()
+                # expand to (B*C, P, 3) but C is small
+                q_exp = q_batch[:, None, :, :].expand(B, C, -1, -1).reshape(B * C, -1, 3)
+                t_exp = t_batch[None, :, :, :].expand(B, C, -1, -1).reshape(B * C, -1, 3)
+
+                # CD for this block
+                # print("calc CD")
+                cd_block, _ = pytorch3d.loss.chamfer_distance(q_exp, t_exp, batch_reduction=None)  # (B*C,)
+                cd_block = cd_block.view(B, C)       # (B, C)
+                # print("calc cd done.")
+                # EMD for this block (loop over pairs in the block)
+                # print("calc emd")
+                # emd_block = emd_approx(q_exp, t_exp)
+                # emd_block = emd_block.view(B, C)     # (B, C)
+                # print("calc emd done")
+
+                # update best
+                cd_min_block, _ = cd_block.min(dim=1)   # (B,)
+                # emd_min_block, _ = emd_block.min(dim=1) # (B,)
+
+                best_cd = torch.minimum(best_cd, cd_min_block)
+                # best_emd = torch.minimum(best_emd, emd_min_block)
+
+            all_best_cd.append(best_cd)
+            # all_best_emd.append(best_emd)
+
+        all_best_cd = torch.cat(all_best_cd, dim=0)
+        # all_best_emd = torch.cat(all_best_emd, dim=0)
+        return all_best_cd #, all_best_emd
+
+    cd_s2r = one_direction(gen_pcs, ref_pcs)
+
+    if symmetric:
+        cd_r2s = one_direction(ref_pcs, gen_pcs)
+        cd_all = torch.cat([cd_s2r, cd_r2s], dim=0)
+        # emd_all = torch.cat([emd_s2r, emd_r2s], dim=0)
     else:
-        cd = torch.cat(cd_lst)
-        emd = torch.cat(emd_lst)
+        cd_all = cd_s2r
+        # emd_all = emd_s2r
 
-    results = {
-        "MMD-CD": cd,
-        "MMD-EMD": emd,
+    return {
+        "MMD-CD": cd_all.mean(),
+        # "MMD-EMD": emd_all.mean(),
     }
-    return results
+
 
 
 if __name__ == "__main__":
     a = torch.randn([16, 2048, 3]).cuda()
     b = torch.randn([16, 2048, 3]).cuda()
-    print(EMD_CD(a, b, batch_size=8))

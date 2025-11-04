@@ -29,12 +29,13 @@ import numpy as np
 import torch
 import tqdm
 from classes import MODEL_CLASSES
-from datasets.H5Datset import H5Dataset
-from keypoint_diffuser.utils.pc_utils import collate_fn
-from keypoint_diffuser.utils.transforms import Collect, GridSample, ToTensor
 from pytorch3d.loss import chamfer_distance
 from torch.utils.data import DataLoader
 from torchvision import transforms
+
+from datasets.H5Datset import H5Dataset
+from keypoint_diffuser.utils.pc_utils import collate_fn
+from keypoint_diffuser.utils.transforms import Collect, GridSample, ToTensor
 
 
 TESTSET = "/app/shapenetcorev2_hdf5_2048/val"
@@ -104,7 +105,7 @@ def batched_chamfer(pool_pcs, batch_size=8):
                 pc_i_rep = pc_i.repeat(pc_j.shape[0], 1, 1)  # (B, N, 3)
 
                 # compute Chamfer distance (symmetric)
-                cd_batch, _ = chamfer_distance(pc_i_rep, pc_j)
+                _cd_batch, _ = chamfer_distance(pc_i_rep, pc_j)
                 # cd_batch is a scalar (mean over batch)
                 # We need per-sample distance, so compute manually:
                 # we can compute separately to get per-batch losses
@@ -136,7 +137,6 @@ def save_interpolations(pair_idx, interps, kps, opt, out_dir=Path("interps_out")
         np.save(out_dir / f"interp_{i:02d}.npy", rec.cpu().numpy())
         np.save(out_dir / f"kps{i:02d}.npy", kp.cpu().numpy())
 
-    print(f"[✓] Saved {len(interps)} interpolations under {out_dir}/")
 
 
 # ------------------------------------------------------------
@@ -236,7 +236,7 @@ def main():
     model.model.eval().cuda()
 
     # load dataset
-    loader, dataset = make_loader(opt)
+    _loader, dataset = make_loader(opt)
     num_total = len(dataset)
     print(f"[INFO] dataset size = {num_total}")
 

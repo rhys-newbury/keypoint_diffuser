@@ -4,8 +4,8 @@ from typing import Any
 
 import numpy as np
 import torch
-from baselines.test_base import TestBase
 
+from baselines.test_base import TestBase
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.options.ae_options import AEOptions
 from keypoint_diffuser.utils.nn import load_network
@@ -40,10 +40,8 @@ class Ours(TestBase):
 
     def get_reconstruction(
         self, pcd: np.ndarray
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        z0, mu, logvar = self.model.encode(self.get_network_data(pcd))
-        z_aux = reparameterize(mu, logvar)  # sampled from q(z|x)
-        z0 = z0.reshape(z0.shape[0], -1)
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        z0, z_aux = get_latent(pcd)
         z_full = torch.cat([z0, z_aux], dim=1)
 
         recons = self.model.decode(z_full, 2048).detach()
@@ -51,7 +49,19 @@ class Ours(TestBase):
             recons.unsqueeze(1),
             pcd["target_shape"].reshape(z0.shape[0], -1, 3).cuda(),
             z0,
+            z_aux,
         )
+
+    def get_latent(self, pcd: np.ndarray):
+        z0, mu, logvar = self.model.encode(self.get_network_data(pcd))
+        z_aux = reparameterize(mu, logvar)  # sampled from q(z|x)
+        z0 = z0.reshape(z0.shape[0], -1)
+        return z0, z_aux
+
+    @torch.no_grad()
+    def generate(self, z0):
+        return self.model.decode(z0, 2048)
+
 
     @torch.no_grad()
     def interpolate_latent(

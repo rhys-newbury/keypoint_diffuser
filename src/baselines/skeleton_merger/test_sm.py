@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+
 from baselines.skeleton_merger import merger_net
 from baselines.test_base import TestBase
 

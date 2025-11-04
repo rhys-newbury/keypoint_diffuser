@@ -11,6 +11,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import torch
+
 from datasets.people_dataset import PeopleDataset  # <-- import your dataset class
 
 
@@ -120,7 +121,6 @@ def main():
         random_rotate=args.random_rotate,
     )
 
-    print(f"Loaded {len(dataset)} samples from {args.dir}")
     visualize_collage(dataset, grid=args.grid)
 
 

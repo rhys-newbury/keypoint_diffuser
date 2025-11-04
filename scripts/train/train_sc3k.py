@@ -3,19 +3,18 @@ from glob import glob
 from pathlib import Path
 
 import torch
-from baselines.sc3k import network
-from baselines.sc3k.utils import AverageMeter, compute_loss
-from datasets.discovery import discover_datasets
 from db_utils import save_train_run
 from tqdm import tqdm
 from utils import DATA_DIR, DATASET
 
 import wandb
+from baselines.sc3k import network
+from baselines.sc3k.utils import AverageMeter, compute_loss
+from datasets.discovery import discover_datasets
 
 
 AVAILABLE_DATASETS = discover_datasets()
 dataset_choices = sorted(AVAILABLE_DATASETS.keys())
-import wandb
 
 
 parser = argparse.ArgumentParser(description="Train SC3K (argparse version)")

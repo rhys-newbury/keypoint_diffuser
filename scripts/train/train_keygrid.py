@@ -10,15 +10,15 @@ from glob import glob
 from pathlib import Path
 
 import torch
-from baselines.key_grid.composed_chamfer import loss_all
-from baselines.key_grid.merger_net import Net
-from datasets.discovery import discover_datasets
 from db_utils import save_train_run
 from torch import optim
 from tqdm import tqdm
 from utils import DATA_DIR, DATASET
 
 import wandb
+from baselines.key_grid.composed_chamfer import loss_all
+from baselines.key_grid.merger_net import Net
+from datasets.discovery import discover_datasets
 
 
 AVAILABLE_DATASETS = discover_datasets()

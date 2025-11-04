@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 
 import torch
+
 from baselines.diffusion_point_cloud.autoencoder import AutoEncoder
 from baselines.test_base import TestBase
 

@@ -29,6 +29,9 @@ import numpy as np
 import torch
 import tqdm
 from classes import MODEL_CLASSES
+from torch.utils.data import DataLoader
+from torchvision import transforms
+
 from datasets.H5Datset import H5Dataset
 from keypoint_diffuser.utils.eval_metrics import EMD_CD_recon
 from keypoint_diffuser.utils.pc_utils import collate_fn
@@ -37,8 +40,6 @@ from keypoint_diffuser.utils.transforms import (
     GridSample,
     ToTensor,
 )
-from torch.utils.data import DataLoader
-from torchvision import transforms
 
 
 TESTSET = "/app/shapenetcorev2_hdf5_2048/val"
@@ -62,9 +63,7 @@ def save_recon_geoms(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     saved = 0
-    for idx, (recon, gt, cd, emd, kp) in enumerate(
-        zip(best_recons, best_gts, cds, emds, kps)
-    ):
+    for idx, (recon, gt, cd, emd, kp) in enumerate(zip(best_recons, best_gts, cds, emds, kps)):
         # recon: [M, 3], gt: [N, 3]
         dst = out_dir / f"sample_{idx:05d}"
         dst.mkdir(parents=True, exist_ok=True)
@@ -161,6 +160,29 @@ def make_loader(opt: argparse.Namespace) -> DataLoader:
     )
 
 
+def covariance_scale_to_keypoints(points, keypoints, eps=1e-8):
+    """
+    points:    (B, N, 3)
+    keypoints: (B, M, 3)
+    returns:   (B, N, 3), (B, 1)
+    """
+    # 1) center
+    p_mean = points.mean(dim=1, keepdim=True)
+    k_mean = keypoints.mean(dim=1, keepdim=True)
+    p_c = points - p_mean
+    k_c = keypoints - k_mean
+
+    # 2) covariance trace (sum of variances)
+    # var = E[||x||^2]/d  up to constants; we'll just use mean squared norm
+    p_var = (p_c ** 2).sum(dim=-1).mean(dim=1)   # (B,)
+    k_var = (k_c ** 2).sum(dim=-1).mean(dim=1)   # (B,)
+
+    s = torch.sqrt((k_var + eps) / (p_var + eps)).view(-1, 1, 1)   # (B,1,1)
+    # 3) apply
+    p_scaled = p_mean + s * p_c
+    return p_scaled, s
+
+
 def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output")):
     cds, emds = [], []
     best_recons, best_gts, kps = [], [], []
@@ -188,8 +210,12 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
                 # Repeat GT -> [C, N, 3]
                 gt_b = gt_batch[b].unsqueeze(0).expand(C, -1, -1)
 
+                kp_ = kp[b, ...].reshape(1, -1, 3)
+
+                preds2 = covariance_scale_to_keypoints(preds, kp_ )[0]
+
                 # One call for all candidates
-                res = EMD_CD_recon(preds, gt_b, reduced=False)
+                res = EMD_CD_recon(preds2, gt_b, reduced=False)
                 cd_all = res["CD"].detach().cpu().numpy()  # shape [C] or [C,]
                 emd_all = res["EMD"].detach().cpu().numpy()  # shape [C] or [C,]
 
@@ -198,7 +224,7 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
                 cds.append(float(cd_all[i]))
                 emds.append(float(emd_all[i]))
 
-                best_recons.append(preds[i].cpu().numpy())  # [2048,3]
+                best_recons.append(preds2[i].cpu().numpy())  # [2048,3]
                 best_gts.append(gt_batch[b].cpu().numpy())  # [N,3]
                 kps.append(kp[b].reshape(-1, 3))
 

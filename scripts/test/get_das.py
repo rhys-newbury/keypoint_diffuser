@@ -9,15 +9,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import tqdm
-from baselines.test_base import TestBase
 from classes import MODEL_CLASSES
+from torchvision import transforms
+
+from baselines.test_base import TestBase
 from keypoint_diffuser.utils.pc_utils import collate_fn
 from keypoint_diffuser.utils.transforms import (
     Collect,
     GridSample,
     ToTensor,
 )
-from torchvision import transforms
 
 
 CHECKPOINTS_DIR = "checkpoints"
@@ -49,7 +50,7 @@ for model_name, model_cls in MODEL_CLASSES.items():
         default="/app/annotations",
     )
     try_add_arg(subparser, "--pcd-path", type=Path, default="/app/pcds")
-    try_add_arg(subparser, "--batch-size", type=int, default=32)
+    try_add_arg(subparser, "--batch-size", type=int, default=2)
     try_add_arg(subparser, "--key-points", type=int, default=10)
 
     try_add_arg(
@@ -104,11 +105,13 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
     )
 
     annotation_json = opt.annotations / f"{opt.category}.json"
-
     kpn_ds = json.load(open(annotation_json))
+
     out_kpcd = []
     out_nfact = []
     out_Q = []
+    out_attn = []      # NEW
+    out_coord = []     # NEW
 
     for i in tqdm.tqdm(
         range(0, len(kpn_ds), opt.batch_size), unit_scale=opt.batch_size
@@ -131,30 +134,51 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
             out_nfact.append([pcmax, pcmin])
             Q.append(pcn)
 
+        # make sure batch has at least 2
         if len(Q) == 1:
             Q.append(Q[-1])
             out_nfact.append(out_nfact[-1])
+
         with torch.no_grad():
             Q = np.array(Q)
             out_Q.append(Q)
+
+            # build transformed batch
             T_nb = []
-            for i in range(Q.shape[0]):
-                data = {"coord": Q[i]}
+            for k in range(Q.shape[0]):
+                data = {"coord": Q[k]}
                 T_nb.append(t(data))
 
-            batch = collate_fn(
-                T_nb
-            )  # assumes collate_fn knows how to stack dictionaries correctly
+            batch = collate_fn(T_nb)
             batch = {k: v.cuda() for k, v in batch.items()}
             batch["orig"] = Q
 
-            with torch.no_grad():
-                key_points = model.get_keypoints(batch)
+            # forward
+            key_points = model.get_keypoints(batch)
 
-            for kp in key_points:
+            # NOTE: we assume this returns (features, attn, coord_padded)
+            _, attn, coord_padded = model.model.encoder.get_attention(batch)
+
+            # now split per-item
+            for kp, a, c in zip(key_points, attn, coord_padded):
+                # move to cpu / numpy as needed
+                if torch.is_tensor(kp):
+                    kp = kp.detach().cpu().numpy()
+                if torch.is_tensor(a):
+                    a = a.detach().cpu().numpy()
+                if torch.is_tensor(c):
+                    c = c.detach().cpu().numpy()
+
                 out_kpcd.append(kp)
+                out_attn.append(a)
+                out_coord.append(c)
 
-    predicted = {"kpcd": out_kpcd, "nfact": out_nfact}
+    predicted = {
+        "kpcd": out_kpcd,
+        "nfact": out_nfact,
+        "attn": out_attn,
+        "coord": out_coord,
+    }
 
     print(f"[✓] Prediction completed for {len(out_kpcd)} samples.")
     return kpn_ds, predicted, out_Q
@@ -271,27 +295,32 @@ def save_numpy_geoms(
     opt,
     out_dir: Path = Path("geom_np"),
     vis_max=1000,
-    scores=None,  # (B,) per-entry scores
-    assignments=None,  # list of arrays, each (K,) mapping pred→gt
+    scores=None,          # (B,) per-entry scores
+    assignments=None,     # list of arrays, each (K,) mapping pred→gt
 ):
     """
     Saves raw numpy arrays for each sample:
-      - pc.npy        : normalized point cloud
-      - pred_kp.npy   : predicted keypoints (normalized)
-      - gt_kp.npy     : ground truth keypoints (normalized)
-      - assign.npy    : assignment indices (len=K, each entry = gt index)
-    Also dumps meta.json with ids, config, and optional score.
+      - pc.npy          : normalized point cloud
+      - pred_kp.npy     : predicted keypoints (normalized)
+      - gt_kp.npy       : ground truth keypoints (normalized)
+      - assign.npy      : assignment indices (len=K, each entry = gt index)  [optional]
+      - attn.npy        : attention for that sample                       [optional]
+      - encoder_coord.npy : encoder coords / padded coords                [optional]
+      - meta.json       : misc info, scores
     """
-
     out_dir.mkdir(exist_ok=True)
+
     flat_Q = [q for qb in out_Q for q in qb]  # flatten batches
+
+    has_attn = "attn" in predicted and len(predicted["attn"]) == len(kpn_ds)
+    has_coord = "coord" in predicted and len(predicted["coord"]) == len(kpn_ds)
 
     saved = 0
     for idx, (entry, kpcd_norm, nfact) in enumerate(
         zip(kpn_ds, predicted["kpcd"], predicted["nfact"])
     ):
-        pc = np.asarray(flat_Q[idx], dtype=np.float32)  # normalized pc
-        pred = np.asarray(kpcd_norm, dtype=np.float32)  # normalized preds
+        pc = np.asarray(flat_Q[idx], dtype=np.float32)      # normalized pc
+        pred = np.asarray(kpcd_norm, dtype=np.float32)      # normalized preds
 
         # normalize GT with nfact
         pcmax, pcmin = nfact
@@ -303,16 +332,21 @@ def save_numpy_geoms(
             gt.append(nkp)
         gt = np.asarray(gt, dtype=np.float32)
 
-        # save per-sample folder
         dst = out_dir / opt.category / entry["model_id"]
         dst.mkdir(exist_ok=True, parents=True)
+
         np.save(dst / "pc.npy", pc)
         np.save(dst / "pred_kp.npy", pred)
         np.save(dst / "gt_kp.npy", gt)
 
-        # save assignments if available
         if assignments is not None:
             np.save(dst / "assign.npy", np.asarray(assignments[idx], dtype=np.int64))
+
+        # NEW: save attention and coord if available
+        if has_attn:
+            np.save(dst / "attn.npy", np.asarray(predicted["attn"][idx]))
+        if has_coord:
+            np.save(dst / "encoder_coord.npy", np.asarray(predicted["coord"][idx]))
 
         meta = {
             "model": opt.model,
@@ -325,13 +359,19 @@ def save_numpy_geoms(
         }
         if scores is not None:
             meta["score"] = float(scores[idx])
+
+        # maybe mention which extra artifacts we saved
+        if has_attn:
+            meta["has_attn"] = True
+        if has_coord:
+            meta["has_encoder_coord"] = True
+
         with open(dst / "meta.json", "w") as f:
             json.dump(meta, f, indent=2)
 
         saved += 1
 
     print(f"[✓] Saved {saved} samples as numpy arrays under {out_dir}/")
-
 
 # ----------------------------
 # Database

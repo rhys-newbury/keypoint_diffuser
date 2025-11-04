@@ -1,3 +1,5 @@
+import itertools
+
 import numpy as np
 import torch
 
@@ -20,14 +22,14 @@ class EDMPrecond(torch.nn.Module):
         self,
         code,
         randn_like=torch.randn_like,
-        num_steps=50,
-        sigma_min=0.002,
+        num_steps=120,
+        sigma_min=0.01,
         sigma_max=80,
-        rho=7,
-        s_churn=0,
+        rho=3,
+        s_churn=0.1,
         s_min=0,
         s_max=float("inf"),
-        s_noise=1,
+        s_noise=0.5,
     ):
         batch_size = code.shape[0]
         latents = torch.randn([batch_size, 2048, 3], device=code.device)
@@ -53,7 +55,7 @@ class EDMPrecond(torch.nn.Module):
         # Main sampling loop.
         x_next = latents.to(torch.float64) * t_steps[0]
         for i, (t_cur, t_next) in enumerate(
-            zip(t_steps[:-1], t_steps[1:], strict=False)
+            itertools.pairwise(t_steps)
         ):  # 0, ..., N-1
             x_cur = x_next
 

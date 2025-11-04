@@ -6,13 +6,13 @@ import torch
 import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
-from baselines.diffusion_point_cloud.autoencoder import AutoEncoder
-from baselines.diffusion_point_cloud.common import get_linear_scheduler
 from db_utils import save_train_run
 from discovery import discover_datasets
 from utils import DATA_DIR, DATASET
 
 import wandb
+from baselines.diffusion_point_cloud.autoencoder import AutoEncoder
+from baselines.diffusion_point_cloud.common import get_linear_scheduler
 
 
 AVAILABLE_DATASETS = discover_datasets()

@@ -91,9 +91,8 @@ def extract_smplx_params(pkl_dict: dict[str, Any]) -> dict[str, Any]:
             t = t.unsqueeze(0)
         elif t.ndim > 2 and k.endswith("_pose"):
             t = t.reshape(t.shape[0], -1) if t.shape[0] == 1 else t[:1].reshape(1, -1)
-        else:
-            if t.shape[0] > 1:
-                t = t[:1]
+        elif t.shape[0] > 1:
+            t = t[:1]
         params[k] = t
     return params
 
@@ -169,10 +168,10 @@ def sample_point_cloud_with_meshfix(vertices, faces, n_points, *, interior_ratio
     mf.repair(verbose=False)
     mesh = trimesh.Trimesh(vertices=mf.v, faces=mf.f, process=False)
     if not mesh.is_watertight:
-        print("[warn] mesh not watertight after repair")
+        pass
 
     r = float(np.clip(interior_ratio, 0.0, 1.0))
-    n_interior = int(round(r * n_points))
+    n_interior = round(r * n_points)
     n_surface = n_points - n_interior
 
     # robust resampling
@@ -533,7 +532,7 @@ def label_points_from_lbs_interp_6(
     if lbs is None:
         raise RuntimeError("SMPL-X model doesn't expose lbs_weights.")
     W = lbs.detach().cpu().numpy()
-    V, J = W.shape
+    _V, J = W.shape
 
     # joint names / buckets
     jn = joint_names if joint_names is not None else get_joint_names_for_model(model, J)
@@ -718,7 +717,7 @@ def label_points_from_lbs_interp_6(
     def _suppress_torso_along(A, B, radius):
         if A is None or B is None:
             return
-        d, t, _ = _segdist(points, joints[A], joints[B])
+        d, _t, _ = _segdist(points, joints[A], joints[B])
         limb_dir = joints[B] - joints[A]
         side = ((points - joints[A]) @ limb_dir) > 0.0
         near = d <= radius
@@ -1054,14 +1053,13 @@ def walk_and_convert(
                 try:
                     visualize_pointcloud_and_keypoints(pcd_path, kpt_npz_path)
                     preview_count += 1
-                except Exception as e:
-                    print(f"[WARN] preview failed for {pcd_path}: {e}", file=sys.stderr)
+                except Exception:
+                    pass
             converted += 1
             pbar.update(1)
             pbar.set_postfix(failed=failed)
             if converted >= limit:
                 break
-    print(f"\nDone. Converted: {converted}, Failed: {failed}")
 
 
 if __name__ == "__main__":
@@ -1093,16 +1091,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if not args.root.is_dir():
-        print(
-            f"ERROR: root path {args.root} does not exist or is not a directory.",
-            file=sys.stderr,
-        )
         sys.exit(1)
     if not args.smplx_dir.is_dir():
-        print(
-            f"ERROR: smplx-dir {args.smplx_dir} does not exist or is not a directory.",
-            file=sys.stderr,
-        )
         sys.exit(1)
 
     walk_and_convert(

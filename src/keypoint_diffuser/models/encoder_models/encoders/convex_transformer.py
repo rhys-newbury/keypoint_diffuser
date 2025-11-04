@@ -61,6 +61,21 @@ class ConvexTransformer(nn.Module):
         """
         Returns keypoints as attention-weighted convex combinations of input points.
         """
+
+        attn_out, attn_w, coord_padded = self.get_attention(data_dict)
+
+        # convex combination: (B,K,N) @ (B,N,3) -> (B,K,3)
+        keypoints = torch.bmm(attn_w, coord_padded)
+
+        if self.extra_latent > 0:
+            extra_latent = self.extra_latent_proj(
+                attn_out.mean(dim=1)
+            )  # (B, extra_latent)
+            return keypoints, extra_latent
+
+        return keypoints
+
+    def get_attention(self, data_dict):
         point = self.encoder(
             data_dict
         )  # point.feat: (N,64), point.coord: (N,3), point.offset: (B,)
@@ -102,17 +117,7 @@ class ConvexTransformer(nn.Module):
 
         attn_w = attn_w.mean(dim=1)
 
-        # convex combination: (B,K,N) @ (B,N,3) -> (B,K,3)
-        keypoints = torch.bmm(attn_w, coord_padded)
-
-        if self.extra_latent > 0:
-            extra_latent = self.extra_latent_proj(
-                attn_out.mean(dim=1)
-            )  # (B, extra_latent)
-            return keypoints, extra_latent
-
-        return keypoints
-
+        return attn_out, attn_w, coord_padded
 
 def make_interactive_attention_html(
     attn_w: torch.Tensor,
@@ -181,8 +186,8 @@ def make_interactive_attention_html(
                 legendgroup=f"k{k}",
                 hovertemplate=(
                     f"<b>k{k} top</b><br>"
-                    + "x:%{x:.3f}<br>y:%{y:.3f}<br>z:%{z:.3f}<br>"
-                    + "w:%{customdata:.5f}<extra></extra>"
+                     "x:%{x:.3f}<br>y:%{y:.3f}<br>z:%{z:.3f}<br>"
+                     "w:%{customdata:.5f}<extra></extra>"
                 ),
                 customdata=w[top_idx],
             )

@@ -11,15 +11,15 @@ from glob import glob
 from pathlib import Path
 
 import torch
-from baselines.skeleton_merger.composed_chamfer import composed_sqrt_chamfer
-from baselines.skeleton_merger.merger_net import Net
-from datasets.discovery import discover_datasets
 from db_utils import save_train_run
 from torch import optim
 from tqdm import tqdm
 from utils import DATA_DIR, DATASET
 
 import wandb
+from baselines.skeleton_merger.composed_chamfer import composed_sqrt_chamfer
+from baselines.skeleton_merger.merger_net import Net
+from datasets.discovery import discover_datasets
 
 
 AVAILABLE_DATASETS = discover_datasets()
@@ -90,7 +90,7 @@ def feed(net, optimizer, loader, epoch):
 
             optimizer.zero_grad()
             try:
-                RPCD, KPCD, KPA, LF, MA = net(batch_x)
+                RPCD, _KPCD, _KPA, LF, MA = net(batch_x)
             except ValueError:
                 continue
 

@@ -7,16 +7,17 @@ from pathlib import Path
 import numpy as np
 import torch
 import tqdm
-from baselines.test_base import TestBase
 from classes import MODEL_CLASSES
 from icp import icp_align_identity
+from torchvision import transforms
+
+from baselines.test_base import TestBase
 from keypoint_diffuser.utils.pc_utils import collate_fn
 from keypoint_diffuser.utils.transforms import (
     Collect,
     GridSample,
     ToTensor,
 )
-from torchvision import transforms
 
 
 CHECKPOINTS_DIR = "checkpoints"
@@ -146,7 +147,7 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
             pcn = (pc - pcmin) / (pcmax - pcmin)
             pcn = 2.0 * (pcn - 0.5)
 
-            T, _, _, pc_aligned = icp_align_identity(pcn, orig_pcn)
+            _T, _, _, pc_aligned = icp_align_identity(pcn, orig_pcn)
             pc_aligned = np.concatenate([pc_aligned, pc_labels[:, None]], axis=1)
 
             Q.append(orig_pcn)
@@ -174,7 +175,6 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
             for kp in key_points:
                 out_kpcd.append(kp)
 
-    print(f"[✓] Prediction completed for {len(out_kpcd)} samples.")
     return out_kpcd, labels
 
 

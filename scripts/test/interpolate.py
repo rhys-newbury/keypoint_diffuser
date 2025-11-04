@@ -8,14 +8,18 @@ import torch.distributed as dist
 import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
+from tqdm import tqdm
+
 from datasets import get_dataset
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.options.ae_options import AEOptions
 from keypoint_diffuser.utils.utils import reparameterize
-from tqdm import tqdm
 
 
 torch.autograd.set_detect_anomaly(True)
+
+from sklearn.decomposition import PCA
+from torchvision import transforms
 
 from keypoint_diffuser.utils.pc_utils import collate_fn
 from keypoint_diffuser.utils.transforms import (
@@ -25,8 +29,6 @@ from keypoint_diffuser.utils.transforms import (
     GridSample,
     ToTensor,
 )
-from sklearn.decomposition import PCA
-from torchvision import transforms
 
 
 CHECKPOINTS_DIR = "checkpoints"
@@ -37,7 +39,6 @@ CHECKPOINT_EXT = ".pth"
 def setup(rank, world_size):
     if torch.cuda.device_count() > 1:
         local_rank = int(os.environ["LOCAL_RANK"])
-        print("local_rank", local_rank, "rank: ", rank, "world_size: ", world_size)
         torch.cuda.set_device(local_rank)
 
         dist.init_process_group("nccl", rank=rank, world_size=world_size)
@@ -197,7 +198,6 @@ def interpolate(opt):
 
     with torch.no_grad():
         for idx in range(6):
-            print(idx)
             recons = ae_model.decode(z_full[idx : idx + 1, ...], num_points=5000)
             recons_interps.append(recons.cpu())
             torch.cuda.empty_cache()
@@ -207,7 +207,7 @@ def interpolate(opt):
         pcd = o3d.geometry.PointCloud(
             points=o3d.utility.Vector3dVector(pc.squeeze().numpy())
         )
-        pcd_clean, ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+        pcd_clean, _ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
         pcd_clean.estimate_normals(
             search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30)
         )

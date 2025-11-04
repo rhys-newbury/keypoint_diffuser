@@ -29,15 +29,9 @@ def load_network(net, path):
 
     missingkeys, unexpectedkeys = network.load_state_dict(loaded_state, strict=False)
     if len(missingkeys) > 0:
-        print(
-            f"load_network {len(missingkeys)} missing keys",
-            "\n".join(missingkeys),
-        )
+        pass
     if len(unexpectedkeys) > 0:
-        print(
-            f"load_network {len(unexpectedkeys)} unexpected keys",
-            "\n".join(unexpectedkeys),
-        )
+        pass
 
 
 def save_network(net, directory, network_label, epoch_label=None, **kwargs):

@@ -386,7 +386,6 @@ def main():
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.write_html(str(out_path), include_plotlyjs=True, full_html=True)
-    print(f"[✓] wrote interactive viewer to {out_path}")
 
 
 if __name__ == "__main__":

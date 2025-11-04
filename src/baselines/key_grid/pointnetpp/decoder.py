@@ -68,7 +68,7 @@ class PointNetReconstruct(nn.Module):
         xyz2 = xyz2.permute(0, 2, 1)
 
         points2 = points2.permute(0, 2, 1)
-        B, N, C = xyz1.shape
+        B, N, _C = xyz1.shape
         _, S, _ = xyz2.shape
 
         if S == 1:

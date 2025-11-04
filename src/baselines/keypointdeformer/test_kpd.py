@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+
 from baselines.keypointdeformer.models import cage_skinning
 from baselines.keypointdeformer.options.base_options import BaseOptions
 from baselines.keypointdeformer.utils.nn import load_network
@@ -28,6 +29,8 @@ class KPD(TestBase):
             .numpy()
             .transpose(0, 2, 1)
         )
+    def get_latent(self, pcd):
+        return self.get_keypoints(pcd)
 
     def get_data(self, data):
         source_shape, target_shape = data["source_shape"], data["target_shape"]

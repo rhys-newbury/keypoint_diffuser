@@ -199,6 +199,8 @@ def main():
                 if args.mode in ("das", "both") and not already_evaluated(
                     eval_db_path, ckpt_path, algo, category, args.das_table
                 ):
+                    algo_ = "Ours" if algo == "Ours2" else algo
+
                     annotation_json = Path("/app/annotations") / f"{category}.json"
                     cmd_das = [
                         "python3",
@@ -206,8 +208,6 @@ def main():
                         algo_,
                         "--ckpt",
                         str(ckpt_path),
-                        "--annotation-json",
-                        str(annotation_json),
                         "--pcd-path",
                         str(args.pcd_path),
                         "--batch-size",
@@ -218,17 +218,15 @@ def main():
                         str(category),
                         "--db-path",
                         str(eval_db_path),
-                        "--table-name",
-                        args.das_table,
                     ]
                     run_cmd(cmd_das, rid, "get_das")
                     # else: already done; skip
 
                 # Correlation
                 if args.mode in ("corr", "both"):
-                # and not already_evaluated(
-                #     eval_db_path, ckpt_path, algo, category, args.corr_table
-                # ):
+                    # and not already_evaluated(
+                    #     eval_db_path, ckpt_path, algo, category, args.corr_table
+                    # ):
                     algo_ = "Ours" if algo == "Ours2" else algo
 
                     annotation_json = Path("/app/annotations") / f"{category}.json"

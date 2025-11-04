@@ -4,14 +4,14 @@ import numpy as np
 import torch
 import torch.nn.parallel
 import torch.utils.data
-from baselines.keypointdeformer.models.cage_skinning import CageSkinning
-from baselines.keypointdeformer.options.base_options import BaseOptions
-from baselines.keypointdeformer.utils.nn import save_network, weights_init
-from datasets.discovery import discover_datasets
 from db_utils import save_train_run
 from utils import DATA_DIR, DATASET
 
 import wandb
+from baselines.keypointdeformer.models.cage_skinning import CageSkinning
+from baselines.keypointdeformer.options.base_options import BaseOptions
+from baselines.keypointdeformer.utils.nn import save_network, weights_init
+from datasets.discovery import discover_datasets
 
 
 AVAILABLE_DATASETS = discover_datasets()

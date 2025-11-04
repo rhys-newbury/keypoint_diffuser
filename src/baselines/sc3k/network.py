@@ -15,12 +15,12 @@ def vector_gather(vectors, indices):
     Returns:
         Tensor[N, K, D] or Tensor[N, D]
     """
-    N, L, D = vectors.shape
+    N, _L, D = vectors.shape
     squeeze = False
     if indices.ndim == 1:
         squeeze = True
         indices = indices.unsqueeze(-1)
-    N2, K = indices.shape
+    N2, _K = indices.shape
     assert N == N2
     indices = einops.repeat(indices, "N K -> N K D", D=D)
     out = torch.gather(vectors, dim=1, index=indices)

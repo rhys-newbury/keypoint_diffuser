@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import configargparse
+
 from baselines.keypointdeformer.models.cage_skinning import CageSkinning
 from datasets.discovery import discover_datasets
 
@@ -96,10 +97,9 @@ class BaseOptions:
         message += "----------------- Unknown options ---------------\n"
         for item in unknown:
             if item.startswith("-"):
-                message += "%s, " % item
+                message += f"{item}, "
         message += "\n"
         message += "----------------- End -------------------"
-        print(message)
 
     def parse(self, args=None, skip_model=False, unknown_ok=False):
         opt, unknown = self.gather_options(

@@ -152,7 +152,6 @@ def plot_recon_collage_interactive(
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.write_html(out_path, include_plotlyjs=True, full_html=True)
-    print(f"[✓] Saved interactive HTML to {out_path}")
 
 
 if __name__ == "__main__":

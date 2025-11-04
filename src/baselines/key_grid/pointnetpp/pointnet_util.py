@@ -71,7 +71,7 @@ def farthest_point_sample(xyz, npoint):
         centroids: sampled pointcloud index, [B, npoint]
     """
     device = xyz.device
-    B, N, C = xyz.shape
+    B, N, _C = xyz.shape
     centroids = torch.zeros(B, npoint, dtype=torch.long).to(device)
     distance = torch.ones(B, N).to(device) * 1e10
     farthest = torch.randint(0, N, (B,), dtype=torch.long).to(device)
@@ -97,7 +97,7 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
         group_idx: grouped points index, [B, S, nsample]
     """
     device = xyz.device
-    B, N, C = xyz.shape
+    B, N, _C = xyz.shape
     _, S, _ = new_xyz.shape
     group_idx = (
         torch.arange(N, dtype=torch.long).to(device).view(1, 1, N).repeat([B, S, 1])
@@ -123,7 +123,7 @@ def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
         new_xyz: sampled points position data, [B, npoint, nsample, 3]
         new_points: sampled points data, [B, npoint, nsample, 3+D]
     """
-    B, N, C = xyz.shape
+    B, _N, C = xyz.shape
     S = npoint
     fps_idx = farthest_point_sample(xyz, npoint)  # [B, npoint, C]
     torch.cuda.empty_cache()
@@ -247,7 +247,7 @@ class PointNetSetAbstractionMsg(nn.Module):
         if points is not None:
             points = points.permute(0, 2, 1)
 
-        B, N, C = xyz.shape
+        B, _N, C = xyz.shape
         S = self.npoint
         new_xyz = index_points(xyz, farthest_point_sample(xyz, S))
         new_points_list = []
@@ -300,7 +300,7 @@ class PointNetFeaturePropagation(nn.Module):
         xyz2 = xyz2.permute(0, 2, 1)
 
         points2 = points2.permute(0, 2, 1)
-        B, N, C = xyz1.shape
+        B, N, _C = xyz1.shape
         _, S, _ = xyz2.shape
 
         if S == 1:

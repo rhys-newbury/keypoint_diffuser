@@ -229,7 +229,7 @@ def batch_compute_similarity_transform_torch(S1, S2):
 
     # 4. Solution that Maximizes trace(R'K) is R=U*V', where U, V are
     # singular vectors of K.
-    U, s, V = torch.svd(K)
+    U, _s, V = torch.svd(K)
 
     # Construct Z that fixes the orientation of R to get det(R)=1.
     Z = torch.eye(U.shape[1], device=S1.device).unsqueeze(0)
