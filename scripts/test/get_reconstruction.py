@@ -63,6 +63,8 @@ def save_recon_geoms(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     saved = 0
+    if len(emds) == 0:
+        emds = [None] * len(kps)
     for idx, (recon, gt, cd, emd, kp) in enumerate(zip(best_recons, best_gts, cds, emds, kps)):
         # recon: [M, 3], gt: [N, 3]
         dst = out_dir / f"sample_{idx:05d}"
@@ -70,7 +72,7 @@ def save_recon_geoms(
 
         np.save(dst / "recon.npy", np.asarray(recon, dtype=np.float32))
         np.save(dst / "gt.npy", np.asarray(gt, dtype=np.float32))
-        np.save(dst / "kp.npy", np.asarray(kp.cpu(), dtype=np.float32))
+        np.save(dst / "kp.npy", np.asarray(kp, dtype=np.float32))
 
         meta = {
             "model": opt.model,
@@ -79,7 +81,7 @@ def save_recon_geoms(
             "num_recon": int(recon.shape[0]),
             "num_gt": int(gt.shape[0]),
             "cd": float(cd),
-            "emd": float(emd),
+            "emd": float(emd) if emd is not None else None,
         }
         with open(dst / "meta.json", "w") as f:
             json.dump(meta, f, indent=2)
@@ -184,56 +186,69 @@ def covariance_scale_to_keypoints(points, keypoints, eps=1e-8):
 
 
 def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output")):
+    """
+    Batched computation of CD+EMD with masking, no per-item loop.
+    Assumes each batch has same number of points P.
+    """
     cds, emds = [], []
-    best_recons, best_gts, kps = [], [], []
+    best_recons, best_gts, kps_out = [], [], []
 
-    model.model.eval()
-    model.model.cuda()
+    device = next(model.model.parameters()).device
+    model.model.eval().to(device)
+    ours = getattr(opt, "model", None) == "Ours"
+
     with torch.no_grad():
         for batch in tqdm.tqdm(loader, desc="Reconstruct (best per item)"):
-            # recon_list: list of length B; each item is a list of [2048,3] tensors
+
             recon_list, pc, kp = model.get_reconstruction(batch)
-            gt_batch = pc.float()
-            B = gt_batch.shape[0]
 
-            for b in range(B):
-                cands = recon_list[b]
-                if len(cands) == 0:  # no valid candidates for this item
-                    continue
-                # Stack candidates -> [C, 2048, 3]
-                preds = (
-                    torch.stack(cands, dim=0).float() if type(cands) == list else cands
-                )
+            B = pc.shape[0]
+            gt_batch = pc.to(device, dtype=torch.float32)
 
-                C = preds.shape[0]
+            # shape check: recon_list is list[B] of [1,P,3] or [P,3]
+            preds = []
+            for pred in recon_list:
+                if not pred or len(pred) == 0:
+                    preds.append(torch.zeros((1, 3), device=device))  # placeholder
+                else:
+                    p = pred[0] if isinstance(pred, list) else pred
+                    preds.append(p.to(device))
 
-                # Repeat GT -> [C, N, 3]
-                gt_b = gt_batch[b].unsqueeze(0).expand(C, -1, -1)
+            preds = torch.stack(preds, dim=0)  # (B,P,3) possibly with empties
+            mask = torch.isfinite(preds).all(dim=-1).all(dim=-1) & (preds.abs().sum(dim=-1).sum(dim=-1) > 0)
+            valid_mask = mask.unsqueeze(-1).unsqueeze(-1)
 
-                kp_ = kp[b, ...].reshape(1, -1, 3)
+            # filter invalid
+            preds = preds[mask]
+            gts = gt_batch[mask]
+            kps_valid = kp[mask] if ours else kp[mask]
 
-                preds2 = covariance_scale_to_keypoints(preds, kp_ )[0]
+            if preds.shape[0] == 0:
+                continue
 
-                # One call for all candidates
-                res = EMD_CD_recon(preds2, gt_b, reduced=False)
-                cd_all = res["CD"].detach().cpu().numpy()  # shape [C] or [C,]
-                emd_all = res["EMD"].detach().cpu().numpy()  # shape [C] or [C,]
+            # optional covariance scaling for ours
+            if ours:
+                preds = covariance_scale_to_keypoints(preds, kps_valid.to(device))[0]
 
-                # Pick best by CD
-                i = int(np.argmin(cd_all))
-                cds.append(float(cd_all[i]))
-                emds.append(float(emd_all[i]))
+            # metrics batched
+            res = EMD_CD_recon(preds, gts, reduced=False)
+            cd = res["CD"].detach().cpu().numpy()
+            emd = res["EMD"].detach().cpu().numpy()
 
-                best_recons.append(preds2[i].cpu().numpy())  # [2048,3]
-                best_gts.append(gt_batch[b].cpu().numpy())  # [N,3]
-                kps.append(kp[b].reshape(-1, 3))
+            cds.extend(cd.tolist())
+            emds.extend(emd.tolist())
 
-    save_recon_geoms(best_recons, best_gts, cds, emds, opt, kps, out_dir=out_dir)
+            # save valid ones
+            best_recons.extend(preds.detach().cpu().numpy())
+            best_gts.extend(gts.detach().cpu().numpy())
+            kps_out.extend(kps_valid.detach().cpu().numpy())
 
-    cd_mean = np.mean(cds)
-    emd_mean = np.mean(emds)
+    if save:
+        save_recon_geoms(best_recons, best_gts, cds, emds, opt, kps_out, out_dir=out_dir)
+
+    cd_mean = float(np.mean(cds)) if cds else float("nan")
+    emd_mean = float(np.mean(emds)) if emds else float("nan")
     return cd_mean, emd_mean
-
 
 # ----------------------------
 # DB

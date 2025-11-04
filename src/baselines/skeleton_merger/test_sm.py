@@ -3,7 +3,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-
 from baselines.skeleton_merger import merger_net
 from baselines.test_base import TestBase
 
@@ -37,36 +36,63 @@ class SM(TestBase):
     def get_reconstruction(
         self,
         pcd: np.ndarray,
-        thresholds=(0.1, 0.2, 0.3, 0.5, 0.6, 0.7, 0.8, 0.9),
         min_points: int = 2048,
     ):
+        """
+        Greedy reconstruction by activation score:
+        - For each item b, sort part indices by MA[b] descending
+        - Accumulate corresponding RPCD parts until total points >= min_points
+        - If overshoot: downsample to exactly min_points (no replacement)
+        - If not enough even after all parts: upsample with replacement to min_points
+
+        Returns:
+            reconstructions: list length B; each item is [ merged_(min_points x 3) ]
+            data           : torchified input (B, ..., 3)
+            kps            : keypoints returned by the model
+        """
         device = next(self.model.parameters()).device
         data = torch.as_tensor(pcd, dtype=torch.float32, device=device)
 
-        RPCD, _, _, _, MA = self.model(
-            data
-        )  # RPCD: list[P] of [B x m x 3], MA: [B x P]
+        # RPCD: list[P] of tensors shaped [B, m_i, 3]
+        # MA   : [B, P] activation scores per part
+        RPCD, kps, _, _, MA = self.model(data)
 
+        B = data.shape[0]
+        MA.shape[1]  # number of parts
         reconstructions = []
-        for b in range(data.shape[0]):
-            recos_b = []
-            for th in thresholds:
-                keep_ids = (MA[b] > th).nonzero(as_tuple=True)[0]
-                if keep_ids.numel() == 0:
-                    continue  # nothing passes this threshold
 
-                parts = [RPCD[i][b] for i in keep_ids.tolist()]
-                merged = torch.cat(parts, dim=0)  # [M x 3]
+        for b in range(B):
+            # sort parts by activation score (desc)
+            scores = MA[b]  # (P,)
+            order = torch.argsort(scores, descending=True)
+            parts_points = []
+            total = 0
 
-                M = merged.shape[0]
-                if min_points > M:
-                    continue  # skip candidates too small
+            for idx in order.tolist():
+                pts = RPCD[idx][b]  # [m_i, 3]
+                if pts.numel() == 0:
+                    continue
+                parts_points.append(pts)
+                total += pts.shape[0]
+                if total >= min_points:
+                    break
 
-                if min_points < M:
-                    sel = torch.randperm(M, device=merged.device)[:min_points]
-                    merged = merged[sel]
+            if not parts_points:
+                # no parts available for this item; return empty candidate
+                reconstructions.append([])
+                continue
 
-                recos_b.append(merged)  # each candidate is exactly [2048 x 3]
-            reconstructions.append(recos_b)
+            merged = torch.cat(parts_points, dim=0)  # [M, 3]
+            M = merged.shape[0]
 
-        return reconstructions, data
+            if min_points <= M:
+                # downsample without replacement
+                sel = torch.randperm(M, device=merged.device)[:min_points]
+                merged = merged[sel]
+
+                reconstructions.append([merged])
+
+            elif min_points > M:
+                reconstructions.append([])
+
+        return reconstructions, data, kps

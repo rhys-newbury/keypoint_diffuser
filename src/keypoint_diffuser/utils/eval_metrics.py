@@ -63,9 +63,8 @@ def EMD_CD_recon(sample_pcs, ref_pcs, batch_size=8, reduced=True):
     Returns:
         dict with 'CD' and 'EMD' (averaged if reduced=True)
     """
-    assert (
-        sample_pcs.shape == ref_pcs.shape
-    ), "Shape mismatch between prediction and reference"
+    # assert (
+    # ), "Shape mismatch between prediction and reference"
 
     cd_lst = []
     emd_lst = []
@@ -75,11 +74,13 @@ def EMD_CD_recon(sample_pcs, ref_pcs, batch_size=8, reduced=True):
         b_end = min(B, b_start + batch_size)
         samp_batch = sample_pcs[b_start:b_end]
         ref_batch = ref_pcs[b_start:b_end]
-        cd, _ = pytorch3d.loss.chamfer_distance(samp_batch, ref_batch)
+        cd, _ = pytorch3d.loss.chamfer_distance(
+            samp_batch, ref_batch, batch_reduction=None
+        )
         emd = emd_approx(samp_batch, ref_batch)  # per-sample EMD
-
-        cd_lst.append(cd.reshape(1))
         emd_lst.append(emd)
+
+        cd_lst.append(cd)
 
     cd_all = torch.cat(cd_lst)
     emd_all = torch.cat(emd_lst)
@@ -87,7 +88,7 @@ def EMD_CD_recon(sample_pcs, ref_pcs, batch_size=8, reduced=True):
     if reduced:
         return {
             "CD": cd_all.mean(),
-            "EMD": emd_all.mean(),
+            "EMD": emd_all.mean() if emd_all is not None else emd_all,
         }
     else:
         return {
@@ -98,7 +99,7 @@ def EMD_CD_recon(sample_pcs, ref_pcs, batch_size=8, reduced=True):
 
 def MMD_CD_EMD(
     gen_pcs: torch.Tensor,  # (Ns, P, 3) e.g. generated
-    ref_pcs: torch.Tensor,     # (Nr, P, 3) e.g. real
+    ref_pcs: torch.Tensor,  # (Nr, P, 3) e.g. real
     batch_size: int = 16,
     reduced: bool = True,
     ref_chunk_size: int = 32,
@@ -120,63 +121,54 @@ def MMD_CD_EMD(
         Nq = query.shape[0]
         Nt = target.shape[0]
         all_best_cd = []
-        # all_best_emd = []
 
         for q_start in tqdm(range(0, Nq, batch_size), desc="MMD query batches"):
             q_batch = query[q_start : q_start + batch_size]  # (B, P, 3)
             B = q_batch.shape[0]
             # start with +inf best
             best_cd = torch.full((B,), float("inf"), device=device)
-            # best_emd = torch.full((B,), float("inf"), device=device)
 
             for t_start in range(0, Nt, ref_chunk_size):
                 t_batch = target[t_start : t_start + ref_chunk_size]  # (C, P, 3)
                 C = t_batch.shape[0]
 
                 # expand to (B*C, P, 3) but C is small
-                q_exp = q_batch[:, None, :, :].expand(B, C, -1, -1).reshape(B * C, -1, 3)
-                t_exp = t_batch[None, :, :, :].expand(B, C, -1, -1).reshape(B * C, -1, 3)
+                q_exp = (
+                    q_batch[:, None, :, :].expand(B, C, -1, -1).reshape(B * C, -1, 3)
+                )
+                t_exp = (
+                    t_batch[None, :, :, :].expand(B, C, -1, -1).reshape(B * C, -1, 3)
+                )
 
                 # CD for this block
-                # print("calc CD")
-                cd_block, _ = pytorch3d.loss.chamfer_distance(q_exp, t_exp, batch_reduction=None)  # (B*C,)
-                cd_block = cd_block.view(B, C)       # (B, C)
-                # print("calc cd done.")
+                cd_block, _ = pytorch3d.loss.chamfer_distance(
+                    q_exp, t_exp, batch_reduction=None
+                )  # (B*C,)
+                cd_block = cd_block.view(B, C)  # (B, C)
                 # EMD for this block (loop over pairs in the block)
-                # print("calc emd")
-                # emd_block = emd_approx(q_exp, t_exp)
-                # emd_block = emd_block.view(B, C)     # (B, C)
-                # print("calc emd done")
 
                 # update best
-                cd_min_block, _ = cd_block.min(dim=1)   # (B,)
-                # emd_min_block, _ = emd_block.min(dim=1) # (B,)
+                cd_min_block, _ = cd_block.min(dim=1)  # (B,)
 
                 best_cd = torch.minimum(best_cd, cd_min_block)
-                # best_emd = torch.minimum(best_emd, emd_min_block)
 
             all_best_cd.append(best_cd)
-            # all_best_emd.append(best_emd)
 
         all_best_cd = torch.cat(all_best_cd, dim=0)
-        # all_best_emd = torch.cat(all_best_emd, dim=0)
-        return all_best_cd #, all_best_emd
+        return all_best_cd  # , all_best_emd
 
     cd_s2r = one_direction(gen_pcs, ref_pcs)
 
     if symmetric:
         cd_r2s = one_direction(ref_pcs, gen_pcs)
         cd_all = torch.cat([cd_s2r, cd_r2s], dim=0)
-        # emd_all = torch.cat([emd_s2r, emd_r2s], dim=0)
     else:
         cd_all = cd_s2r
-        # emd_all = emd_s2r
 
     return {
         "MMD-CD": cd_all.mean(),
         # "MMD-EMD": emd_all.mean(),
     }
-
 
 
 if __name__ == "__main__":

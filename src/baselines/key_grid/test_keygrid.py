@@ -3,7 +3,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-
 from baselines.key_grid import merger_net
 from baselines.test_base import TestBase
 
@@ -34,4 +33,6 @@ class KeyGrid(TestBase):
 
     def get_reconstruction(self, pcd: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
         _, reconstruct = self.model(pcd.cuda(), False)
-        return reconstruct.unsqueeze(1), pcd.cuda()
+        kps = self.model.get_keypoints(data).cpu().numpy()
+
+        return reconstruct, pcd.cuda(), kps

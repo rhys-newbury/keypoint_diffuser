@@ -3,7 +3,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-
 from baselines.keypointdeformer.models import cage_skinning
 from baselines.keypointdeformer.options.base_options import BaseOptions
 from baselines.keypointdeformer.utils.nn import load_network
@@ -29,6 +28,7 @@ class KPD(TestBase):
             .numpy()
             .transpose(0, 2, 1)
         )
+
     def get_latent(self, pcd):
         return self.get_keypoints(pcd)
 
@@ -43,4 +43,8 @@ class KPD(TestBase):
     def get_reconstruction(self, pcd: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
         data = self.get_data(pcd)
         out_dict = self.model(*data)
-        return (out_dict["deformed"].unsqueeze(1)), data[0].transpose(2, 1)
+        return (
+            (out_dict["deformed"].unsqueeze(1)),
+            data[0].transpose(2, 1),
+            out_dict["target_keypoints"],
+        )
