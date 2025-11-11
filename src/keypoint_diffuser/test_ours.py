@@ -96,3 +96,53 @@ class Ours(TestBase):
         k_interps = [k.cpu() for k in k_interps]
 
         return recons, k_interps
+
+    @staticmethod
+    def choose_model(metrics_info, ckpt_paths, tail_frac=0.2):
+        """
+        Select checkpoint via step→epoch mapping:
+        - find lowest diffusion loss in last tail_frac of steps
+        - convert step position → ckpt index proportional to training progress
+        """
+        if "diffusion_loss" not in metrics_info:
+            raise KeyError("metrics_info must include 'diffusion_loss'.")
+
+        steps = np.asarray(metrics_info["diffusion_loss"]["steps"], dtype=float)
+        losses = np.asarray(metrics_info["diffusion_loss"]["values"], dtype=float)
+        assert steps.size == losses.size > 0, "Bad diffusion_loss input"
+
+        # sort by step (safety)
+        order = np.argsort(steps)
+        steps, losses = steps[order], losses[order]
+
+        # last X% of steps
+        n = len(steps)
+        start = max(0, int((1 - tail_frac) * n))
+        tail_losses = losses[start:]
+
+        # min loss in tail
+        j = int(np.nanargmin(tail_losses))
+        best_step = steps[start + j]
+        best_val = losses[start + j]
+
+        # proportional progress → epoch index
+        max_step = float(steps[-1])
+        prog = best_step / max_step if max_step > 0 else 1.0
+
+        ckpt_paths = TestBase.filter_and_sort_ckpts(ckpt_paths)
+
+        N = len(ckpt_paths)
+        idx = int(round(prog * (N - 1)))
+        idx = min(max(idx, 0), N - 1)
+
+        best_ckpt = ckpt_paths[idx][2]
+
+        return {
+            "ckpt": best_ckpt,
+            "ckpt_index": idx,
+            "total_ckpts": N,
+            "best_step": float(best_step),
+            "best_loss": float(best_val),
+            "training_progress_%": round(prog * 100, 2),
+            "picked_from": f"last_{int(tail_frac*100)}%_steps (step→epoch mapping)",
+        }

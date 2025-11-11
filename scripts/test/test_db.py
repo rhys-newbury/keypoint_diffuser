@@ -4,9 +4,32 @@ import re
 import sqlite3
 import subprocess
 from pathlib import Path
-
+import random
 
 EPOCH_RE = re.compile(r"(?P<k>\d+)kp_(?P<epoch>\d+)\.pth$", re.IGNORECASE)
+
+
+def list_ckpts_fallback(path_str: str):
+    base = Path(path_str)
+
+    # First try original path (slow2)
+    try:
+        return list_ckpts(str(base))
+    except FileNotFoundError:
+        pass
+
+    # --- build fallback path ---
+    # we keep only the final directory name
+    final_dir = base.name  # vivid-tree-3
+    fallback = Path("/mnt/slow3") / final_dir
+
+    # Try fallback (slow3)
+    try:
+        return list_ckpts(str(fallback))
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"No checkpoints found in either:\n  {base}\n  {fallback}"
+        )
 
 
 def list_ckpts(path_str: str) -> list[Path]:
@@ -84,7 +107,7 @@ def main():
     # What to run
     ap.add_argument(
         "--mode",
-        choices=["das", "corr", "both"],
+        choices=["das", "corr", "reconstruction", "all"],
         default="both",
         help="Which evaluation(s) to run per checkpoint.",
     )
@@ -99,6 +122,14 @@ def main():
         default=Path("get_correspondence.py"),
         help="Path to Correlation script",
     )
+
+    ap.add_argument(
+        "--reconstruct-script",
+        type=Path,
+        default=Path("get_reconstruction.py"),
+        help="Path to Correlation script",
+    )
+
 
     # DB passed through to the child script(s)
     ap.add_argument(
@@ -152,6 +183,7 @@ def main():
     q += " ORDER BY id ASC"
 
     rows = list(cur.execute(q, params))
+    random.shuffle(rows)
     con.close()
 
     if not rows:
@@ -174,8 +206,11 @@ def main():
         return rc
 
     for rid, algo, category, ckpt_dir, key_points in rows:
+        if algo == "SC3K":
+            continue
+
         try:
-            ckpt_list = list_ckpts(ckpt_dir)
+            ckpt_list = list_ckpts_fallback(ckpt_dir)
 
             # apply optional epoch filter
             if args.start_epoch is not None:
@@ -194,9 +229,36 @@ def main():
                 print(f"[run_id={rid}] !! no checkpoints to process after filtering")
                 continue
 
+            random.shuffle(ckpt_list)
+
             for ckpt_path in ckpt_list:
                 # DAS
-                if args.mode in ("das", "both") and not already_evaluated(
+                if args.mode in ("reconstruction", "all") and not already_evaluated(
+                    eval_db_path, ckpt_path, algo, category, "reconstruction_results_low"
+                ):
+                    algo_ = "Ours" if algo == "Ours2" else algo
+
+                    annotation_json = Path("/app/annotations") / f"{category}.json"
+                    cmd_das = [
+                        "python3",
+                        str(args.reconstruct_script),
+                        algo_,
+                        "--ckpt",
+                        str(ckpt_path),
+                        "--batch-size",
+                        str(args.batch_size),
+                        "--key-points",
+                        str(key_points),
+                        "--category",
+                        str(category),
+                        "--db-path",
+                        str(eval_db_path),
+                    ]
+                    run_cmd(cmd_das, rid, "get_reconstruction")
+                    # else: already done; skip
+
+
+                if args.mode in ("das", "all") and not already_evaluated(
                     eval_db_path, ckpt_path, algo, category, args.das_table
                 ):
                     algo_ = "Ours" if algo == "Ours2" else algo
@@ -223,7 +285,7 @@ def main():
                     # else: already done; skip
 
                 # Correlation
-                if args.mode in ("corr", "both"):
+                if args.mode in ("corr", "all"):
                     # and not already_evaluated(
                     #     eval_db_path, ckpt_path, algo, category, args.corr_table
                     # ):

@@ -26,13 +26,12 @@ import tqdm
 
 # your project imports
 from classes import MODEL_CLASSES
-from torch.utils.data import DataLoader
-from torchvision import transforms
-
 from datasets.H5Datset import H5Dataset
 from keypoint_diffuser.utils.eval_metrics import MMD_CD_EMD
 from keypoint_diffuser.utils.pc_utils import collate_fn
 from keypoint_diffuser.utils.transforms import Collect, GridSample, ToTensor
+from torch.utils.data import DataLoader
+from torchvision import transforms
 
 
 DEFAULT_TRAIN = "/app/shapenetcorev2_hdf5_2048/train"
@@ -47,7 +46,12 @@ def make_loader(root, model_name, category, batch_size, num_workers, is_train):
     if model_name == "Ours":
         t = transforms.Compose(
             [
-                GridSample(keys=("coord",), hash_type="fnv", mode="train" if True else "test", return_grid_coord=True),
+                GridSample(
+                    keys=("coord",),
+                    hash_type="fnv",
+                    mode="train" if True else "test",
+                    return_grid_coord=True,
+                ),
                 ToTensor(),
                 Collect(keys=("coord", "grid_coord"), feat_keys=("coord",)),
             ]
@@ -81,7 +85,7 @@ def extract_latent_from_model(model, batch):
     return kp, z_aux
 
 
-def collect_train_keypoints(model, loader, device="cuda"):
+def collect_train_keypoints(model, loader, opt, device="cuda"):
     model.model.eval().to(device)
     all_kps, all_aux = [], []
     with torch.no_grad():
@@ -93,7 +97,15 @@ def collect_train_keypoints(model, loader, device="cuda"):
             if z_aux is not None:
                 all_aux.append(z_aux.cpu())
     all_kps = torch.cat(all_kps, dim=0)
-    z_aux_mean = torch.cat(all_aux, dim=0).mean(dim=0, keepdim=True) if len(all_aux) else None
+    if opt.model == "Ours":
+        z_aux_mean = (
+            torch.cat(all_aux, dim=0).mean(dim=0, keepdim=True)
+            if len(all_aux)
+            else None
+        )
+    else:
+        z_aux_mean = torch.cat(all_aux, dim=0)
+
     return all_kps, z_aux_mean
 
 
@@ -125,18 +137,21 @@ def sample_from_pca_kde(num, pca_mu, pca_comps, kde_mu, kde_std):
 # ------------------------------------------------------------
 # Generation
 # ------------------------------------------------------------
-def generate_from_keypoints(model, kp_samples, z_aux_mean):
+def generate_from_keypoints(model, kp_samples, z_aux_mean, opt):
     device = kp_samples.device
 
     if z_aux_mean is not None:
-        z_aux_rep = z_aux_mean.to(device).expand(kp_samples.shape[0], -1)
-        z0 = torch.cat([kp_samples, z_aux_rep], dim=1)
+        if opt.model == "Ours":
+            z_aux_rep = z_aux_mean.to(device).expand(kp_samples.shape[0], -1)
+            z0 = torch.cat([kp_samples, z_aux_rep], dim=1)
+        else:
+            z0 = kp_samples, z_aux_mean
     else:
         z0 = kp_samples
 
     model.model.eval().to(device)
     with torch.no_grad():
-            return model.generate(z0)
+        return model.generate(z0)
 
 
 # ------------------------------------------------------------
@@ -152,7 +167,6 @@ def init_db(db_path: Path):
             model TEXT,
             ckpt TEXT,
             category TEXT,
-            num_gen INTEGER,
             pca_dim INTEGER,
             mmd_cd REAL,
             mmd_emd REAL,
@@ -170,14 +184,13 @@ def save_mmd_run(db_path: Path, opt, mmd_cd):
     cur.execute(
         """
         INSERT INTO mmd_results
-        (model, ckpt, category, num_gen, pca_dim, mmd_cd, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (model, ckpt, category, pca_dim, mmd_cd, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
             opt.model,
             str(opt.ckpt) if opt.ckpt else None,
             opt.category,
-            int(opt.num_gen),
             int(opt.pca_dim),
             float(mmd_cd),
             datetime.now().isoformat(timespec="seconds"),
@@ -200,16 +213,42 @@ def build_argparser():
         cls.get_parser(sp)
         with contextlib.suppress(Exception):
             sp.add_argument("--ckpt", type=Path)
+            sp.add_argument("--category", type=str)
+
+        sp.add_argument("--key-points", type=int, default=10)
 
         sp.add_argument("--batch-size", type=int, default=16)
         sp.add_argument("--num-workers", type=int, default=4)
         sp.add_argument("--trainset", type=str, default=DEFAULT_TRAIN)
         sp.add_argument("--refset", type=str, default=DEFAULT_REF)
-        sp.add_argument("--num-gen", type=int, default=128)
         sp.add_argument("--pca-dim", type=int, default=16)
         sp.add_argument("--symmetric-mmd", action="store_true")
         sp.add_argument("--db-path", type=Path, default=Path("results.db"))
     return p
+
+
+def covariance_scale_to_keypoints(points, keypoints, eps=1e-8):
+    """
+    points:    (B, N, 3)
+    keypoints: (B, M, 3)
+    returns:   (B, N, 3), (B, 1)
+    """
+    # 1) center
+    keypoints = keypoints.reshape(keypoints.shape[0], -1, 3)
+    p_mean = points.mean(dim=1, keepdim=True)
+    k_mean = keypoints.mean(dim=1, keepdim=True)
+    p_c = points - p_mean
+    k_c = keypoints - k_mean
+
+    # 2) covariance trace (sum of variances)
+    # var = E[||x||^2]/d  up to constants; we'll just use mean squared norm
+    p_var = (p_c**2).sum(dim=-1).mean(dim=1)  # (B,)
+    k_var = (k_c**2).sum(dim=-1).mean(dim=1)  # (B,)
+
+    s = torch.sqrt((k_var + eps) / (p_var + eps)).view(-1, 1, 1)  # (B,1,1)
+    # 3) apply
+    p_scaled = p_mean + s * p_c
+    return p_scaled, s
 
 
 def main():
@@ -221,31 +260,52 @@ def main():
     model.load_model(opt.ckpt, opt)
 
     # 1) Collect training keypoints
-    train_loader = make_loader(opt.trainset, opt.model, opt.category, opt.batch_size, opt.num_workers, True)
-    all_kps, z_aux_mean = collect_train_keypoints(model, train_loader)
+    train_loader = make_loader(
+        opt.trainset, opt.model, opt.category, opt.batch_size, opt.num_workers, True
+    )
+    all_kps, z_aux_mean = collect_train_keypoints(model, train_loader, opt)
 
     # 2) Fit PCA + KDE
     pca_mu, pca_comps, z_pca = fit_pca(all_kps, opt.pca_dim)
     kde_mu, kde_std = fit_diag_kde(z_pca)
 
     # 3) Sample keypoints & generate
-    kp_samples_flat = sample_from_pca_kde(opt.num_gen, pca_mu, pca_comps, kde_mu, kde_std)
+
+    ref_loader = make_loader(
+        opt.refset, opt.model, opt.category, opt.batch_size, opt.num_workers, False
+    )
+    num_ref = len(ref_loader.dataset)
+
+    kp_samples_flat = sample_from_pca_kde(num_ref, pca_mu, pca_comps, kde_mu, kde_std)
     kp_samples = torch.from_numpy(kp_samples_flat).float().cuda()
-    gen_pcs = generate_from_keypoints(model, kp_samples, z_aux_mean).float().cuda()
+
+    idx = torch.randperm(z_aux_mean.shape[0])[: kp_samples.shape[0]]
+
+    gen_pcs = (
+        generate_from_keypoints(model, kp_samples, z_aux_mean[idx], opt).float().cuda()
+    )
+
+    if opt.model == "Ours":
+        gen_pcs = covariance_scale_to_keypoints(gen_pcs, kp_samples)[0]
 
     # 4) Load reference pcs
-    ref_loader = make_loader(opt.refset, opt.model, opt.category, opt.batch_size, opt.num_workers, False)
     ref_pcs_list = []
     with torch.no_grad():
         for batch in tqdm.tqdm(ref_loader, desc="Load ref pcs"):
-            ref_pcs_list.append(batch["target_shape"].float().reshape(batch["orig_offset"].shape[0], -1, 3))
+            if opt.model == "Ours":
+                ref_pcs_list.append(
+                    batch["target_shape"]
+                    .float()
+                    .reshape(batch["orig_offset"].shape[0], -1, 3)
+                )
+            else:
+                ref_pcs_list.append(batch["source_shape"])
 
     ref_pcs = torch.cat(ref_pcs_list, dim=0).cuda()
 
     # 5) Compute MMD
     out = MMD_CD_EMD(gen_pcs, ref_pcs, batch_size=16, symmetric=opt.symmetric_mmd)
     print(f"MMD-CD  : {float(out['MMD-CD']):.6f}")
-    # print(f"MMD-EMD : {float(out['MMD-EMD']):.6f}")
 
     # 6) Log results
     run_id = save_mmd_run(opt.db_path, opt, float(out["MMD-CD"]))

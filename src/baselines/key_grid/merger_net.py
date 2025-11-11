@@ -156,7 +156,7 @@ class Net(nn.Module):
         paired_joints = torch.stack(
             [kpcd[:, self.skeleton_idx[0], :], kpcd[:, self.skeleton_idx[1], :]], dim=2
         )
-        global_feats = F.max_pool1d(l3_feats, 16).squeeze()
+        global_feats = F.max_pool1d(l3_feats, 16).squeeze(2)
         strengths = F.sigmoid(self.MA_L(self.MA(global_feats)))
         feature_map = self.draw_lines(normal_point, paired_joints)
         feature_map = feature_map * strengths.reshape(B, len(self.skeleton_idx[0]), 1)

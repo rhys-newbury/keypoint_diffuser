@@ -10,15 +10,15 @@ from glob import glob
 from pathlib import Path
 
 import torch
+from baselines.key_grid.composed_chamfer import loss_all
+from baselines.key_grid.merger_net import Net
+from datasets.discovery import discover_datasets
 from db_utils import save_train_run
 from torch import optim
 from tqdm import tqdm
 from utils import DATA_DIR, DATASET
 
 import wandb
-from baselines.key_grid.composed_chamfer import loss_all
-from baselines.key_grid.merger_net import Net
-from datasets.discovery import discover_datasets
 
 
 AVAILABLE_DATASETS = discover_datasets()
@@ -115,7 +115,7 @@ if __name__ == "__main__":
     )
 
     loader = torch.utils.data.DataLoader(
-        dataset, batch_size=batch, shuffle=True, num_workers=0
+        dataset, batch_size=batch, shuffle=True, num_workers=0, drop_last=True
     )
 
     net = Net(cfg.max_points, cfg.key_points).cuda()

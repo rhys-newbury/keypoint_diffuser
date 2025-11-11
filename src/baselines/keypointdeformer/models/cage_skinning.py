@@ -268,3 +268,121 @@ class CageSkinning(nn.Module):
             loss.backward()
             self.optimizer.step()
             self.keypoint_optimizer.step()
+
+    def deform_from_keypoints(
+        self,
+        source_shape: torch.Tensor,  # (B, 3, N)
+        target_keypoints: torch.Tensor,  # (B, 3, K) or (3, K)
+        verbose: bool = True,
+    ):
+        """
+        Deform `source_shape` so that its predicted keypoints move toward `target_keypoints`,
+        using the cage + MVC pipeline in this module.
+
+        Args:
+            source_shape: (B, 3, N) point clouds in the same normalized space as training.
+            target_keypoints: (B, 3, K) or (3, K) desired keypoint locations.
+            n_influence_ratio: Optional override of opt.n_influence_ratio for how many
+                cage verts each keypoint influences (relative to cage/keypoint counts).
+            optimize_cage: If True, runs a quick shrink-to-shape step before deforming.
+                If None, uses (not self.opt.no_optimize_cage).
+            verbose: Passed through to deform_with_MVC.
+
+        Returns:
+            {
+                "deformed": (B, N, 3)  # deformed points
+                "cage": (B, Vc, 3),    # original cage (per batch)
+                "new_cage": (B, Vc, 3),
+                "weight": (B, N, Vc),  # MVC weights
+                "source_keypoints": (B, 3, K),
+                "target_keypoints": (B, 3, K),
+                "influence": (B, K, Vc),  # masked influence used
+            }
+        """
+        assert (
+            source_shape.dim() == 3 and source_shape.shape[1] == 3
+        ), "source_shape must be (B, 3, N)"
+        B = source_shape.shape[0]
+        device = source_shape.device
+        dtype = source_shape.dtype
+
+        # --- Normalize/prepare target keypoints batch shape ---
+        if target_keypoints.dim() == 2:
+            # (3, K) -> (B, 3, K)
+            target_keypoints = target_keypoints.unsqueeze(0).expand(B, -1, -1)
+        assert (
+            target_keypoints.shape[0] == B and target_keypoints.shape[1] == 3
+        ), "target_keypoints must be (B, 3, K) or (3, K)"
+
+        K = target_keypoints.shape[2]
+
+        # --- Predict source keypoints from the shape ---
+        # (Optionally: keep these unclamped during inference as discussed.)
+        source_keypoints = self.keypoint_predictor(source_shape)  # (B, 3, K)
+
+        # --- Cage & faces on the right device ---
+        cage = self.template_vertices.to(device=device, dtype=dtype)  # (1, 3, Vc)
+        faces = self.template_faces.to(device)  # (1, Fc, 3)
+        Vc = cage.shape[2]
+
+        # Optional quick cage optimization
+        optimize_cage = not getattr(self.opt, "no_optimize_cage", False)
+
+        if optimize_cage:
+            # run per-batch
+            c = cage.expand(B, -1, -1).clone()
+            with torch.no_grad():
+                c = self.optimize_cage(c, source_shape)  # keeps (B, 3, Vc)
+        else:
+            c = cage.expand(B, -1, -1).clone()
+
+        # --- Build influence matrix (keypoints x cage_verts), with predictor offset ---
+        # Base learnable influence param
+        base_influence = self.influence_param[None].to(
+            device=device, dtype=dtype
+        )  # (1, K, Vc)
+        influence_offset = self.influence_predictor(source_shape)  # (B, K*Vc)
+        influence_offset = rearrange(influence_offset, "b (k v) -> b k v", k=K, v=Vc)
+
+        influence = base_influence + influence_offset  # (B, K, Vc)
+
+        # --- Sparsify influences based on kpt↔cage proximity ---
+        # distance between keypoints and cage verts
+        # c: (B, 3, Vc), source_keypoints: (B, 3, K)
+        dists_sq = torch.sum(
+            (source_keypoints[..., None] - c[:, :, None]) ** 2, dim=1
+        )  # (B, K, Vc)
+        ratio = self.opt.n_influence_ratio
+        n_influence = max(
+            5, int((dists_sq.shape[2] / dists_sq.shape[1]) * float(ratio))
+        )  # >=5
+
+        # threshold per (B, K, 1) taking the n_influence nearest cage verts
+        thresh = torch.topk(dists_sq, k=n_influence, largest=False, dim=2)[0][
+            :, :, -1
+        ].unsqueeze(-1)
+        keep = dists_sq <= (
+            thresh + 1e-12
+        )  # (B, K, Vc) boolean mask, small epsilon to break ties
+        influence = influence * keep
+
+        # --- Move cage by aggregating keypoint offsets via influence ---
+        kpt_offsets = target_keypoints - source_keypoints  # (B, 3, K)
+        # weighted sum over K, broadcasting influence as (B, 1, K, Vc)
+        cage_offset = torch.sum(
+            kpt_offsets[:, :, :, None] * influence[:, None, :, :], dim=2
+        )  # (B, 3, Vc)
+        new_cage = c + cage_offset  # (B, 3, Vc)
+
+        # --- MVC deformation ---
+        # deform_with_MVC expects shapes as (B, V, 3)
+        c_T = c.transpose(1, 2).contiguous()  # (B, Vc, 3)
+        new_cage_T = new_cage.transpose(1, 2).contiguous()  # (B, Vc, 3)
+        faces_B = faces.expand(B, -1, -1)  # (B, Fc, 3)
+        src_T = source_shape.transpose(1, 2).contiguous()  # (B, N, 3)
+
+        deformed_shapes, weights, _ = deform_with_MVC(
+            c_T, new_cage_T, faces_B, src_T, verbose=verbose
+        )  # deformed_shapes: (B, N, 3)
+
+        return deformed_shapes

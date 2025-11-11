@@ -29,9 +29,6 @@ import numpy as np
 import torch
 import tqdm
 from classes import MODEL_CLASSES
-from torch.utils.data import DataLoader
-from torchvision import transforms
-
 from datasets.H5Datset import H5Dataset
 from keypoint_diffuser.utils.eval_metrics import EMD_CD_recon
 from keypoint_diffuser.utils.pc_utils import collate_fn
@@ -40,6 +37,8 @@ from keypoint_diffuser.utils.transforms import (
     GridSample,
     ToTensor,
 )
+from torch.utils.data import DataLoader
+from torchvision import transforms
 
 
 TESTSET = "/app/shapenetcorev2_hdf5_2048/val"
@@ -65,7 +64,9 @@ def save_recon_geoms(
     saved = 0
     if len(emds) == 0:
         emds = [None] * len(kps)
-    for idx, (recon, gt, cd, emd, kp) in enumerate(zip(best_recons, best_gts, cds, emds, kps)):
+    for idx, (recon, gt, cd, emd, kp) in enumerate(
+        zip(best_recons, best_gts, cds, emds, kps)
+    ):
         # recon: [M, 3], gt: [N, 3]
         dst = out_dir / f"sample_{idx:05d}"
         dst.mkdir(parents=True, exist_ok=True)
@@ -169,6 +170,7 @@ def covariance_scale_to_keypoints(points, keypoints, eps=1e-8):
     returns:   (B, N, 3), (B, 1)
     """
     # 1) center
+    keypoints = keypoints.reshape(keypoints.shape[0], -1, 3)
     p_mean = points.mean(dim=1, keepdim=True)
     k_mean = keypoints.mean(dim=1, keepdim=True)
     p_c = points - p_mean
@@ -176,10 +178,10 @@ def covariance_scale_to_keypoints(points, keypoints, eps=1e-8):
 
     # 2) covariance trace (sum of variances)
     # var = E[||x||^2]/d  up to constants; we'll just use mean squared norm
-    p_var = (p_c ** 2).sum(dim=-1).mean(dim=1)   # (B,)
-    k_var = (k_c ** 2).sum(dim=-1).mean(dim=1)   # (B,)
+    p_var = (p_c**2).sum(dim=-1).mean(dim=1)  # (B,)
+    k_var = (k_c**2).sum(dim=-1).mean(dim=1)  # (B,)
 
-    s = torch.sqrt((k_var + eps) / (p_var + eps)).view(-1, 1, 1)   # (B,1,1)
+    s = torch.sqrt((k_var + eps) / (p_var + eps)).view(-1, 1, 1)  # (B,1,1)
     # 3) apply
     p_scaled = p_mean + s * p_c
     return p_scaled, s
@@ -194,34 +196,35 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
     best_recons, best_gts, kps_out = [], [], []
 
     device = next(model.model.parameters()).device
+    print("running on device: ", device)
     model.model.eval().to(device)
     ours = getattr(opt, "model", None) == "Ours"
 
     with torch.no_grad():
         for batch in tqdm.tqdm(loader, desc="Reconstruct (best per item)"):
-
             recon_list, pc, kp = model.get_reconstruction(batch)
 
-            B = pc.shape[0]
+            pc.shape[0]
             gt_batch = pc.to(device, dtype=torch.float32)
 
             # shape check: recon_list is list[B] of [1,P,3] or [P,3]
             preds = []
             for pred in recon_list:
-                if not pred or len(pred) == 0:
+                if pred is None or len(pred) == 0:
                     preds.append(torch.zeros((1, 3), device=device))  # placeholder
                 else:
                     p = pred[0] if isinstance(pred, list) else pred
                     preds.append(p.to(device))
 
-            preds = torch.stack(preds, dim=0)  # (B,P,3) possibly with empties
-            mask = torch.isfinite(preds).all(dim=-1).all(dim=-1) & (preds.abs().sum(dim=-1).sum(dim=-1) > 0)
-            valid_mask = mask.unsqueeze(-1).unsqueeze(-1)
+            preds = torch.stack(preds, dim=0).reshape(*gt_batch.shape)  # (B,P,3) possibly with empties
+            mask = torch.isfinite(preds).all(dim=-1).all(dim=-1) & (
+                preds.abs().sum(dim=-1).sum(dim=-1) > 0
+            ).reshape(-1)
 
             # filter invalid
             preds = preds[mask]
             gts = gt_batch[mask]
-            kps_valid = kp[mask] if ours else kp[mask]
+            kps_valid = kp[mask]
 
             if preds.shape[0] == 0:
                 continue
@@ -231,7 +234,7 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
                 preds = covariance_scale_to_keypoints(preds, kps_valid.to(device))[0]
 
             # metrics batched
-            res = EMD_CD_recon(preds, gts, reduced=False)
+            res = EMD_CD_recon(preds.double(), gts.double(), reduced=False)
             cd = res["CD"].detach().cpu().numpy()
             emd = res["EMD"].detach().cpu().numpy()
 
@@ -244,11 +247,14 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
             kps_out.extend(kps_valid.detach().cpu().numpy())
 
     if save:
-        save_recon_geoms(best_recons, best_gts, cds, emds, opt, kps_out, out_dir=out_dir)
+        save_recon_geoms(
+            best_recons, best_gts, cds, emds, opt, kps_out, out_dir=out_dir
+        )
 
     cd_mean = float(np.mean(cds)) if cds else float("nan")
     emd_mean = float(np.mean(emds)) if emds else float("nan")
     return cd_mean, emd_mean
+
 
 # ----------------------------
 # DB
@@ -260,7 +266,7 @@ def init_db(db_path: Path):
     cur = con.cursor()
     cur.execute(
         """
-        CREATE TABLE IF NOT EXISTS reconstruction (
+        CREATE TABLE IF NOT EXISTS reconstruction_results_low (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             model TEXT NOT NULL,
             ckpt TEXT,
@@ -280,7 +286,7 @@ def save_run(db_path: Path, opt: argparse.Namespace, cd: float, emd: float) -> i
     cur = con.cursor()
     cur.execute(
         """
-        INSERT INTO reconstruction (model, ckpt, category, batch_size, cd_recon, emd_recon)
+        INSERT INTO reconstruction_results_low (model, ckpt, category, batch_size, cd_recon, emd_recon)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
@@ -310,6 +316,7 @@ def main():
     model_cls = MODEL_CLASSES[opt.model]
     model = model_cls()
     model.load_model(opt.ckpt, opt)
+    model.model.cuda()
 
     loader = make_loader(opt)
 
