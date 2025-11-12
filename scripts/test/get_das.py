@@ -157,21 +157,26 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
             key_points = model.get_keypoints(batch)
 
             # NOTE: we assume this returns (features, attn, coord_padded)
-            _, attn, coord_padded = model.model.encoder.get_attention(batch)
+            if False:
+                _, attn, coord_padded = model.model.encoder.get_attention(batch)
 
-            # now split per-item
-            for kp, a, c in zip(key_points, attn, coord_padded):
-                # move to cpu / numpy as needed
-                if torch.is_tensor(kp):
-                    kp = kp.detach().cpu().numpy()
-                if torch.is_tensor(a):
-                    a = a.detach().cpu().numpy()
-                if torch.is_tensor(c):
-                    c = c.detach().cpu().numpy()
+                # now split per-item
+                for kp, a, c in zip(key_points, attn, coord_padded):
+                    # move to cpu / numpy as needed
+                    if torch.is_tensor(kp):
+                        kp = kp.detach().cpu().numpy()
+                    if torch.is_tensor(a):
+                        a = a.detach().cpu().numpy()
+                    if torch.is_tensor(c):
+                        c = c.detach().cpu().numpy()
 
-                out_kpcd.append(kp)
-                out_attn.append(a)
-                out_coord.append(c)
+                    out_kpcd.append(kp)
+                    out_attn.append(a)
+                    out_coord.append(c)
+            else:
+                for kp in key_points:
+                    out_kpcd.append(kp)
+
 
     predicted = {
         "kpcd": out_kpcd,
