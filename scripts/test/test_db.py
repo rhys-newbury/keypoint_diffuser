@@ -108,7 +108,7 @@ def main():
     ap.add_argument(
         "--mode",
         choices=["das", "corr", "reconstruction", "all"],
-        default="both",
+        default="all",
         help="Which evaluation(s) to run per checkpoint.",
     )
 
@@ -184,6 +184,9 @@ def main():
 
     rows = list(cur.execute(q, params))
     random.shuffle(rows)
+    
+    print(rows)
+
     con.close()
 
     if not rows:
@@ -206,7 +209,8 @@ def main():
         return rc
 
     for rid, algo, category, ckpt_dir, key_points in rows:
-        if algo == "SC3K":
+        print(rid, algo, category)
+        if algo == "DPM":
             continue
 
         try:
@@ -233,31 +237,6 @@ def main():
 
             for ckpt_path in ckpt_list:
                 # DAS
-                if args.mode in ("reconstruction", "all") and not already_evaluated(
-                    eval_db_path, ckpt_path, algo, category, "reconstruction_results_low"
-                ):
-                    algo_ = "Ours" if algo == "Ours2" else algo
-
-                    annotation_json = Path("/app/annotations") / f"{category}.json"
-                    cmd_das = [
-                        "python3",
-                        str(args.reconstruct_script),
-                        algo_,
-                        "--ckpt",
-                        str(ckpt_path),
-                        "--batch-size",
-                        str(args.batch_size),
-                        "--key-points",
-                        str(key_points),
-                        "--category",
-                        str(category),
-                        "--db-path",
-                        str(eval_db_path),
-                    ]
-                    run_cmd(cmd_das, rid, "get_reconstruction")
-                    # else: already done; skip
-
-
                 if args.mode in ("das", "all") and not already_evaluated(
                     eval_db_path, ckpt_path, algo, category, args.das_table
                 ):
@@ -285,10 +264,9 @@ def main():
                     # else: already done; skip
 
                 # Correlation
-                if args.mode in ("corr", "all"):
-                    # and not already_evaluated(
-                    #     eval_db_path, ckpt_path, algo, category, args.corr_table
-                    # ):
+                if args.mode in ("corr", "all") and not already_evaluated(
+                        eval_db_path, ckpt_path, algo, category, args.corr_table
+                    ):
                     algo_ = "Ours" if algo == "Ours2" else algo
 
                     annotation_json = Path("/app/annotations") / f"{category}.json"
