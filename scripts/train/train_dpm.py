@@ -6,13 +6,13 @@ import torch
 import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
+from baselines.diffusion_point_cloud.autoencoder import AutoEncoder
+from baselines.diffusion_point_cloud.common import get_linear_scheduler
+from datasets.discovery import discover_datasets
 from db_utils import save_train_run
-from discovery import discover_datasets
 from utils import DATA_DIR, DATASET
 
 import wandb
-from baselines.diffusion_point_cloud.autoencoder import AutoEncoder
-from baselines.diffusion_point_cloud.common import get_linear_scheduler
 
 
 AVAILABLE_DATASETS = discover_datasets()
@@ -22,7 +22,7 @@ dataset_choices = sorted(AVAILABLE_DATASETS.keys())
 # Arguments
 parser = argparse.ArgumentParser()
 # Model arguments
-parser.add_argument("--key-points", type=int, default=10)
+parser.add_argument("--key-point", type=int, default=10)
 
 parser.add_argument(
     "--dataset",
@@ -68,12 +68,12 @@ parser.add_argument("--ckpt-dir", type=Path, default=Path("."))
 if __name__ == "__main__":
     args = parser.parse_args()
 
-    args.latent_dim = args.key_points + 3 * 5
+    args.latent_dim = args.key_point + 3 * 5
 
     wandb.init(project=f"dpm_{args.category}_train", config=args)
     ckpt_dir = args.ckpt_dir / wandb.run.name
     ckpt_dir.mkdir()
-    save_train_run(args.db, "DPM", args.category, ckpt_dir, args.key_points)
+    save_train_run(args.db, "DPM", args.category, ckpt_dir, args.key_point)
 
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
 
@@ -133,5 +133,5 @@ if __name__ == "__main__":
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
             },
-            f"{ckpt_dir!s}/{args.key_points}kp_{epoch}.pth",
+            f"{ckpt_dir!s}/{args.key_point}kp_{epoch}.pth",
         )

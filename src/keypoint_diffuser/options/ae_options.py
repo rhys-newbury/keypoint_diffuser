@@ -3,7 +3,6 @@ from pathlib import Path
 
 import configargparse
 import numpy as np
-
 from datasets.discovery import discover_datasets
 
 
@@ -34,7 +33,7 @@ class AEConfig:
     epochs: int = 100
     save_interval: int = 100
     log_interval: int = 10
-    key_points: int = 10
+    key_point: int = 10
     extra_latent: int = 5
     num_steps: int = 200
     beta_1: float = 1e-4

@@ -39,7 +39,7 @@ parser.add_argument(
 
 parser.add_argument(
     "-k",
-    "--key_points",
+    "--key_point",
     type=int,
     default=10,
     help="Requested number of keypoints to detect.",
@@ -97,11 +97,14 @@ if __name__ == "__main__":
     cfg = parser.parse_args()
     batch = cfg.batch
 
-    wandb.init(project=f"keygridOrig_{cfg.category}_train", config=cfg)
+    wandb.init(
+        project=f"keygridOrig_{cfg.category if cfg.dataset == 'H5Dataset' else 'People'}_train",
+        config=cfg,
+    )
 
     ckpt_dir = cfg.ckpt_dir / wandb.run.name
     ckpt_dir.mkdir()
-    save_train_run(cfg.db, "KeyGridOrig", cfg.category, ckpt_dir, cfg.key_points)
+    save_train_run(cfg.db, "KeyGridOrig", cfg.category, ckpt_dir, cfg.key_point)
 
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
     DatasetClass = AVAILABLE_DATASETS[cfg.dataset]
@@ -118,7 +121,7 @@ if __name__ == "__main__":
         dataset, batch_size=batch, shuffle=True, num_workers=0, drop_last=True
     )
 
-    net = Net(cfg.max_points, cfg.key_points).cuda()
+    net = Net(cfg.max_points, cfg.key_point).cuda()
     optimizer = optim.Adadelta(net.parameters(), lr=0.1, eps=1e-2)
 
     for epoch in range(cfg.epochs):
@@ -128,5 +131,5 @@ if __name__ == "__main__":
                 "epoch": epoch,
                 "model_state_dict": net.state_dict(),
             },
-            f"{ckpt_dir!s}/{cfg.key_points}kp_{epoch}.pth",
+            f"{ckpt_dir!s}/{cfg.key_point}kp_{epoch}.pth",
         )

@@ -11,15 +11,15 @@ from glob import glob
 from pathlib import Path
 
 import torch
+from baselines.skeleton_merger.composed_chamfer import composed_sqrt_chamfer
+from baselines.skeleton_merger.merger_net import Net
+from datasets.discovery import discover_datasets
 from db_utils import save_train_run
 from torch import optim
 from tqdm import tqdm
 from utils import DATA_DIR, DATASET
 
 import wandb
-from baselines.skeleton_merger.composed_chamfer import composed_sqrt_chamfer
-from baselines.skeleton_merger.merger_net import Net
-from datasets.discovery import discover_datasets
 
 
 AVAILABLE_DATASETS = discover_datasets()
@@ -42,7 +42,7 @@ parser.add_argument("--db", type=Path, help="Database path")
 
 parser.add_argument(
     "-k",
-    "--key-points",
+    "--key_point",
     type=int,
     default=10,
     help="Requested number of keypoints to detect.",
@@ -79,9 +79,7 @@ def feed(net, optimizer, loader, epoch):
         running_loss = 0.0
         total_time = 0.0
 
-        loop = tqdm(
-            enumerate(loader), total=len(loader), desc="Train" if train else "Eval"
-        )
+        loop = tqdm(enumerate(loader), total=len(loader), desc="Train")
 
         for i, batch_x in loop:
             start = time.time()
@@ -125,12 +123,15 @@ if __name__ == "__main__":
     ns = parser.parse_args()
 
     batch = ns.batch
-    wandb.init(project=f"skeleton_merger_{ns.category}_train", config=ns)
+    wandb.init(
+        project=f"skeleton_merger_{ns.category if ns.dataset == 'H5Dataset' else 'People'}_train",
+        config=ns,
+    )
 
     ckpt_dir = ns.ckpt_dir / wandb.run.name
     ckpt_dir.mkdir()
 
-    save_train_run(ns.db, "SM", ns.category, ckpt_dir, ns.key_points)
+    save_train_run(ns.db, "SM", ns.category, ckpt_dir, ns.key_point)
 
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
     DatasetClass = AVAILABLE_DATASETS[ns.dataset]
@@ -150,14 +151,14 @@ if __name__ == "__main__":
         num_workers=0,
     )
 
-    net = Net(ns.max_points, ns.key_points).to(ns.device)
+    net = Net(ns.max_points, ns.key_point).to(ns.device)
     optimizer = optim.Adadelta(net.parameters(), eps=1e-2)
     for epoch in range(ns.epochs):
-        feed(net, optimizer, loader, True, epoch)
+        feed(net, optimizer, loader, epoch)
         torch.save(
             {
                 "epoch": epoch,
                 "model_state_dict": net.state_dict(),
             },
-            f"{ckpt_dir!s}/{ns.key_points}kp_{epoch}.pth",
+            f"{ckpt_dir!s}/{ns.key_point}kp_{epoch}.pth",
         )

@@ -9,7 +9,7 @@ import torch
 import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
-from datasets.H5Datset import H5Dataset
+from datasets.discovery import discover_datasets
 from db_utils import save_train_run
 from einops import repeat
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
@@ -19,8 +19,13 @@ from keypoint_diffuser.utils.nn import save_network
 from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
 from torch.nn.utils import clip_grad_norm_
+from utils import DATA_DIR, DATASET
 
 import wandb
+
+
+AVAILABLE_DATASETS = discover_datasets()
+dataset_choices = sorted(AVAILABLE_DATASETS.keys())
 
 
 torch.autograd.set_detect_anomaly(True)
@@ -155,7 +160,7 @@ def get_network_data(data: dict[str, Any], key="orig"):
 def train(opt: AEConfig):
     ckpt_dir = opt.ckpt_dir / wandb.run.name
     ckpt_dir.mkdir()
-    save_train_run(opt.db, "Ours2", opt.category, ckpt_dir, opt.key_points)
+    save_train_run(opt.db, "Ours2", opt.category, ckpt_dir, opt.key_point)
 
     t = transforms.Compose(
         [
@@ -186,10 +191,12 @@ def train(opt: AEConfig):
         ]
     )
 
-    DATASET = "/app/shapenetcorev2_hdf5_2048/train/"
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
-    dataset = H5Dataset(
-        h5_files,
+    DatasetClass = AVAILABLE_DATASETS[opt.dataset]
+
+    dataset = DatasetClass(
+        h5_files=h5_files,
+        root_dir=DATA_DIR,
         normalize=True,
         include_label=False,
         object_name=opt.category,
@@ -256,7 +263,7 @@ def train(opt: AEConfig):
                 get_network_data(data), step=t, temperature=temp_t
             )
 
-            code_ = code[:, : opt.key_points * 3].reshape(
+            code_ = code[:, : opt.key_point * 3].reshape(
                 data["orig_offset"].shape[0], -1, 3
             )
 
@@ -269,7 +276,7 @@ def train(opt: AEConfig):
             wandb.log({"diffusion_loss": diffusion_loss}, step=t)
             wandb.log({"kl_divergence": kl}, step=t)
 
-            fps = sample_farthest_points(target_shape_t, opt.key_points + 10).transpose(
+            fps = sample_farthest_points(target_shape_t, opt.key_point + 10).transpose(
                 2, 1
             )
 
@@ -342,7 +349,10 @@ if __name__ == "__main__":
     np.random.seed(seed)
 
     if opt.phase == "train":
-        wandb.init(project=f"ours_{opt.category}_train", config=opt)
+        wandb.init(
+            project=f"ours_{opt.category if opt.dataset == 'H5Dataset' else 'People'}_train",
+            config=opt,
+        )
         wandb.run.log_code(".")
         train(opt)
 

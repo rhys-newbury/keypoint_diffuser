@@ -4,14 +4,14 @@ import numpy as np
 import torch
 import torch.nn.parallel
 import torch.utils.data
-from db_utils import save_train_run
-from utils import DATA_DIR, DATASET
-
-import wandb
 from baselines.keypointdeformer.models.cage_skinning import CageSkinning
 from baselines.keypointdeformer.options.base_options import BaseOptions
 from baselines.keypointdeformer.utils.nn import save_network, weights_init
 from datasets.discovery import discover_datasets
+from db_utils import save_train_run
+from utils import DATA_DIR, DATASET
+
+import wandb
 
 
 AVAILABLE_DATASETS = discover_datasets()
@@ -28,11 +28,14 @@ def get_data(data):
 
 
 def train(opt):
-    wandb.init(project=f"KPD_{opt.category}_train", config=opt)
+    wandb.init(
+        project=f"KPD_{opt.category if opt.dataset == 'H5Dataset' else 'People'}_train",
+        config=opt,
+    )
 
     ckpt_dir = opt.ckpt_dir / wandb.run.name
     ckpt_dir.mkdir()
-    save_train_run(opt.db, "KPD", opt.category, ckpt_dir, opt.key_points)
+    save_train_run(opt.db, "KPD", opt.category, ckpt_dir, opt.key_point)
 
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
     DatasetClass = AVAILABLE_DATASETS[opt.dataset]
@@ -78,7 +81,7 @@ def train(opt):
             t += 1
         print(current_loss)
 
-        save_network(net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=e)
+        save_network(net, ckpt_dir, network_label=f"{opt.key_point}kp", epoch_label=e)
 
 
 if __name__ == "__main__":

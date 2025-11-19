@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import configargparse
-
 from baselines.keypointdeformer.models.cage_skinning import CageSkinning
 from datasets.discovery import discover_datasets
 
@@ -35,7 +34,7 @@ class BaseOptions:
         parser.add_argument("--db", type=Path, help="Database path")
 
         parser.add_argument("--batch_size", type=int, help="batch size", default=16)
-        parser.add_argument("--key_points", type=int, help="", default=10)
+        parser.add_argument("--key_point", type=int, help="", default=10)
         parser.add_argument("--cage_size", type=float, default=1.4, help="")
 
         parser.add_argument("--lr", type=float, help="learning rate", default=0.001)

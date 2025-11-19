@@ -49,6 +49,15 @@ class DPM(TestBase):  # inherit if you need the same interface
             )  # [B, N, 3]
         return recons.unsqueeze(1).cpu(), pcd, code
 
+    def generate(self, code):
+        recons = self.model.decode(
+            code, 2048, flexibility=self.flexibility
+        )  # [B, N, 3]
+        return recons
+
+    def get_latent(self, pcd):
+        return self.model.encode(pcd.cuda()), None  # [B, Z]
+
     def get_keypoints(self, pcd):
         raise NotImplementedError()
 

@@ -9,16 +9,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import tqdm
-from classes import MODEL_CLASSES
-from torchvision import transforms
-
 from baselines.test_base import TestBase
+from classes import MODEL_CLASSES
 from keypoint_diffuser.utils.pc_utils import collate_fn
 from keypoint_diffuser.utils.transforms import (
     Collect,
     GridSample,
     ToTensor,
 )
+from torchvision import transforms
 
 
 CHECKPOINTS_DIR = "checkpoints"
@@ -110,8 +109,8 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
     out_kpcd = []
     out_nfact = []
     out_Q = []
-    out_attn = []      # NEW
-    out_coord = []     # NEW
+    out_attn = []  # NEW
+    out_coord = []  # NEW
 
     for i in tqdm.tqdm(
         range(0, len(kpn_ds), opt.batch_size), unit_scale=opt.batch_size
@@ -176,7 +175,6 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
             else:
                 for kp in key_points:
                     out_kpcd.append(kp)
-
 
     predicted = {
         "kpcd": out_kpcd,
@@ -300,8 +298,8 @@ def save_numpy_geoms(
     opt,
     out_dir: Path = Path("geom_np"),
     vis_max=1000,
-    scores=None,          # (B,) per-entry scores
-    assignments=None,     # list of arrays, each (K,) mapping pred→gt
+    scores=None,  # (B,) per-entry scores
+    assignments=None,  # list of arrays, each (K,) mapping pred→gt
 ):
     """
     Saves raw numpy arrays for each sample:
@@ -324,8 +322,8 @@ def save_numpy_geoms(
     for idx, (entry, kpcd_norm, nfact) in enumerate(
         zip(kpn_ds, predicted["kpcd"], predicted["nfact"])
     ):
-        pc = np.asarray(flat_Q[idx], dtype=np.float32)      # normalized pc
-        pred = np.asarray(kpcd_norm, dtype=np.float32)      # normalized preds
+        pc = np.asarray(flat_Q[idx], dtype=np.float32)  # normalized pc
+        pred = np.asarray(kpcd_norm, dtype=np.float32)  # normalized preds
 
         # normalize GT with nfact
         pcmax, pcmin = nfact
@@ -377,6 +375,7 @@ def save_numpy_geoms(
         saved += 1
 
     print(f"[✓] Saved {saved} samples as numpy arrays under {out_dir}/")
+
 
 # ----------------------------
 # Database

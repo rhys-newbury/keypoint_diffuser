@@ -60,14 +60,14 @@ class CageSkinning(nn.Module):
         nd_decoder_kpt = MLPDeformer2(
             dim=dim,
             bottleneck_size=bottleneck_size,
-            npoint=opt.key_points,
+            npoint=opt.key_point,
             residual=opt.d_residual,
             normalization=opt.normalization,
         )
         self.keypoint_predictor = nn.Sequential(shape_encoder_kpt, nd_decoder_kpt)
 
         # influence predictor
-        influence_size = self.opt.key_points * self.template_vertices.shape[2]
+        influence_size = self.opt.key_point * self.template_vertices.shape[2]
         shape_encoder_influence = nn.Sequential(
             PointNetfeat(dim=dim, num_points=2048, bottleneck_size=influence_size),
             Linear(
@@ -95,9 +95,9 @@ class CageSkinning(nn.Module):
         self.register_buffer("template_faces", template_faces)
         self.register_buffer("template_vertices", template_vertices)
 
-        # key_points x number of vertices
+        # key_point x number of vertices
         self.influence_param = nn.Parameter(
-            torch.zeros(self.opt.key_points, self.template_vertices.shape[2]),
+            torch.zeros(self.opt.key_point, self.template_vertices.shape[2]),
             requires_grad=True,
         )
 
@@ -148,7 +148,7 @@ class CageSkinning(nn.Module):
         self.shape = shape
         self.keypoints = keypoints
 
-        n_fps = self.opt.n_fps if self.opt.n_fps else 2 * self.opt.key_points
+        n_fps = self.opt.n_fps if self.opt.n_fps else 2 * self.opt.key_point
         self.init_keypoints = sample_farthest_points(shape, n_fps)
 
         if target_shape is not None:

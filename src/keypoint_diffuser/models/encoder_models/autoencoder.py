@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from torch.nn import Module
 
+from keypoint_diffuser.options.ae_options import AEConfig
 from keypoint_diffuser.utils.loss import EDMLossCurriculum
 from keypoint_diffuser.utils.utils import reparameterize
 
@@ -11,11 +12,11 @@ from .encoders.convex_transformer import ConvexTransformer
 
 
 class AutoEncoder(Module):
-    def __init__(self, args, max_steps=20000):
+    def __init__(self, args: AEConfig, max_steps=20000):
         super().__init__()
         self.args = args
         self.encoder = ConvexTransformer(
-            zdim=args.key_points, extra_latent=args.extra_latent
+            zdim=args.key_point, extra_latent=args.extra_latent
         )
 
         self.fc_mu = nn.Sequential(
@@ -32,7 +33,7 @@ class AutoEncoder(Module):
 
         self.diffusion_ = PointwiseNetV2(
             point_dim=3,
-            context_dim=args.key_points * 3 + args.extra_latent,
+            context_dim=args.key_point * 3 + args.extra_latent,
             residual=args.residual,
         )
         self.use_edm = args.use_edm
@@ -104,3 +105,11 @@ class AutoEncoder(Module):
             loss = self.diffusion.get_loss(t.transpose(1, 2), code)
 
         return loss, z0, mu, logvar
+
+
+if __name__ == "__main__":
+    opt = AEConfig("yes", "airplane")
+    x = AutoEncoder(opt)
+    import pdb
+
+    pdb.set_trace()

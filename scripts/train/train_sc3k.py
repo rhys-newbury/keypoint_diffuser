@@ -3,14 +3,14 @@ from glob import glob
 from pathlib import Path
 
 import torch
+from baselines.sc3k import network
+from baselines.sc3k.utils import AverageMeter, compute_loss
+from datasets.discovery import discover_datasets
 from db_utils import save_train_run
 from tqdm import tqdm
 from utils import DATA_DIR, DATASET
 
 import wandb
-from baselines.sc3k import network
-from baselines.sc3k.utils import AverageMeter, compute_loss
-from datasets.discovery import discover_datasets
 
 
 AVAILABLE_DATASETS = discover_datasets()
@@ -37,7 +37,7 @@ parser.add_argument("--db", type=Path, help="Database path")
 parser.add_argument("--lr", type=float, default=1e-3)
 
 # Domain/task specifics you reference
-parser.add_argument("--key-points", type=int, default=10)
+parser.add_argument("--key_point", type=int, default=10)
 parser.add_argument("--log-path", type=str, default=None)
 parser.add_argument("--category", type=str, help="Category of objects", default="chair")
 
@@ -108,10 +108,10 @@ def train(cfg, ckpt_dir):
 
         torch.save(
             model.state_dict(),
-            f"{ckpt_dir!s}/{cfg.key_points}kp_{epoch}.pth",
+            f"{ckpt_dir!s}/{cfg.key_point}kp_{epoch}.pth",
         )
 
-        wandb.log({"train_loss": train_loss, "val_loss": val_loss}, step=epoch)
+        wandb.log({"train_loss": train_loss}, step=epoch)
 
 
 if __name__ == "__main__":
@@ -119,11 +119,14 @@ if __name__ == "__main__":
     cfg.task = "generic"
     cfg.split = "train"
 
-    wandb.init(project=f"sc3k_{cfg.category}_train", config=cfg)
+    wandb.init(
+        project=f"sc3k_{cfg.category if cfg.dataset == 'H5Dataset' else 'People'}_train",
+        config=cfg,
+    )
 
     ckpt_dir = cfg.ckpt_dir / wandb.run.name
     ckpt_dir.mkdir()
 
-    save_train_run(cfg.db, "SC3K", cfg.category, ckpt_dir, cfg.key_points)
+    save_train_run(cfg.db, "SC3K", cfg.category, ckpt_dir, cfg.key_point)
 
     train(cfg, ckpt_dir)

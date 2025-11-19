@@ -78,7 +78,7 @@ class PeopleDataset(Dataset):
         return all_points, keypoints
 
     def __getitem__(self, idx):
-        pc, _ = self._load_sample(idx)
+        pc, keypoints = self._load_sample(idx)
 
         if self.random_rotate:
             # SC3K wants 'random' rotations.
@@ -119,8 +119,8 @@ class PeopleDataset(Dataset):
                 orig, deformed = transformed
                 return {
                     "target_shape": torch.tensor(pc, dtype=torch.float32),
-                    **{f"orig_{k}": v for k, v in orig.items()},
-                    **{f"deformed_{k}": v for k, v in deformed.items()},
+                    **{f"orig_{k}": v.cuda() for k, v in orig.items()},
+                    **{f"deformed_{k}": v.cuda() for k, v in deformed.items()},
                 }
             else:
                 return {
@@ -131,4 +131,5 @@ class PeopleDataset(Dataset):
         # === DEFAULT ===
         if self.normalize:
             pc = self._normalize_pc(pc)
+
         return pc
