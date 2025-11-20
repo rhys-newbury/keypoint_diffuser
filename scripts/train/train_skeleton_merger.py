@@ -60,7 +60,7 @@ parser.add_argument(
     default=2048,
     help="Indicates maximum points in each input point cloud.",
 )
-parser.add_argument("--ckpt-dir", type=Path, default=Path("."))
+parser.add_argument("--ckpt_dir", type=Path, default=Path("."))
 
 
 def L2(embed):

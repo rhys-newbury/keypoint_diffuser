@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import torch
 
 from datasets.people_dataset import PeopleDataset  # <-- import your dataset class
+from matplotlib.colors import ListedColormap
 
 
 # -----------------------------------------------------------------------------
@@ -31,16 +32,16 @@ def visualize_collage(dataset: PeopleDataset, grid: int = 3):
     idxs = random.sample(range(len(dataset)), n)
 
     for ax, idx in zip(axes[:n], idxs):
-        sample = dataset[idx]
-        pts = (
-            sample["target_shape"].cpu().numpy()
-            if isinstance(sample["target_shape"], torch.Tensor)
-            else sample["target_shape"]
-        )
+        pts, kpts = dataset[idx]
 
         # color by z for aesthetics (optional)
-        z_norm = (pts[:, 2] - pts[:, 2].min()) / (pts[:, 2].ptp() + 1e-8)
-        colors = plt.get_cmap("viridis")(z_norm)
+        # z_norm = (pts[:, 2] - pts[:, 2].min()) / (pts[:, 2].ptp() + 1e-8)
+        # colors = plt.get_cmap("viridis")(z_norm)
+        cmap = plt.get_cmap("tab10")   # much better for 3 classes
+
+        # normalize labels into colormap range
+        colors = cmap(pts[:, 3] % cmap.N)
+        # import pdb; pdb.set_trace()
 
         ax.scatter(
             pts[:, 0],
@@ -53,27 +54,26 @@ def visualize_collage(dataset: PeopleDataset, grid: int = 3):
         )
 
         # plot keypoints if present
-        if "keypoints" in sample and sample["keypoints"].numel() > 0:
-            kpts = sample["keypoints"].cpu().numpy()
-            ax.scatter(
-                kpts[:, 0],
-                kpts[:, 1],
-                kpts[:, 2],
-                s=20,
-                c="red",
-                depthshade=False,
-                marker="^",
-                edgecolors="k",
-                linewidths=0.4,
-            )
+        ax.scatter(
+            kpts[:, 0],
+            kpts[:, 1],
+            kpts[:, 2],
+            s=20,
+            c="red",
+            depthshade=False,
+            marker="^",
+            edgecolors="k",
+            linewidths=0.4,
+        )
 
-        ax.set_title(sample.get("name", f"sample_{idx}"), fontsize=8)
+        # ax.set_title(sample.get("name", f"sample_{idx}"), fontsize=8)
         ax.set_xticks([])
         ax.set_yticks([])
         ax.set_zticks([])
 
         # equal axes
         mins, maxs = pts.min(axis=0), pts.max(axis=0)
+        print(mins, maxs)
         center = (mins + maxs) / 2
         r = (maxs - mins).max() / 2
         for dim, c in zip("xyz", center):
@@ -119,6 +119,7 @@ def main():
         root_dir=args.dir,
         normalize=args.normalize,
         random_rotate=args.random_rotate,
+        get_keypoints=True,
     )
 
     visualize_collage(dataset, grid=args.grid)

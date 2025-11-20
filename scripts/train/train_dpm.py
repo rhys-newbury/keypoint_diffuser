@@ -22,7 +22,7 @@ dataset_choices = sorted(AVAILABLE_DATASETS.keys())
 # Arguments
 parser = argparse.ArgumentParser()
 # Model arguments
-parser.add_argument("--key-point", type=int, default=10)
+parser.add_argument("--key_point", type=int, default=10)
 
 parser.add_argument(
     "--dataset",
@@ -62,7 +62,7 @@ parser.add_argument("--sched_end_epoch", type=int, default=300 * 1000)
 parser.add_argument("--seed", type=int, default=2020)
 parser.add_argument("--device", type=str, default="cuda")
 parser.add_argument("--tag", type=str, default=None)
-parser.add_argument("--ckpt-dir", type=Path, default=Path("."))
+parser.add_argument("--ckpt_dir", type=Path, default=Path("."))
 
 # Main loop
 if __name__ == "__main__":

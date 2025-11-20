@@ -26,13 +26,12 @@ import tqdm
 
 # your project imports
 from classes import MODEL_CLASSES
-from torch.utils.data import DataLoader
-from torchvision import transforms
-
 from datasets.H5Datset import H5Dataset
 from keypoint_diffuser.utils.eval_metrics import MMD_CD_EMD
 from keypoint_diffuser.utils.pc_utils import collate_fn
 from keypoint_diffuser.utils.transforms import Collect, GridSample, ToTensor
+from torch.utils.data import DataLoader
+from torchvision import transforms
 
 
 DEFAULT_TRAIN = "/app/shapenetcorev2_hdf5_2048/train"
@@ -47,7 +46,12 @@ def make_loader(root, model_name, category, batch_size, num_workers, is_train):
     if model_name == "Ours":
         t = transforms.Compose(
             [
-                GridSample(keys=("coord",), hash_type="fnv", mode="train" if True else "test", return_grid_coord=True),
+                GridSample(
+                    keys=("coord",),
+                    hash_type="fnv",
+                    mode="train" if True else "test",
+                    return_grid_coord=True,
+                ),
                 ToTensor(),
                 Collect(keys=("coord", "grid_coord"), feat_keys=("coord",)),
             ]
@@ -99,7 +103,11 @@ def collect_train_keypoints(model, loader, opt, device="cuda"):
                 all_aux.append(z_aux.cpu())
     all_kps = torch.cat(all_kps, dim=0)
     if opt.model == "Ours":
-        z_aux_mean = torch.cat(all_aux, dim=0).mean(dim=0, keepdim=True) if len(all_aux) else None
+        z_aux_mean = (
+            torch.cat(all_aux, dim=0).mean(dim=0, keepdim=True)
+            if len(all_aux)
+            else None
+        )
     else:
         z_aux_mean = torch.cat(all_aux, dim=0) if len(all_aux) else None
 
@@ -212,7 +220,7 @@ def build_argparser():
             sp.add_argument("--ckpt", type=Path)
             sp.add_argument("--category", type=str)
 
-        sp.add_argument("--key-points", type=int, default=10)            
+        sp.add_argument("--key_point", type=int, default=10)
 
         sp.add_argument("--batch-size", type=int, default=16)
         sp.add_argument("--num-workers", type=int, default=4)
@@ -222,6 +230,7 @@ def build_argparser():
         sp.add_argument("--symmetric-mmd", action="store_true")
         sp.add_argument("--db-path", type=Path, default=Path("results.db"))
     return p
+
 
 def covariance_scale_to_keypoints(points, keypoints, eps=1e-8):
     """
@@ -256,7 +265,9 @@ def main():
     model.load_model(opt.ckpt, opt)
 
     # 1) Collect training keypoints
-    train_loader = make_loader(opt.trainset, opt.model, opt.category, opt.batch_size, opt.num_workers, True)
+    train_loader = make_loader(
+        opt.trainset, opt.model, opt.category, opt.batch_size, opt.num_workers, True
+    )
     all_kps, z_aux_mean = collect_train_keypoints(model, train_loader, opt)
 
     # 2) Fit PCA + KDE
@@ -265,28 +276,37 @@ def main():
 
     # 3) Sample keypoints & generate
 
-    ref_loader = make_loader(opt.refset, opt.model, opt.category, opt.batch_size, opt.num_workers, False)
+    ref_loader = make_loader(
+        opt.refset, opt.model, opt.category, opt.batch_size, opt.num_workers, False
+    )
     num_ref = len(ref_loader.dataset)
 
     kp_samples_flat = sample_from_pca_kde(num_ref, pca_mu, pca_comps, kde_mu, kde_std)
     kp_samples = torch.from_numpy(kp_samples_flat).float().cuda()
-    
+
     if z_aux_mean:
-        idx = torch.randperm(z_aux_mean.shape[0])[:kp_samples.shape[0]]
-        gen_pcs = generate_from_keypoints(model, kp_samples, z_aux_mean[idx], opt).float().cuda()
+        idx = torch.randperm(z_aux_mean.shape[0])[: kp_samples.shape[0]]
+        gen_pcs = (
+            generate_from_keypoints(model, kp_samples, z_aux_mean[idx], opt)
+            .float()
+            .cuda()
+        )
     else:
         gen_pcs = generate_from_keypoints(model, kp_samples, None, opt).float().cuda()
 
     if opt.model == "Ours":
         gen_pcs = covariance_scale_to_keypoints(gen_pcs, kp_samples)[0]
 
-
     # 4) Load reference pcs
     ref_pcs_list = []
     with torch.no_grad():
         for batch in tqdm.tqdm(ref_loader, desc="Load ref pcs"):
             if opt.model == "Ours":
-                ref_pcs_list.append(batch["target_shape"].float().reshape(batch["orig_offset"].shape[0], -1, 3))
+                ref_pcs_list.append(
+                    batch["target_shape"]
+                    .float()
+                    .reshape(batch["orig_offset"].shape[0], -1, 3)
+                )
             elif opt.model == "KPD":
                 ref_pcs_list.append(batch["source_shape"])
             else:
@@ -296,7 +316,6 @@ def main():
     # 5) Compute MMD
     out = MMD_CD_EMD(gen_pcs, ref_pcs, batch_size=16, symmetric=opt.symmetric_mmd)
     print(f"MMD-CD  : {float(out['MMD-CD']):.6f}")
-    # print(f"MMD-EMD : {float(out['MMD-EMD']):.6f}")
 
     # 6) Log results
     run_id = save_mmd_run(opt.db_path, opt, float(out["MMD-CD"]))

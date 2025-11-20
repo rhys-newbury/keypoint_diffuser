@@ -20,7 +20,7 @@ class SM(TestBase):
 
     def load_model(self, model_path: Path, cfg):
         self.model = merger_net.Net(
-            cfg.max_points, cfg.key_points
+            cfg.max_points, cfg.key_point
         ).cuda()  # unsupervised network
         self.model.load_state_dict(
             torch.load(model_path)["model_state_dict"]

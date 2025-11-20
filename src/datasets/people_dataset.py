@@ -27,6 +27,7 @@ class PeopleDataset(Dataset):
         transform=None,
         get_two=False,
         random_rotate=False,
+        get_keypoints=False,
         **kwargs,
     ):
         self.root_dir = Path(root_dir)
@@ -34,6 +35,7 @@ class PeopleDataset(Dataset):
         self.transform = transform
         self.get_two = get_two
         self.random_rotate = random_rotate
+        self.get_keypoints = get_keypoints
 
         self.samples = sorted(self.root_dir.glob("*.kp.npz"))
         if not self.samples:
@@ -62,10 +64,14 @@ class PeopleDataset(Dataset):
         kp_path = self.samples[idx]
         ply_path = kp_path.with_name(kp_path.name.replace(".kp.npz", ".ply"))
 
+        seg_path = kp_path.with_name(kp_path.name.replace(".kp.npz", ".semseg.npz"))
         # load all points
         all_points = np.asarray(
             trimesh.load(ply_path, process=False).vertices, dtype=np.float32
         )
+        seg_data = np.load(seg_path, allow_pickle=True)
+
+        labels = seg_data.get('labels')
 
         # load keypoints
         data = np.load(kp_path, allow_pickle=True)
@@ -75,10 +81,10 @@ class PeopleDataset(Dataset):
             np.concatenate([joints, midpoints], axis=0) if midpoints.size else joints
         )
 
-        return all_points, keypoints
+        return all_points, keypoints, labels
 
     def __getitem__(self, idx):
-        pc, keypoints = self._load_sample(idx)
+        pc, keypoints, labels = self._load_sample(idx)
 
         if self.random_rotate:
             # SC3K wants 'random' rotations.
@@ -131,5 +137,6 @@ class PeopleDataset(Dataset):
         # === DEFAULT ===
         if self.normalize:
             pc = self._normalize_pc(pc)
-
-        return pc
+            keypoints = self._normalize_pc(keypoints)
+        
+        return pc if not self.get_keypoints else (np.hstack((pc, labels.reshape(-1, 1))), keypoints)

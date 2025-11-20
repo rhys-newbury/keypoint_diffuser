@@ -62,7 +62,7 @@ parser.add_argument("--chamfer", type=int, help="", default=20)
 parser.add_argument("--lambda_init_points", type=float, help="", default=1.0)
 parser.add_argument("--lambda_chamfer", type=float, help="", default=1.0)
 parser.add_argument("--category", type=str, help="Category of objects", default="chair")
-parser.add_argument("--ckpt-dir", type=Path, default=Path("."))
+parser.add_argument("--ckpt_dir", type=Path, default=Path("."))
 
 
 def feed(net, optimizer, loader, train, epoch, ns):

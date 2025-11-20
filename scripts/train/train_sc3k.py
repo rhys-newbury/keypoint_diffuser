@@ -57,7 +57,7 @@ parser.add_argument("--lamda", type=float, default=0.0)
 parser.add_argument("--lamda2", type=float, default=0.0)
 parser.add_argument("--sample-points", type=int, default=2048)
 
-parser.add_argument("--ckpt-dir", type=Path, default=Path("."))
+parser.add_argument("--ckpt_dir", type=Path, default=Path("."))
 
 
 def train(cfg, ckpt_dir):

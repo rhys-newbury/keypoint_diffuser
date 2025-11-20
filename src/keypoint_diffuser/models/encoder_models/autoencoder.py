@@ -105,11 +105,3 @@ class AutoEncoder(Module):
             loss = self.diffusion.get_loss(t.transpose(1, 2), code)
 
         return loss, z0, mu, logvar
-
-
-if __name__ == "__main__":
-    opt = AEConfig("yes", "airplane")
-    x = AutoEncoder(opt)
-    import pdb
-
-    pdb.set_trace()

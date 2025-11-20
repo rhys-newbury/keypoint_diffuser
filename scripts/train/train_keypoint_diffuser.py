@@ -336,7 +336,7 @@ def train(opt: AEConfig):
 
             t += 1
 
-        save_network(net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=e)
+        save_network(net, ckpt_dir, network_label=f"{opt.key_point}kp", epoch_label=e)
     save_network(net, ckpt_dir, network_label="net", epoch_label="final")
 
 

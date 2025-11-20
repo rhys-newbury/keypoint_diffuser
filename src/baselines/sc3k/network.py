@@ -214,7 +214,7 @@ class Unsupervised_kpnet_without_Residual_block(nn.Module):
 
         self.conv21 = torch.nn.Conv1d(1024, 512, 1)
         self.conv22 = torch.nn.Conv1d(512, 256, 1)
-        self.conv23 = torch.nn.Conv1d(256, cfg.key_points, 1)
+        self.conv23 = torch.nn.Conv1d(256, cfg.key_point, 1)
         self.bn21 = nn.BatchNorm1d(512)
         self.bn22 = nn.BatchNorm1d(256)
 

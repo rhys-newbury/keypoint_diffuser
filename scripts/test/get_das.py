@@ -50,7 +50,7 @@ for model_name, model_cls in MODEL_CLASSES.items():
     )
     try_add_arg(subparser, "--pcd-path", type=Path, default="/app/pcds")
     try_add_arg(subparser, "--batch-size", type=int, default=2)
-    try_add_arg(subparser, "--key-points", type=int, default=10)
+    try_add_arg(subparser, "--key_point", type=int, default=10)
 
     try_add_arg(
         subparser, "--category", type=str, help="Category of objects", default="chair"
@@ -421,7 +421,7 @@ def save_run(db_path, opt, fwd, bwd, das, miou_at_0_1):
             str(opt.annotations),
             str(opt.pcd_path),
             int(opt.batch_size),
-            int(opt.key_points),
+            int(opt.key_point),
             str(opt.category),
             float(fwd),
             float(bwd),

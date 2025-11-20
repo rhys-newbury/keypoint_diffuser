@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+import random
 import re
 import sqlite3
 import subprocess
 from pathlib import Path
-import random
+
 
 EPOCH_RE = re.compile(r"(?P<k>\d+)kp_(?P<epoch>\d+)\.pth$", re.IGNORECASE)
 
@@ -83,7 +84,11 @@ def already_evaluated(
             f"SELECT 1 FROM {table_name} WHERE ckpt = ? AND model = ? AND category = ? LIMIT 1;",
             (str(ckpt), model, category),
         )
-        return cur.fetchone() is not None
+
+        is_evaled = cur.fetchone() is not None
+        if is_evaled:
+            print(f"{ckpt} for algo: {model} already evaled")
+        return is_evaled
     finally:
         con.close()
 
@@ -107,7 +112,7 @@ def main():
     # What to run
     ap.add_argument(
         "--mode",
-        choices=["das", "corr", "reconstruction", "all"],
+        choices=["das", "corr", "all"],
         default="all",
         help="Which evaluation(s) to run per checkpoint.",
     )
@@ -130,7 +135,6 @@ def main():
         help="Path to Correlation script",
     )
 
-
     # DB passed through to the child script(s)
     ap.add_argument(
         "--eval-db-path",
@@ -149,7 +153,7 @@ def main():
     ap.add_argument(
         "--corr-table",
         type=str,
-        default="runs_correlation",
+        default="runs_correlation2",
         help="Table name to check/populate for correlation (default: runs_correlation)",
     )
 
@@ -184,7 +188,7 @@ def main():
 
     rows = list(cur.execute(q, params))
     random.shuffle(rows)
-    
+
     print(rows)
 
     con.close()
@@ -234,13 +238,14 @@ def main():
                 continue
 
             random.shuffle(ckpt_list)
+            algo_ = "Ours" if algo == "Ours2" else algo
 
             for ckpt_path in ckpt_list:
                 # DAS
                 if args.mode in ("das", "all") and not already_evaluated(
-                    eval_db_path, ckpt_path, algo, category, args.das_table
+                    eval_db_path, ckpt_path, algo_, category, args.das_table
                 ):
-                    algo_ = "Ours" if algo == "Ours2" else algo
+                    # algo_ = "Ours" if algo == "Ours2" else algo
 
                     annotation_json = Path("/app/annotations") / f"{category}.json"
                     cmd_das = [
@@ -253,7 +258,7 @@ def main():
                         str(args.pcd_path),
                         "--batch-size",
                         str(args.batch_size),
-                        "--key-points",
+                        "--key_point",
                         str(key_points),
                         "--category",
                         str(category),
@@ -265,9 +270,8 @@ def main():
 
                 # Correlation
                 if args.mode in ("corr", "all") and not already_evaluated(
-                        eval_db_path, ckpt_path, algo, category, args.corr_table
-                    ):
-                    algo_ = "Ours" if algo == "Ours2" else algo
+                    eval_db_path, ckpt_path, algo_, category, args.corr_table
+                ):
 
                     annotation_json = Path("/app/annotations") / f"{category}.json"
                     cmd_corr = [
@@ -282,7 +286,7 @@ def main():
                         str(args.pcd_path),
                         "--batch-size",
                         str(args.batch_size),
-                        "--key-points",
+                        "--key_point",
                         str(key_points),
                         "--category",
                         str(category),

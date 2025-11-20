@@ -7,3 +7,4 @@ __logs
 data/
 true-frog-235
 **/*.pth
+scripts/data_processing/models_smplx_v1_1

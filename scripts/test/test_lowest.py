@@ -275,7 +275,7 @@ def main():
                     str(ckpt_path),
                     "--batch-size",
                     str(args.batch_size),
-                    "--key-points",
+                    "--key_point",
                     str(key_points),
                     "--category",
                     str(category),

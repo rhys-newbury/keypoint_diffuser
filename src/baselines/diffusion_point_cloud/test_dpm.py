@@ -35,7 +35,7 @@ class DPM(TestBase):  # inherit if you need the same interface
         """Load AE checkpoint and build model on device."""
         ckpt = torch.load(str(ckpt_path), map_location=self.device)
         self.flexibility = 0.0  # getattr(self.ckpt_args, 'flexibility', 0.0)
-        cfg.latent_dim = cfg.key_points + 3 * 5
+        cfg.latent_dim = cfg.key_point + 3 * 5
 
         self.model = AutoEncoder(cfg).to(self.device)
         self.model.load_state_dict(ckpt["model_state_dict"], strict=True)

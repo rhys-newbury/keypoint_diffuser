@@ -27,3 +27,5 @@ scripts/eval_logs
 scripts/train/train_summary
 scripts/train/wandb
 *.db
+scripts/data_processing/models_smplx_v1_1
+ego/
