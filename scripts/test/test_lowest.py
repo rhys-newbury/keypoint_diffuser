@@ -179,7 +179,7 @@ def main():
     ap.add_argument(
         "--db", type=Path, required=True, help="Path to results.db (has train_runs)"
     )
-    ap.add_argument("--wandb-entity", type=str, default="rhys-newbury")
+    ap.add_argument("--wandb-entity", type=str, default="USER")
 
     ap.add_argument(
         "--ckpt-root",
