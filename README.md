@@ -14,15 +14,9 @@ A lot of this code is built upon the following repos:
 ## Training
 Download ShapeNet from HuggingFace
 
-To train a model on the airplane category with 8 unsupervised keypoints run:
+To train a model on the airplane category with 10 unsupervised keypoints run:
 ```
-python scripts/train_ae.py -c configs/airplane-8kpt.yaml
-```
-
-## Testing
-To test the trained model run:
-```
-python scripts/train_ae.py -c configs/airplane-8kpt.yaml -t configs/test.yaml
+python scripts/train_keypoint_diffuser.py
 ```
 
 ## Contributing
