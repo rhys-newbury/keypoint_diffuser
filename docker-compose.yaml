@@ -6,13 +6,9 @@ services:
         - ./:/app
         - /tmp/.X11-unix:/tmp/.X11-unix
         - ~/.Xauthority:/root/.Xauthority
-        - ~/.bash_history:/home/taco/.bash_history
+        - ~/.bash_history:/home/user/.bash_history
         - ~/.gitconfig:/etc/gitconfig
-        - ~/.ssh:/home/taco/.ssh
-        - /mnt/wslg:/mnt/wslg
-        - /media/taco/shape_data:/app/data/shapenet/shape_data
-        - /media/taco/shape_data/keypoints/logs:/app/data/keypoints
-        - /media/taco/nfs:/app/data/smplx
+        - ~/.ssh:/home/user/.ssh
 
       network_mode: "host"
       build:
