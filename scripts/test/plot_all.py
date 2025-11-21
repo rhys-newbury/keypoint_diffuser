@@ -9,7 +9,15 @@ import numpy as np
 
 
 # Added recon metrics
-VALID_METRICS = {"das", "fwd", "bwd", "miou_at_0_1", "correlation", "recon_cd", "recon_emd"}
+VALID_METRICS = {
+    "das",
+    "fwd",
+    "bwd",
+    "miou_at_0_1",
+    "correlation",
+    "recon_cd",
+    "recon_emd",
+}
 
 
 # ---------------- DB helpers ----------------
@@ -161,13 +169,11 @@ def best_map_from_rows(rows: list[tuple], metric: str, table_name: str) -> dict:
             best[cat] = {}
         if algo not in best[cat]:
             best[cat][algo] = {"metric": v}
-        else:
-            if want_max:
-                if v > best[cat][algo]["metric"]:
-                    best[cat][algo]["metric"] = v
-            else:
-                if v < best[cat][algo]["metric"]:
-                    best[cat][algo]["metric"] = v
+        elif (want_max and v > best[cat][algo]["metric"]) or (
+            not want_max and v < best[cat][algo]["metric"]
+        ):
+            best[cat][algo]["metric"] = v
+
     return best
 
 
@@ -175,7 +181,6 @@ def best_map_from_rows(rows: list[tuple], metric: str, table_name: str) -> dict:
 def aggregate_across_dbs(best_maps: list[dict], metric: str) -> dict:
     """
     Aggregate per (category, algo) across DBs.
-    Returns agg[cat][algo] = {"values": np.array, "mean": float, "std": float, "best": float, "count": int}
     where "best" is max if higher-is-better else min (computed over per-DB bests).
     """
     cats = sorted({c for bm in best_maps for c in bm})
@@ -305,7 +310,7 @@ def build_latex_table_multi_metrics(
     lines.append("\\centering")
     lines.append("\\begin{adjustbox}{max width=\\textwidth}")
     lines.append(
-        f"\\begin{{tabular}}{{l|{'|'.join(['c'*len(algos_per_metric[m]) for m in metrics])}}}"
+        f"\\begin{{tabular}}{{l|{'|'.join(['c' * len(algos_per_metric[m]) for m in metrics])}}}"
     )
     lines.append("\\toprule")
 
@@ -391,7 +396,9 @@ def build_latex_table_multi_metrics(
     lines.append("\\bottomrule")
     lines.append("\\end{tabular}")
     lines.append("\\end{adjustbox}")
-    lines.append("\\caption{Per-category performance (mean $\\pm$ std across DBs) for multiple metrics.}")
+    lines.append(
+        "\\caption{Per-category performance (mean $\\pm$ std across DBs) for multiple metrics.}"
+    )
     lines.append("\\label{tab:multi_metrics_mean_std}")
     lines.append("\\end{table*}")
     return "\n".join(lines)
@@ -399,9 +406,7 @@ def build_latex_table_multi_metrics(
 
 # ---------------- Orchestrator ----------------
 def main():
-    ap = argparse.ArgumentParser(
-        description="Plot grouped bars and emit a LaTeX table (mean ± std) across multiple metrics, including reconstruction."
-    )
+    ap = argparse.ArgumentParser(description="Plot grouped bars and emit a LaTeX table")
     ap.add_argument(
         "--db",
         type=Path,
@@ -426,7 +431,7 @@ def main():
         "--out",
         type=Path,
         default=Path("grouped_best_std.png"),
-        help="Plot output base path; per-metric plots saved as <stem>_<metric><suffix>. Use '-' to show instead.",
+        help="Plot output base path",
     )
     ap.add_argument(
         "--algo-order",
@@ -463,7 +468,9 @@ def main():
 
         agg = aggregate_across_dbs(best_maps_per_db, metric)
         if not agg:
-            print(f"[{metric}] No data found across the provided DBs. Skipping this metric.")
+            print(
+                f"[{metric}] No data found across the provided DBs. Skipping this metric."
+            )
             continue
         agg_by_metric[metric] = agg
 

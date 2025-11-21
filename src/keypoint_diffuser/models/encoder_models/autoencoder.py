@@ -6,7 +6,7 @@ from keypoint_diffuser.options.ae_options import AEConfig
 from keypoint_diffuser.utils.loss import EDMLossCurriculum
 from keypoint_diffuser.utils.utils import reparameterize
 
-from .diffusion import DiffusionPoint, PointwiseNetV2, VarianceSchedule
+from .diffusion import PointwiseNetV2
 from .edm_model import EDMPrecond
 from .encoders.convex_transformer import ConvexTransformer
 
@@ -34,23 +34,12 @@ class AutoEncoder(Module):
         self.diffusion_ = PointwiseNetV2(
             point_dim=3,
             context_dim=args.key_point * 3 + args.extra_latent,
-            residual=args.residual,
+            residual=False,
         )
-        self.use_edm = args.use_edm
+        self.use_edm = True
 
-        if self.use_edm:
-            self.diffusion = EDMPrecond(self.diffusion_)
-            self.loss = EDMLossCurriculum(max_steps=int(max_steps * 0.8))
-        else:
-            self.diffusion = DiffusionPoint(
-                net=self.diffusion_,
-                var_sched=VarianceSchedule(
-                    num_steps=args.num_steps,
-                    beta_1=args.beta_1,
-                    beta_t=args.beta_t,
-                    mode=args.sched_mode,
-                ),
-            )
+        self.diffusion = EDMPrecond(self.diffusion_)
+        self.loss = EDMLossCurriculum(max_steps=int(max_steps * 0.8))
 
     def encode(self, x):
         """

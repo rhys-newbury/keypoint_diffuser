@@ -144,5 +144,5 @@ class Ours(TestBase):
             "best_step": float(best_step),
             "best_loss": float(best_val),
             "training_progress_%": round(prog * 100, 2),
-            "picked_from": f"last_{int(tail_frac*100)}%_steps (step→epoch mapping)",
+            "picked_from": f"last_{int(tail_frac * 100)}%_steps (step→epoch mapping)",
         }

@@ -70,7 +70,7 @@ class KPD(TestBase):
         )
 
     @staticmethod
-    def choose_model(metrics_info, ckpt_paths, tail_frac=0.2):
+    def choose_model(metrics_info, ckpt_paths, _tail_frac=0.2):
         if "chamfer" not in metrics_info:
             raise KeyError("metrics_info must include 'chamfer'.")
 

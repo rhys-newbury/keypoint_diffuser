@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Evaluate keypoint–label correlation and DAS-style alignment on a PeopleDataset.
+Evaluate keypoint-label correlation and DAS-style alignment on a PeopleDataset.
 """
 
 import argparse
@@ -11,10 +11,8 @@ from pathlib import Path
 import numpy as np
 import torch
 import tqdm
-from torchvision import transforms
-
-from classes import MODEL_CLASSES
 from baselines.test_base import TestBase
+from classes import MODEL_CLASSES
 from datasets.people_dataset import PeopleDataset
 from keypoint_diffuser.utils.pc_utils import collate_fn
 from keypoint_diffuser.utils.transforms import (
@@ -22,6 +20,8 @@ from keypoint_diffuser.utils.transforms import (
     GridSample,
     ToTensor,
 )
+from torchvision import transforms
+
 
 CHECKPOINTS_DIR = "checkpoints"
 CHECKPOINT_EXT = ".pth"
@@ -30,6 +30,7 @@ CHECKPOINT_EXT = ".pth"
 # ----------------------------
 # Argparse helpers
 # ----------------------------
+
 
 def try_add_arg(p: argparse.ArgumentParser, arg, type=None, default=None, **kwargs):
     with contextlib.suppress(argparse.ArgumentError):
@@ -89,6 +90,7 @@ for model_name, model_cls in MODEL_CLASSES.items():
 # Utilities
 # ----------------------------
 
+
 def split_xyz_labels(arr: np.ndarray):
     """
     Expect arr shape (N, 4): xyz + label.
@@ -104,6 +106,7 @@ def split_xyz_labels(arr: np.ndarray):
 # ----------------------------
 # Prediction over PeopleDataset
 # ----------------------------
+
 
 def run_prediction_people(
     model: TestBase,
@@ -134,9 +137,9 @@ def run_prediction_people(
         ]
     )
 
-    out_kpcd = []   # predicted keypoints
-    labels = []     # per-point xyz+merged label
-    gt_kpts = []    # GT keypoints from dataset
+    out_kpcd = []  # predicted keypoints
+    labels = []  # per-point xyz+merged label
+    gt_kpts = []  # GT keypoints from dataset
 
     num_samples = len(dataset)
 
@@ -197,8 +200,8 @@ def run_prediction_people(
 
 
 # ----------------------------
-# Correlation (segment-based)
 # ----------------------------
+
 
 def project_to_surface(pred, surface_points, eps=0.05):
     """
@@ -225,15 +228,15 @@ def project_to_surface(pred, surface_points, eps=0.05):
 
 @torch.no_grad()
 def keypoint_label_correlation(
-    out_kpcd,   # List[ArrayLike] or (B, K, 3)
-    labels,     # List[np.ndarray] each (Ni, 4): xyz + label
+    out_kpcd,  # List[ArrayLike] or (B, K, 3)
+    labels,  # List[np.ndarray] each (Ni, 4): xyz + label
     threshold=0.05,
     device=None,
     model=None,
 ):
     """
     Returns:
-        avg_corr: scalar tensor — mean over keypoints of (most-frequent nearby label frequency across batch)
+        avg_corr: scalar tensor — mean over keypoints
         closest_labels_tensor: Bool tensor of shape (B, K, L)
         per_kp_toplabel_freq: Tensor (K,)
         per_kp_toplabel_id:   Long Tensor (K,)
@@ -300,6 +303,7 @@ def keypoint_label_correlation(
 # DAS-style alignment (using People GT keypoints)
 # ----------------------------
 
+
 def fwd_alignment_scores_people_threshold_multi(
     gt_kpts,
     predicted_kpcd,
@@ -328,41 +332,36 @@ def fwd_alignment_scores_people_threshold_multi(
     presence_list = []
 
     for pred, gt in zip(predicted_kpcd, gt_kpts):
-        pred = np.asarray(pred, float)   # (K_pred, 3)
-        gt   = np.asarray(gt, float)     # (K_gt, 3)
+        pred = np.asarray(pred, float)  # (K_pred, 3)
+        gt = np.asarray(gt, float)  # (K_gt, 3)
 
-        # (K_pred, K_gt)
         dist = np.sqrt(((pred[:, None, :] - gt[None, :, :]) ** 2).sum(axis=-1))
 
         # Find closest GT distance per predicted kp
-        d_min = dist.min(axis=1, keepdims=True)        # (K_pred, 1)
+        d_min = dist.min(axis=1, keepdims=True)  # (K_pred, 1)
 
         # dynamic threshold: closest * 1.10
-        dynamic_thresh = d_min * 1.20                  # (K_pred, 1)
+        dynamic_thresh = d_min * 1.20  # (K_pred, 1)
 
         # broadcast compare: (K_pred, K_gt)
         within = dist <= dynamic_thresh
-        # within = dist <= float(threshold)   # bool (K_pred, K_gt)
         presence_list.append(within)
 
-    # Stack: (B, K_pred, K_gt)
     presence = np.stack(presence_list, axis=0)
 
-    # For each kp and GT id, count in how many samples it’s present
+    # For each kp and GT id, count in how many samples it`s present
     # counts_per_label[k, j] = number of samples where kp k was close to GT j
     counts_per_label = presence.sum(axis=0)  # (K_pred, K_gt)
 
     # For each kp, pick the GT joint with highest count (the "most common")
     per_kp_toplabel_freq = counts_per_label.max(axis=1)  # (K_pred,)
-    per_kp_toplabel_id = counts_per_label.argmax(axis=1) # (K_pred,)
+    per_kp_toplabel_id = counts_per_label.argmax(axis=1)  # (K_pred,)
 
     # normalize by B to get fraction of samples
     per_kp_toplabel_freq = per_kp_toplabel_freq.astype(np.float64) / float(B)
 
     # final scalar: mean over kps
     fwd_score = float(per_kp_toplabel_freq.mean())
-
-    import pdb; pdb.set_trace()
 
     return fwd_score, presence, per_kp_toplabel_freq, per_kp_toplabel_id
 
@@ -373,7 +372,7 @@ def bwd_alignment_scores_people(gt_kpts, predicted_kpcd):
       for each GT keypoint i, see which predicted index it maps to across instances
       and measure consistency.
     """
-    preds = { }  # semantic_id -> list of predicted indices
+    preds = {}  # semantic_id -> list of predicted indices
 
     for kpcd, gt in zip(predicted_kpcd, gt_kpts):
         kpcd = np.asarray(kpcd)
@@ -401,6 +400,7 @@ def bwd_alignment_scores_people(gt_kpts, predicted_kpcd):
 # Database helpers
 # ----------------------------
 
+
 def init_corr_db(db_path: Path):
     con = sqlite3.connect(str(db_path))
     cur = con.cursor()
@@ -426,13 +426,17 @@ def init_corr_db(db_path: Path):
         "CREATE INDEX IF NOT EXISTS idx_runs_corr_people_model ON runs_correlation_people(model);"
     )
     cur.execute(
-        "CREATE INDEX IF NOT EXISTS idx_runs_corr_people_time ON runs_correlation_people(created_at);"
+        "CREATE INDEX IF NOT EXISTS idx_runs_corr_people_time "
+        "ON runs_correlation_people(created_at);"
     )
+
     con.commit()
     return con
 
 
-def save_corr_run(db_path: Path, opt, correlation: float, fwd: float, bwd: float, das: float) -> int:
+def save_corr_run(
+    db_path: Path, opt, correlation: float, fwd: float, bwd: float, das: float
+) -> int:
     con = init_corr_db(db_path)
     cur = con.cursor()
     cur.execute(
@@ -474,7 +478,7 @@ if __name__ == "__main__":
 
     dataset = PeopleDataset(
         root_dir=opt.people_dir,
-        normalize=True,                # PeopleDataset handles normalization
+        normalize=True,  # PeopleDataset handles normalization
         random_rotate=opt.random_rotate,
         get_keypoints=True,
     )
@@ -487,7 +491,9 @@ if __name__ == "__main__":
     )
 
     # DAS-style metrics using GT keypoints
-    fwd, assignments, _, _ = fwd_alignment_scores_people_threshold_multi(gt_kpts, out_kpcd)
+    fwd, assignments, _, _ = fwd_alignment_scores_people_threshold_multi(
+        gt_kpts, out_kpcd
+    )
     bwd = bwd_alignment_scores_people(gt_kpts, out_kpcd)
     das = 0.5 * (fwd + bwd)
 

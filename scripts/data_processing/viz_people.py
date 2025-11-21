@@ -10,10 +10,7 @@ import random
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import torch
-
 from datasets.people_dataset import PeopleDataset  # <-- import your dataset class
-from matplotlib.colors import ListedColormap
 
 
 # -----------------------------------------------------------------------------
@@ -35,13 +32,10 @@ def visualize_collage(dataset: PeopleDataset, grid: int = 3):
         pts, kpts = dataset[idx]
 
         # color by z for aesthetics (optional)
-        # z_norm = (pts[:, 2] - pts[:, 2].min()) / (pts[:, 2].ptp() + 1e-8)
-        # colors = plt.get_cmap("viridis")(z_norm)
-        cmap = plt.get_cmap("tab10")   # much better for 3 classes
+        cmap = plt.get_cmap("tab10")  # much better for 3 classes
 
         # normalize labels into colormap range
         colors = cmap(pts[:, 3] % cmap.N)
-        # import pdb; pdb.set_trace()
 
         ax.scatter(
             pts[:, 0],
@@ -66,7 +60,6 @@ def visualize_collage(dataset: PeopleDataset, grid: int = 3):
             linewidths=0.4,
         )
 
-        # ax.set_title(sample.get("name", f"sample_{idx}"), fontsize=8)
         ax.set_xticks([])
         ax.set_yticks([])
         ax.set_zticks([])

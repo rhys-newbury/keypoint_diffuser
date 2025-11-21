@@ -630,8 +630,9 @@ def label_points_from_lbs_interp_6(
             _idx(["right_elbow", "r_elbow"]),
             _idx(["right_wrist", "r_wrist", "right_hand"]),
         )
-        pel, chest = _idx(["pelvis", "hips", "root"]), _idx(
-            ["chest", "upper_chest", "spine3", "spine2", "neck"]
+        pel, chest = (
+            _idx(["pelvis", "hips", "root"]),
+            _idx(["chest", "upper_chest", "spine3", "spine2", "neck"]),
         )
 
         def segdist(P, A, B):

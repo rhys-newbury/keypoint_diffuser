@@ -331,7 +331,10 @@ def train(opt: AEConfig):
             if t % opt.log_interval == 0:
                 samples_sec = opt.batch_size / iter_time
                 losses_str = str(loss)
-                log_str = f"{t:d}: iter {iter_time:.1f} sec, {samples_sec:.1f} samples/sec {losses_str}"
+                log_str = (
+                    f"{t:d}: iter {iter_time:.1f} sec"
+                    f"{samples_sec:.1f} samples/sec {losses_str}"
+                )
                 print(log_str)
 
             t += 1

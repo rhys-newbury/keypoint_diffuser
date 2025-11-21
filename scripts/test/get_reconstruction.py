@@ -18,6 +18,7 @@ Run:
          --dataset /path/to/ShapeNetH5/ --category chair --batch-size 16 \
          --db-path results.db
 """
+
 import argparse
 import contextlib
 import json
@@ -112,7 +113,7 @@ def build_argparser() -> argparse.ArgumentParser:
         try_add_arg(sp, "--batch-size", type=int, default=16)
         try_add_arg(sp, "--num-workers", type=int, default=4)
         try_add_arg(sp, "--db-path", type=Path, default=Path("results.db"))
-        try_add_arg(sp, "--key-points", type=int, default=10)
+        try_add_arg(sp, "--key_point", type=int, default=10)
 
     return p
 
@@ -216,7 +217,9 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
                     p = pred[0] if isinstance(pred, list) else pred
                     preds.append(p.to(device))
 
-            preds = torch.stack(preds, dim=0).reshape(*gt_batch.shape)  # (B,P,3) possibly with empties
+            preds = torch.stack(preds, dim=0).reshape(
+                *gt_batch.shape
+            )  # (B,P,3) possibly with empties
             mask = torch.isfinite(preds).all(dim=-1).all(dim=-1) & (
                 preds.abs().sum(dim=-1).sum(dim=-1) > 0
             ).reshape(-1)
@@ -286,7 +289,8 @@ def save_run(db_path: Path, opt: argparse.Namespace, cd: float, emd: float) -> i
     cur = con.cursor()
     cur.execute(
         """
-        INSERT INTO reconstruction_results_low (model, ckpt, category, batch_size, cd_recon, emd_recon)
+        INSERT INTO reconstruction_results_low
+            (model, ckpt, category, batch_size, cd_recon, emd_recon)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         (

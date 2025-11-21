@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 try:
     from baselines.keypointdeformer.test_kpd import KPD
 except ImportError:
@@ -32,6 +34,6 @@ MODEL_CLASSES = {
     "KeyGrid": KeyGrid,
     "KeyGridOrig": KeyGrid,
     "DPM": DPM,
-    "Ours": Ours
+    "Ours": Ours,
     # Add more models here:
 }

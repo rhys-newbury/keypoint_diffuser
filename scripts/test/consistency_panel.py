@@ -7,10 +7,9 @@ import numpy as np
 import torch
 import trimesh
 from classes import MODEL_CLASSES
-from torchvision import transforms
-
 from keypoint_diffuser.utils.pc_utils import collate_fn
 from keypoint_diffuser.utils.transforms import Collect, GridSample, ToTensor
+from torchvision import transforms
 
 
 # ------------------------------------------------------------
@@ -67,7 +66,7 @@ def old_normalize(pc: np.ndarray):
 
 
 def old_apply_to_xyz(xyz: np.ndarray, pcmax: float, pcmin: float):
-    """Apply the same min–max → [-1,1] normalization used on the PC."""
+    """Apply the same min-max → [-1,1] normalization used on the PC."""
     x = (xyz - pcmin) / (pcmax - pcmin)
     x = 2.0 * (x - 0.5)
     return x.astype(np.float32)
@@ -102,7 +101,9 @@ def prepare_batch_entries(kpn_ds_slice, opt, tform):
         mid = entry["model_id"]
 
         # labeled cloud
-        pc_labeled_path = opt.label_path / cid / mid / "models" / "point_resampled_labeled.npy"
+        pc_labeled_path = (
+            opt.label_path / cid / mid / "models" / "point_resampled_labeled.npy"
+        )
         if not pc_labeled_path.exists():
             continue
 
@@ -231,7 +232,7 @@ def main():
     kps_list = []
     pc_list = []
 
-    for (kp_np, lbl_pc, (cid, mid), (_pcmax, _pcmin)) in zip(
+    for kp_np, lbl_pc, (cid, mid), (_pcmax, _pcmin) in zip(
         key_points, label_clouds, meta, norm_facts
     ):
         surf_np = lbl_pc[:, :3]

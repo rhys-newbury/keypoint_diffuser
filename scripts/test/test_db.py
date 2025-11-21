@@ -27,10 +27,10 @@ def list_ckpts_fallback(path_str: str):
     # Try fallback (slow3)
     try:
         return list_ckpts(str(fallback))
-    except FileNotFoundError:
+    except FileNotFoundError as e:
         raise FileNotFoundError(
             f"No checkpoints found in either:\n  {base}\n  {fallback}"
-        )
+        ) from e
 
 
 def list_ckpts(path_str: str) -> list[Path]:
@@ -245,8 +245,6 @@ def main():
                 if args.mode in ("das", "all") and not already_evaluated(
                     eval_db_path, ckpt_path, algo_, category, args.das_table
                 ):
-                    # algo_ = "Ours" if algo == "Ours2" else algo
-
                     annotation_json = Path("/app/annotations") / f"{category}.json"
                     cmd_das = [
                         "python3",
@@ -272,7 +270,6 @@ def main():
                 if args.mode in ("corr", "all") and not already_evaluated(
                     eval_db_path, ckpt_path, algo_, category, args.corr_table
                 ):
-
                     annotation_json = Path("/app/annotations") / f"{category}.json"
                     cmd_corr = [
                         "python3",

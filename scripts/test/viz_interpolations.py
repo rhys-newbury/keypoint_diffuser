@@ -358,7 +358,7 @@ def build_plot(
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Interactive Plotly viewer for latent interpolations (cloud+keypoints) with outlier filtering."
+        description="Interactive Plotly viewer for latent interpolations"
     )
     ap.add_argument("--model", required=True, help="e.g. Ours")
     ap.add_argument("--category", required=True, help="e.g. airplane")

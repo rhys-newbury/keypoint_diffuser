@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import argparse
-import random
 import re
 import sqlite3
 from pathlib import Path
+
 from tqdm import tqdm
+
+
 EPOCH_RE = re.compile(r"(?P<k>\d+)kp_(?P<epoch>\d+)\.pth$", re.IGNORECASE)
 
 
@@ -21,7 +23,6 @@ def list_ckpts_fallback(path_str: str):
         return list_ckpts(str(fallback))
     except FileNotFoundError:
         return []
-        # raise FileNotFoundError(f"No checkpoints found under {base} or {fallback}")
 
 
 def list_ckpts(path_str: str):
@@ -115,15 +116,13 @@ def main():
         print("No matching rows.")
         return
 
-    # random.shuffle(rows)
-
     # ----- Progress counters -----
     total_ckpts = 0
     das_done = 0
     corr_done = 0
 
     # ----- Loop (no eval execution) -----
-    for rid, algo, category, ckpt_dir, key_points in tqdm(rows, total=len(rows)):
+    for rid, algo, category, ckpt_dir, _key_points in tqdm(rows, total=len(rows)):
         if algo == "DPM":
             continue
 
@@ -133,7 +132,8 @@ def main():
             # Epoch filter
             if args.start_epoch is not None:
                 ckpt_list = [
-                    f for f in ckpt_list
+                    f
+                    for f in ckpt_list
                     if (m := EPOCH_RE.search(f.name)) is None
                     or int(m.group("epoch")) >= args.start_epoch
                 ]
@@ -167,10 +167,14 @@ def main():
     print(f"Total checkpoints: {total_ckpts}")
 
     if args.mode in ("das", "all"):
-        print(f"DAS:  {das_done} / {total_ckpts}  ({das_done/total_ckpts*100:.1f}%)")
+        print(
+            f"DAS:  {das_done} / {total_ckpts}  ({das_done / total_ckpts * 100:.1f}%)"
+        )
 
     if args.mode in ("corr", "all"):
-        print(f"CORR: {corr_done} / {total_ckpts}  ({corr_done/total_ckpts*100:.1f}%)")
+        print(
+            f"CORR: {corr_done} / {total_ckpts}  ({corr_done / total_ckpts * 100:.1f}%)"
+        )
 
     print("==============================\n")
 

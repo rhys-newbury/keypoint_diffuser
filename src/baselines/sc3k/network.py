@@ -192,13 +192,17 @@ class PointNetfeat(nn.Module):
 
 class Unsupervised_kpnet_without_Residual_block(nn.Module):
     """
-    Unsupervised Key-point net: 3D key-points estimation from point clouds using an unsupervised approach
+    Unsupervised Key-point net: 3D key-points estimation from point clouds
+    using an unsupervised approach
     Inputs:
         point-cloud: [Bx2048x3]
     Computes:
-        - Point cloud features nx1024 [1024 features for every point]
-        - MLP computes nxM features representing class probability for every point [M = total number of key-points]
-        - Use softmax between all the points for every M => select one point that based to the class with highest probability
+        - Point cloud features nx1024
+            [1024 features for every point]
+        - MLP computes nxM features representing class probability for
+            every point [M = total number of key-points]
+        - Use softmax between all the points for every M => select one
+            point that based to the class with highest probability
           So, the total M key-points will be separated => that are the estimated key-points
     Output:
         - the key-points 3D positions [BxMx3] => based on the separated key-points indexes
@@ -235,16 +239,19 @@ class Unsupervised_kpnet_without_Residual_block(nn.Module):
 
 class Unsupervised_kpnet(nn.Module):
     """
-    Unsupervised Key-point net: 3D keypoints estimation from point clouds using an unsupervised approach
+    Unsupervised Key-point net: 3D keypoints estimation from
+    point clouds using an unsupervised approach
     Inputs:
         point-cloud: [Bx2048x3]
     Computes:
         - Point cloud features MxN [N (1024) features for every point (total N=2048)]
         - Residual Blocks down sample the MxN features
         - Conv1D computes N features for K key-points [KxN]
-        - Soft-max normalize the features such that the sum of all the features (N) for single key-point (K1) become 1
+        - Soft-max normalize the features such that the sum of all
+          the features (N) for single key-point (K1) become 1
           [KxN{0to1}]
-        - Matrix Multiplication estimates the K key-points by averaging the points of the input PC based on the computed features
+        - Matrix Multiplication estimates the K key-points by averaging the points
+          of the input PC based on the computed features
           So, the total [Kx3] key-points will be separated => that are the estimated key-points
     Output:
         - the key-points 3D positions [BxKx3]

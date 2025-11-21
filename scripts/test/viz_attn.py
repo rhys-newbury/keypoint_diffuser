@@ -28,9 +28,6 @@ import plotly.graph_objects as go
 from plotly.colors import qualitative
 from plotly.graph_objs import Layout
 
-import plotly.io as pio
-# pio.kaleido.scope.default_format = "png"  # optional
-# pio.renderers.default = "kaleido"
 
 def load_attn_sample_dirs(root_pattern: Path):
     return [
@@ -96,7 +93,7 @@ def build_sample_traces(
 
         r, g, b = base_rgb
         rgba_colors = [
-            f"rgba({int(r*255)},{int(g*255)},{int(b*255)},{alpha:.3f})"
+            f"rgba({int(r * 255)},{int(g * 255)},{int(b * 255)},{alpha:.3f})"
             for alpha in opacities
         ]
 
@@ -161,15 +158,12 @@ def plot_attention_interactive_collage(
             "bgcolor": "white",
             "xaxis": {"showbackground": False, "visible": False},
             "yaxis": {"showbackground": False, "visible": False},
-            "zaxis": {"showbackground": False, "visible": False}
-        }
+            "zaxis": {"showbackground": False, "visible": False},
+        },
     )
-
-
 
     fig = go.Figure(layout=layout)
     buttons = []
-
 
     for sample_idx, sample_dir in enumerate([dirs[0]]):
         attn = np.load(sample_dir / "attn.npy")
@@ -201,7 +195,7 @@ def plot_attention_interactive_collage(
 
         # add traces to main fig
         for tr in sample_traces:
-            tr.visible = (sample_idx == 0)
+            tr.visible = sample_idx == 0
             fig.add_trace(tr)
 
         # remember how many traces the first sample contributed
@@ -233,71 +227,30 @@ def plot_attention_interactive_collage(
 
     # ---------- NEW: save the FIRST sample as PNG ----------
     # if first_sample_trace_count is not None and first_sample_trace_count > 0:
-    #     first_fig = go.Figure()
     #     # copy first-sample traces
     #     for i in range(first_sample_trace_count):
-    #         first_fig.add_trace(fig.data[i])
 
     #     # top-down camera
-    #     camera = dict(
-    #         eye=dict(x=0, y=2.5, z=0),   # look straight down from +Y
-    #         center=dict(x=0, y=0, z=0),
-    #         up=dict(x=0, z=1, y=0)       # make Z point "up" visually
-    #     )
 
-        # apply layout to the figure we're about to export
-        # first_fig.update_layout(
-        #     paper_bgcolor="white",
-        #     plot_bgcolor="white",
-        #     scene=dict(
-        #         bgcolor="white",
-        #         camera=camera,
-        #         xaxis=dict(
-        #             visible=False,
-        #             showgrid=False,
-        #             showbackground=False,
-        #             zeroline=False,
-        #             title="",
-        #         ),
-        #         yaxis=dict(
-        #             visible=False,
-        #             showgrid=False,
-        #             showbackground=False,
-        #             zeroline=False,
-        #             title="",
-        #         ),
-        #         zaxis=dict(
-        #             visible=False,
-        #             showgrid=False,
-        #             showbackground=False,
-        #             zeroline=False,
-        #             title="",
-        #         ),
-        #         aspectmode="data",
-        #     ),
-        #     margin=dict(l=0, r=0, t=0, b=0),
-        #     showlegend=False,  # optional: hide giant legend for PNG
-        # )
+    # apply layout to the figure we're about to export
+    # first_fig.update_layout(
+    #         ),
+    #         ),
+    #         ),
+    #     ),
 
-        # png_path = out_path.parent / "first_attn_sample.png"
-        # try:
-        #     first_fig.write_image(
-        #         str(png_path),
-        #         format="png",
-        #         width=1200,
-        #         height=1000,
-        #         engine="kaleido",
-        #     )
-        #     print(f"[✓] Saved first sample PNG to {png_path}")
-        # except Exception as e:
-        #     print(f"[!] Could not save PNG (need kaleido?): {e}")
+    #     first_fig.write_image(
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Interactive attention → keypoints viewer.")
+    ap = argparse.ArgumentParser(
+        description="Interactive attention → keypoints viewer."
+    )
     ap.add_argument("--model", required=True)
     ap.add_argument("--category", required=True)
-    ap.add_argument("--top-n", type=int, default=100, help="Top-N attended points per keypoint.")
+    ap.add_argument(
+        "--top-n", type=int, default=100, help="Top-N attended points per keypoint."
+    )
     ap.add_argument(
         "--background-alpha",
         type=float,

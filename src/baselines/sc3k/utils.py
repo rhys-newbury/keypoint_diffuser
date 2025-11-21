@@ -126,7 +126,7 @@ def separation_loss(kp, floor=0.01):
     ----------
     kp:         Key-points
     Method:     compute distances of each point from all the points in "kp"
-                consider minimum two distances (distance of a point form itself (distance==0) and the next closest (distance>0))
+                consider minimum two distances
                 take mean of the distances from the closest point (distance>0)
 
     Returns     separation loss ->  average distance of every point from closest points
@@ -153,8 +153,11 @@ def volume_loss(kp, pc):
 
     Parameters: 3D IoU loss
                 => same as coverage loss of clara's Paper
-                => https://github.com/cfernandezlab/Category-Specific-Keypoints/blob/master/models/losses.py
-    Smooth L1 loss: https://pytorch.org/docs/stable/generated/torch.nn.SmoothL1Loss.html#torch.nn.SmoothL1Loss
+                => see:
+                https://github.com/cfernandezlab/Category-Specific-Keypoints/
+                blob/master/models/losses.py
+        Smooth L1 loss
+        https://pytorch.org/docs/stable/generated/torch.nn.SmoothL1Loss.html#torch.nn.SmoothL1Loss
     ----------
     kp: Estimated key-points [BxNx3]
     pc: Point cloud [Bx2048x3]

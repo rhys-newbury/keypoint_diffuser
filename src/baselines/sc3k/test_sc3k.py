@@ -2,7 +2,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-
 from baselines.sc3k import network
 from baselines.test_base import TestBase
 

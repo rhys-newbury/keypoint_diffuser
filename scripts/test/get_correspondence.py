@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import argparse
 import contextlib
 import json
@@ -7,17 +9,16 @@ from pathlib import Path
 import numpy as np
 import torch
 import tqdm
+from baselines.test_base import TestBase
 from classes import MODEL_CLASSES
 from icp import icp_align_identity
-from torchvision import transforms
-
-from baselines.test_base import TestBase
 from keypoint_diffuser.utils.pc_utils import collate_fn
 from keypoint_diffuser.utils.transforms import (
     Collect,
     GridSample,
     ToTensor,
 )
+from torchvision import transforms
 
 
 CHECKPOINTS_DIR = "checkpoints"
@@ -215,10 +216,11 @@ def keypoint_label_correlation(
     labels,  # List[np.ndarray] with shape (Ni, 4): xyz + label
     threshold=0.05,  # radius for "nearby" match (same units as coords)
     device=None,
+    model=None,
 ):
     """
     Returns:
-        avg_corr: scalar tensor — mean over keypoints of (most-frequent nearby label frequency across batch)
+        avg_corr: scalar tensor — mean over keypoints
         closest_labels_tensor: Bool tensor of shape (B, K, L) — per sample/keypoint/label presence
         per_kp_toplabel_freq: Tensor (K,) — frequency of the top label across batch per keypoint
         per_kp_toplabel_id:   Long Tensor (K,) — which label is top per keypoint
@@ -251,7 +253,9 @@ def keypoint_label_correlation(
             labels[b][:, 3], dtype=torch.long, device=d
         )  # (N,)
 
-        kp = project_to_surface(kp, seg_points)
+        if model == "Ours":
+            kp = project_to_surface(kp, seg_points)
+
         # pairwise distances KP x SEG
         distances = torch.cdist(kp, seg_points)  # (K,N), float64
         within = distances <= float(threshold)  # boolean (K,N)
@@ -298,7 +302,7 @@ def init_corr_db(db_path: Path):
     cur = con.cursor()
     cur.execute(
         """
-        CREATE TABLE IF NOT EXISTS runs_correlation2 (
+        CREATE TABLE IF NOT EXISTS runs_correlation3 (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             model TEXT NOT NULL,
@@ -314,10 +318,10 @@ def init_corr_db(db_path: Path):
     )
     # optional: helpful indexes
     cur.execute(
-        "CREATE INDEX IF NOT EXISTS idx_runs_corr_model ON runs_correlation2(model);"
+        "CREATE INDEX IF NOT EXISTS idx_runs_corr_model ON runs_correlation3(model);"
     )
     cur.execute(
-        "CREATE INDEX IF NOT EXISTS idx_runs_corr_time ON runs_correlation2(created_at);"
+        "CREATE INDEX IF NOT EXISTS idx_runs_corr_time ON runs_correlation3(created_at);"
     )
     con.commit()
     return con
@@ -328,7 +332,7 @@ def save_corr_run(db_path: Path, opt, correlation: float) -> int:
     cur = con.cursor()
     cur.execute(
         """
-        INSERT INTO runs_correlation2 (
+        INSERT INTO runs_correlation3 (
             model, ckpt, annotation_json, pcd_path, batch_size, key_points, category, correlation
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
         """,
@@ -361,7 +365,7 @@ if __name__ == "__main__":
 
     out_kpcd, labels = run_prediction(model, opt)
     avg_corr, pres_tensor, kp_freq, kp_label = keypoint_label_correlation(
-        out_kpcd, labels, threshold=0.05
+        out_kpcd, labels, threshold=0.05, model=opt.model
     )
 
     print("correlation 0.05: ", avg_corr)

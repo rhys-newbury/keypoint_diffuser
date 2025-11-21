@@ -47,7 +47,8 @@ ignore = [
     "PLR0913", "SIM115",
     "S101", "PLR2004",
     "B905", "A002", "N803", "N801", "PD011",
-    "E741", "A001", "FBT001", "S608"
+    "E741", "A001", "FBT001", "S608", "T201",
+    "B008", "PD901", "S110", "N999"
 
 ]
 
@@ -92,6 +93,7 @@ extra-standard-library = ["typing_extensions"]
 max-statements = 150
 max-branches=25
 max-args=15
+max-returns=8
 
 
 [tool.black]

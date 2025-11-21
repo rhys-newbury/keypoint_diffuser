@@ -26,7 +26,7 @@ AVAILABLE_DATASETS = discover_datasets()
 dataset_choices = sorted(AVAILABLE_DATASETS.keys())
 
 parser = argparse.ArgumentParser(
-    description="Training Skeleton Merger. Valid .h5 files must contain a 'data' array of shape (N, n, 3) and a 'label' array of shape (N, 1).",
+    description="Training Skeleton Merger",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
 parser.add_argument(

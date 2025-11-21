@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import os
 from typing import Any
 
@@ -8,18 +10,14 @@ import torch.distributed as dist
 import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
-from tqdm import tqdm
-
 from datasets import get_dataset
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.options.ae_options import AEOptions
 from keypoint_diffuser.utils.utils import reparameterize
+from tqdm import tqdm
 
 
 torch.autograd.set_detect_anomaly(True)
-
-from sklearn.decomposition import PCA
-from torchvision import transforms
 
 from keypoint_diffuser.utils.pc_utils import collate_fn
 from keypoint_diffuser.utils.transforms import (
@@ -29,6 +27,8 @@ from keypoint_diffuser.utils.transforms import (
     GridSample,
     ToTensor,
 )
+from sklearn.decomposition import PCA
+from torchvision import transforms
 
 
 CHECKPOINTS_DIR = "checkpoints"

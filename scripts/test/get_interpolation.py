@@ -29,13 +29,12 @@ import numpy as np
 import torch
 import tqdm
 from classes import MODEL_CLASSES
-from pytorch3d.loss import chamfer_distance
-from torch.utils.data import DataLoader
-from torchvision import transforms
-
 from datasets.H5Datset import H5Dataset
 from keypoint_diffuser.utils.pc_utils import collate_fn
 from keypoint_diffuser.utils.transforms import Collect, GridSample, ToTensor
+from pytorch3d.loss import chamfer_distance
+from torch.utils.data import DataLoader
+from torchvision import transforms
 
 
 TESTSET = "/app/shapenetcorev2_hdf5_2048/val"
@@ -136,7 +135,6 @@ def save_interpolations(pair_idx, interps, kps, opt, out_dir=Path("interps_out")
     for i, (rec, kp) in enumerate(zip(interps, kps)):
         np.save(out_dir / f"interp_{i:02d}.npy", rec.cpu().numpy())
         np.save(out_dir / f"kps{i:02d}.npy", kp.cpu().numpy())
-
 
 
 # ------------------------------------------------------------

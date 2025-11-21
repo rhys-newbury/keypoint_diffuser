@@ -54,9 +54,7 @@ class EDMPrecond(torch.nn.Module):
 
         # Main sampling loop.
         x_next = latents.to(torch.float64) * t_steps[0]
-        for i, (t_cur, t_next) in enumerate(
-            itertools.pairwise(t_steps)
-        ):  # 0, ..., N-1
+        for i, (t_cur, t_next) in enumerate(itertools.pairwise(t_steps)):  # 0, ..., N-1
             x_cur = x_next
 
             # Increase noise temporarily.

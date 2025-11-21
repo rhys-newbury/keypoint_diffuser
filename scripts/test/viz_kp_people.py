@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 import argparse
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+import matplotlib.pyplot as plt
 import numpy as np
+import plotly.graph_objects as go
 import torch
 import tqdm
-from torchvision import transforms
-import matplotlib.pyplot as plt
+
+
+if TYPE_CHECKING:
+    from baselines.test_base import TestBase
 from classes import MODEL_CLASSES
-from baselines.test_base import TestBase
 from datasets.people_dataset import PeopleDataset
 from keypoint_diffuser.utils.pc_utils import collate_fn
 from keypoint_diffuser.utils.transforms import (
@@ -16,7 +20,7 @@ from keypoint_diffuser.utils.transforms import (
     GridSample,
     ToTensor,
 )
-import plotly.graph_objects as go
+from torchvision import transforms
 
 
 def build_transforms():
@@ -161,7 +165,7 @@ def main():
         for l in sorted(unique_labels):
             mask = labels == l
             clr = color_palette[l % len(color_palette)]
-            visible = (i == 0)  # only first sample visible initially
+            visible = i == 0  # only first sample visible initially
 
             fig.add_trace(
                 go.Scatter3d(
@@ -169,7 +173,7 @@ def main():
                     y=pcn[mask, 1],
                     z=pcn[mask, 2],
                     mode="markers",
-                    marker=dict(size=2, color=clr, opacity=0.6),
+                    marker={"size": 2, "color": clr, "opacity": 0.6},
                     name=f"Class {l}",
                     showlegend=(i == 0),  # legend only once
                     visible=visible,
@@ -179,36 +183,22 @@ def main():
             trace_idx += 1
 
         # keypoint trace
-        visible = (i == 0)
+        visible = i == 0
         # fig.add_trace(
         #     go.Scatter3d(
-        #         x=keypoints_np[:, 0],
-        #         y=keypoints_np[:, 1],
-        #         z=keypoints_np[:, 2],
-        #         mode="markers",
-        #         marker=dict(
-        #             size=6,
-        #             color="red",
-        #             symbol="cross",
-        #             line=dict(width=1, color="black"),
         #         ),
-        #         name="Keypoints",
-        #         showlegend=(i == 0),
-        #         visible=visible,
-        #     )
-        # )
         fig.add_trace(
             go.Scatter3d(
                 x=keypoints_np[:, 0],
                 y=keypoints_np[:, 1],
                 z=keypoints_np[:, 2],
                 mode="markers",
-                marker=dict(
-                    size=7,
-                    color="red",
-                    symbol="cross",
-                    line=dict(width=1, color="black"),
-                ),
+                marker={
+                    "size": 7,
+                    "color": "red",
+                    "symbol": "cross",
+                    "line": {"width": 1, "color": "black"},
+                },
                 name="Pred Keypoints",
                 showlegend=(i == 0),
                 visible=(i == 0),
@@ -220,28 +210,9 @@ def main():
         # -------------------------
         # GT KEYS from PeopleDataset (blue)
         # -------------------------
-        # kpts_np = kpts.astype(float)   # (K, 3)
         # fig.add_trace(
         #     go.Scatter3d(
-        #         x=kpts_np[:, 0],
-        #         y=kpts_np[:, 1],
-        #         z=kpts_np[:, 2],
-        #         mode="markers",
-        #         marker=dict(
-        #             size=8,
-        #             color="blue",
-        #             symbol="diamond",
-        #             line=dict(width=1, color="black"),
         #         ),
-        #         name="GT Keypoints",
-        #         showlegend=(i == 0),
-        #         visible=(i == 0),
-        #     )
-        # )
-        # sample_trace_indices.append(trace_idx)
-        # trace_idx += 1        
-        # sample_trace_indices.append(trace_idx)
-        # trace_idx += 1
 
         kpts_np = kpts.astype(float)
         K_gt = kpts_np.shape[0]
@@ -260,12 +231,12 @@ def main():
                     y=[kpts_np[j, 1]],
                     z=[kpts_np[j, 2]],
                     mode="markers",
-                    marker=dict(
-                        size=8,
-                        color=clr,
-                        symbol="diamond",
-                        line=dict(width=1, color="black"),
-                    ),
+                    marker={
+                        "size": 8,
+                        "color": clr,
+                        "symbol": "diamond",
+                        "line": {"width": 1, "color": "black"},
+                    },
                     name=f"GT {j}",
                     showlegend=(i == 0),
                     visible=(i == 0),
@@ -287,36 +258,36 @@ def main():
             visible[idx] = True
 
         buttons.append(
-            dict(
-                label=f"Sample {s}",
-                method="update",
-                args=[
+            {
+                "label": f"Sample {s}",
+                "method": "update",
+                "args": [
                     {"visible": visible},
                     {"title": f"{args.model} | idx={s}"},
                 ],
-            )
+            }
         )
 
     fig.update_layout(
         title=f"{args.model} | idx=0",
-        scene=dict(
-            xaxis=dict(visible=False),
-            yaxis=dict(visible=False),
-            zaxis=dict(visible=False),
-            aspectmode="data",
-        ),
+        scene={
+            "xaxis": {"visible": False},
+            "yaxis": {"visible": False},
+            "zaxis": {"visible": False},
+            "aspectmode": "data",
+        },
         updatemenus=[
-            dict(
-                buttons=buttons,
-                direction="down",
-                showactive=True,
-                x=0.0,
-                y=1.15,
-                xanchor="left",
-                yanchor="top",
-            )
+            {
+                "buttons": buttons,
+                "direction": "down",
+                "showactive": True,
+                "x": 0.0,
+                "y": 1.15,
+                "xanchor": "left",
+                "yanchor": "top",
+            }
         ],
-        margin=dict(l=0, r=0, t=50, b=0),
+        margin={"l": 0, "r": 0, "t": 50, "b": 0},
     )
 
     args.out_dir.mkdir(parents=True, exist_ok=True)

@@ -49,7 +49,7 @@ def auto_pick_up_axis(clouds, kps):
         return "z"
     mins = np.stack(mins, axis=0)
     maxs = np.stack(maxs, axis=0)
-    span = (maxs.max(axis=0) - mins.min(axis=0))
+    span = maxs.max(axis=0) - mins.min(axis=0)
     up_idx = int(np.argmin(span))
     for name, idx in AXIS_INDEX.items():
         if idx == up_idx:
@@ -130,7 +130,9 @@ def main():
     # 1) optional extra denoise
     if not args.skip_denoise:
         for i in range(T):
-            clouds[i] = knn_outlier_filter(clouds[i], k=16, std_ratio=2.5, min_points=30)
+            clouds[i] = knn_outlier_filter(
+                clouds[i], k=16, std_ratio=2.5, min_points=30
+            )
 
     # 2) center per frame (translate cloud + kps so cloud center is at origin)
     for i in range(T):
@@ -198,9 +200,6 @@ def main():
         ax.set_xlim(min1, max1)
         ax.set_ylim(min2, max2)
         ax.set_aspect("equal", "box")
-        # ax.set_xticks([])
-        # ax.set_yticks([])
-        # ax.set_title(f"step {i} (file step {steps[i]})", fontsize=8)
 
         ax.set_xticks([])
         ax.set_yticks([])

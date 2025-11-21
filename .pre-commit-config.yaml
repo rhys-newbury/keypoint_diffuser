@@ -24,6 +24,7 @@ repos:
       - id: codespell
         args:
           - --skip=*.ipynb
+          - --ignore-words-list=ist
   - repo: https://github.com/python/black
     rev: 23.1.0
     hooks:

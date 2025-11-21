@@ -98,7 +98,7 @@ class SM(TestBase):
         return reconstructions, data, kps
 
     @staticmethod
-    def choose_model(metrics_info, ckpt_paths, tail_frac=0.2):
+    def choose_model(metrics_info, ckpt_paths, _tail_frac=0.2):
         if "train_Lrc" not in metrics_info:
             raise KeyError("metrics_info must include 'train_Lrc'.")
 

@@ -112,7 +112,8 @@ class CageSkinning(nn.Module):
 
     def optimize_cage(self, cage, shape, distance=0.4, iters=100, step=0.01):
         """
-        pull cage vertices as close to the origin, stop when distance to the shape is bellow the threshold
+        pull cage vertices as close to the origin
+        stop when distance to the shape is below the threshold
         """
         for _ in range(iters):
             vector = -cage

@@ -20,7 +20,7 @@ def discover_datasets():
     for _, mod_name, _ in pkgutil.iter_modules([str(pkg_path)]):
         try:
             module = importlib.import_module(f"datasets.{mod_name}")
-        except Exception:
+        except Exception:  # noqa: S112
             continue
 
         for name, obj in inspect.getmembers(module, inspect.isclass):

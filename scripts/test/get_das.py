@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import argparse
 import collections
 import contextlib
@@ -108,7 +110,7 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
 
     out_kpcd = []
     out_nfact = []
-    out_Q = []
+    out_q = []
     out_attn = []  # NEW
     out_coord = []  # NEW
 
@@ -140,7 +142,7 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
 
         with torch.no_grad():
             Q = np.array(Q)
-            out_Q.append(Q)
+            out_q.append(Q)
 
             # build transformed batch
             T_nb = []
@@ -184,7 +186,7 @@ def run_prediction(model: TestBase, opt: argparse.Namespace):
     }
 
     print(f"[✓] Prediction completed for {len(out_kpcd)} samples.")
-    return kpn_ds, predicted, out_Q
+    return kpn_ds, predicted, out_q
 
 
 # ----------------------------
@@ -294,7 +296,7 @@ def mIoU_curve_plot(kpn_ds, predicted, pcd_path):
 def save_numpy_geoms(
     kpn_ds,
     predicted,
-    out_Q,
+    out_q,
     opt,
     out_dir: Path = Path("geom_np"),
     vis_max=1000,
@@ -313,7 +315,7 @@ def save_numpy_geoms(
     """
     out_dir.mkdir(exist_ok=True)
 
-    flat_Q = [q for qb in out_Q for q in qb]  # flatten batches
+    flat_Q = [q for qb in out_q for q in qb]  # flatten batches
 
     has_attn = "attn" in predicted and len(predicted["attn"]) == len(kpn_ds)
     has_coord = "coord" in predicted and len(predicted["coord"]) == len(kpn_ds)
@@ -445,7 +447,7 @@ if __name__ == "__main__":
     model = model_cls()  # or model_cls(opt) if your ctor expects args
     model.load_model(opt.ckpt, opt)
 
-    kpn_ds, predicted, out_Q = run_prediction(model, opt)
+    kpn_ds, predicted, out_q = run_prediction(model, opt)
 
     fwd, assignments = fwd_alignment_scores(kpn_ds, predicted)
 
@@ -468,7 +470,7 @@ if __name__ == "__main__":
         save_numpy_geoms(
             kpn_ds,
             predicted,
-            out_Q,
+            out_q,
             opt,
             out_dir=Path("geom_np"),
             scores=entry_scores,

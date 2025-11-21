@@ -71,7 +71,7 @@ class PeopleDataset(Dataset):
         )
         seg_data = np.load(seg_path, allow_pickle=True)
 
-        labels = seg_data.get('labels')
+        labels = seg_data.get("labels")
 
         # load keypoints
         data = np.load(kp_path, allow_pickle=True)
@@ -138,5 +138,9 @@ class PeopleDataset(Dataset):
         if self.normalize:
             pc = self._normalize_pc(pc)
             keypoints = self._normalize_pc(keypoints)
-        
-        return pc if not self.get_keypoints else (np.hstack((pc, labels.reshape(-1, 1))), keypoints)
+
+        return (
+            pc
+            if not self.get_keypoints
+            else (np.hstack((pc, labels.reshape(-1, 1))), keypoints)
+        )

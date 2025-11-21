@@ -111,7 +111,9 @@ def mean_value_coordinates_3D(
         - 1
     )
 
-    # NOTE: because of floating point ci can be slightly larger than 1, causing problem with sqrt(1-ci^2)
+    # NOTE: because of floating point ci can be slightly larger than 1,
+    # causing problem with sqrt(1-ci^2)
+
     # NOTE: sqrt(x)' is nan for x=0, hence use eps
     eps = 1e-5
     ci = torch.where(ci >= 1, ci - (ci.detach() - (1 - eps)), ci)
@@ -140,12 +142,6 @@ def mean_value_coordinates_3D(
         - ci[:, :, :, [1, 2, 0]] * theta_i[:, :, :, [2, 0, 1]]
         - ci[:, :, :, [2, 0, 1]] * theta_i[:, :, :, [1, 2, 0]]
     ) / (di * torch.sin(theta_i[:, :, :, [1, 2, 0]]) * si[:, :, :, [2, 0, 1]])
-    # if ∃i,|si| ≤ ε, set wi to 0. coplaner with T but outside
-    # ignore coplaner outside triangle
-    # alternative check
-    # determinant = dot_product(triangle_points[:,:,:,0].unsqueeze(1)-query.unsqueeze(2),
-    #                           torch.cross(triangle_points[:,:,:,1]-triangle_points[:,:,:,0],
-    #                                       triangle_points[:,:,:,2]-triangle_points[:,:,:,0], dim=-1).unsqueeze(1), dim=-1, keepdim=True).detach()
 
     wi = torch.where(
         torch.any(torch.abs(si) <= 1e-5, keepdim=True, dim=-1), torch.zeros_like(wi), wi

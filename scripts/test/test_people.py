@@ -5,13 +5,12 @@ import re
 import sqlite3
 import subprocess
 from pathlib import Path
-from typing import List
 
 
 EPOCH_RE = re.compile(r"(?P<k>\d+)kp_(?P<epoch>\d+)\.pth$", re.IGNORECASE)
 
 
-def list_ckpts(path_str: str) -> List[Path]:
+def list_ckpts(path_str: str) -> list[Path]:
     """
     If path is a file -> [file].
     If path is a dir  -> all *.pth files inside (recursively), sorted by epoch if parseable,
@@ -36,7 +35,7 @@ def list_ckpts(path_str: str) -> List[Path]:
         else:
             others.append(f)
 
-    result: List[Path] = []
+    result: list[Path] = []
     if with_epochs:
         with_epochs.sort(key=lambda x: x[0])  # earliest -> latest
         result.extend([f for _, f in with_epochs])
@@ -45,7 +44,7 @@ def list_ckpts(path_str: str) -> List[Path]:
     return result
 
 
-def list_ckpts_fallback(path_str: str) -> List[Path]:
+def list_ckpts_fallback(path_str: str) -> list[Path]:
     """
     Try original ckpt_dir; if missing, try same final dir name under /mnt/slow3.
     """
@@ -63,10 +62,10 @@ def list_ckpts_fallback(path_str: str) -> List[Path]:
 
     try:
         return list_ckpts(str(fallback))
-    except FileNotFoundError:
+    except FileNotFoundError as e:
         raise FileNotFoundError(
             f"No checkpoints found in either:\n  {base}\n  {fallback}"
-        )
+        ) from e
 
 
 def table_exists(con: sqlite3.Connection, table: str) -> bool:
