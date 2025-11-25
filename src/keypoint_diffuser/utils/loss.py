@@ -9,12 +9,30 @@
 "Elucidating the Design Space of Diffusion-Based Generative Models"."""
 
 import torch
+import torch.nn.functional as F
 from pytorch3d.loss import chamfer_distance
 
 
 # ----------------------------------------------------------------------------
 # Improved loss function proposed in the paper "Elucidating the Design Space
 # of Diffusion-Based Generative Models" (EDM).
+
+
+def local_repulsion(pred, k=8, margin=0.01):
+    """
+    pred: (B, N, 3)
+    returns: (B,) repulsion penalty per batch element
+    """
+    B, N, _ = pred.shape
+    dists = torch.cdist(pred, pred)  # (B,N,N)
+
+    knn_dists, _ = torch.topk(dists, k=k + 1, dim=-1, largest=False)  # (B,N,k+1)
+    knn_dists = knn_dists[:, :, 1:]  # (B,N,k) drop self
+
+    penalty = F.relu(margin - knn_dists)  # (B,N,k)
+    # average over neighbors and points → (B,)
+    penalty_per_batch = penalty.mean(dim=(1, 2))
+    return penalty_per_batch
 
 
 class EDMLossCurriculum:
@@ -53,9 +71,32 @@ class EDMLossCurriculum:
         n = torch.randn_like(y) * sigma
 
         D_yn = net(y + n, sigma, context=code)
-        loss, _ = chamfer_distance(D_yn, y)
-        loss = weight * loss
-        return loss.mean()
+
+        # One-way Chamfer (pred → gt)
+        loss_pred_to_gt, _ = chamfer_distance(
+            D_yn, y, single_directional=True, batch_reduction=None
+        )
+
+        # One-way Chamfer (gt → pred)
+        # this is how close from each ground truth point to a point in the prediction.
+        # we care a lot more about this.
+        loss_gt_to_pred, _ = chamfer_distance(
+            y, D_yn, single_directional=True, batch_reduction=None
+        )
+
+        # Weighted asymmetric combination
+        recon_loss = 0.5 * loss_pred_to_gt + 1.5 * loss_gt_to_pred
+
+        repel_per_sample = local_repulsion(D_yn, k=8, margin=0.01)  # (B,)
+        pct_clean = (
+            (self.sigma_data / (sigma + self.sigma_data)).clamp(0, 1).flatten()
+        )  # (B,)
+
+        spread_strength = 0.02  # base lambda
+        spread_term = spread_strength * pct_clean * repel_per_sample  # (B,)
+        loss = (weight.flatten() * recon_loss).mean() + spread_term.mean()
+
+        return loss
 
 
 # ----------------------------------------------------------------------------

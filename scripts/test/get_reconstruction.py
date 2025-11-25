@@ -35,7 +35,7 @@ from keypoint_diffuser.datasets.shapespartial import ShapesPartial
 from keypoint_diffuser.options.ae_options import AEConfig, AEOptions
 from keypoint_diffuser.utils.eval_metrics import EMD_CD_recon
 from keypoint_diffuser.utils.pc_utils import collate_fn
-from keypoint_diffuser.utils.utils import normalize_to_box_multi
+from keypoint_diffuser.utils.utils import normalize_to_box
 from keypoint_diffuser.utils.transforms import (
     ApplyToBoth,
     Collect,
@@ -55,7 +55,7 @@ PARTIAL_VIEW_MODES = ["default", "myopia", "patch", "tac"]
 # ----------------------------
 
 def save_recon_geoms(
-    recons, gts, inputs, names, partial_sample_names, kps, cds, emds, opt, out_dir: Path = Path("output")
+    recons, gts, inputs, names, partial_sample_names, kps, gt_kps, cds, emds, opt, out_dir: Path = Path("output")
 ):
     """
     Save reconstructions and ground truths as numpy arrays.
@@ -68,7 +68,7 @@ def save_recon_geoms(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     saved = 0
-    for (recon, gt, inpc, name, patsam, kp, cd, emd) in zip(recons, gts, inputs, names, partial_sample_names, kps, cds, emds):
+    for (recon, gt, inpc, name, patsam, kp, gt_kps, cd, emd) in zip(recons, gts, inputs, names, partial_sample_names, kps, gt_kps, cds, emds):
         # recon: [M, 3], gt: [N, 3]
         dst = out_dir / name
         dst.mkdir(parents=True, exist_ok=True)
@@ -127,20 +127,15 @@ def build_argparser() -> argparse.ArgumentParser:
 # KP metrics utils
 # ----------------------------
 
-def fwd_alignment_scores(kpn_ds, predicted):
+def fwd_alignment_scores_gtn(kpn_ds, gt_nkps, pred_nkps):
+    """
+    uses already normalised gt keypoints gtn_kps and predicted keypoints pred_nkps produced from normalized point clouds
+    """
     preds = []
-    for entry, kpcd, nfact in zip(kpn_ds, predicted["kpcd"], predicted["nfact"]):
-        dmax, dmin = nfact
-
-        ground_truths = []
-        for kp in entry["keypoints"]:
-            nkp = (kp["xyz"] - dmin) / (dmax - dmin)
-            nkp = 2.0 * (nkp - 0.5)
-
-            ground_truths.append(nkp)
-        ground_truths = np.array(ground_truths)
+    for entry, ngt, npred in zip(kpn_ds, gt_nkps, pred_nkps):
+        ground_truths = np.array(ngt)
         dist = np.sum(
-            (np.expand_dims(kpcd, 1) - np.expand_dims(ground_truths, 0)) ** 2, axis=-1
+            (np.expand_dims(npred, 1) - np.expand_dims(ground_truths, 0)) ** 2, axis=-1
         )
         argminfwd = np.argmin(dist, -1)
         preds.append([entry["keypoints"][argm]["semantic_id"] for argm in argminfwd])
@@ -151,19 +146,15 @@ def fwd_alignment_scores(kpn_ds, predicted):
     return np.mean(acc)
 
 
-def bwd_alignment_scores(kpn_ds, predicted):
+def bwd_alignment_scores_gtn(kpn_ds, gt_nkps, pred_nkps):
+    """
+    uses already normalised gt keypoints gtn_kps and predicted keypoints pred_nkps produced from normalized point clouds
+    """
     preds = collections.defaultdict(list)
-    for entry, kpcd, nfact in zip(kpn_ds, predicted["kpcd"], predicted["nfact"]):
-        dmax, dmin = nfact
-        ground_truths = []
-        for kp in entry["keypoints"]:
-            nkp = (kp["xyz"] - dmin) / (dmax - dmin)
-            nkp = 2.0 * (nkp - 0.5)
-
-            ground_truths.append(nkp)
-        ground_truths = np.array(ground_truths)
+    for entry, ngt, npred in zip(kpn_ds, gt_nkps, pred_nkps):
+        ground_truths = np.array(ngt)
         dist = np.sum(
-            (np.expand_dims(kpcd, 1) - np.expand_dims(ground_truths, 0)) ** 2, axis=-1
+            (np.expand_dims(npred, 1) - np.expand_dims(ground_truths, 0)) ** 2, axis=-1
         )
         argminbwd = np.argmin(dist, -2)
         for i, kp in enumerate(entry["keypoints"]):
@@ -175,45 +166,7 @@ def bwd_alignment_scores(kpn_ds, predicted):
     
     return np.mean(q)
 
-def mIoU_thresh(kpn_ds, predicted, pcd_path, threshold=0.1):
-    """
-    calculates the mean Intersection over Union (mIoU) for the predicted keypoints against the ground truth keypoints.
-    predicted keypoints are projected back on to the original cloud surface before distance calculation, to measure geometric alignment.
-    """
-    kps = []
-    gts = []
-    for entry, kpcd, nfact in zip(kpn_ds, predicted["kpcd"], predicted["nfact"]):
-        cid = entry["class_id"]
-        mid = entry["model_id"]
-        pc = naive_read_pcd(pcd_path / cid / f"{mid}.pcd")
-        dmax, dmin = nfact
-
-        ground_truths = [pc[kp["pcd_info"]["point_index"]] for kp in entry["keypoints"]]
-        gts.append(ground_truths)
-
-        npc = (pc - dmin) / (dmax - dmin)
-        npc = 2.0 * (npc - 0.5)
-
-        dist = np.sqrt(
-            np.sum((np.expand_dims(kpcd, 1) - np.expand_dims(npc, 0)) ** 2, axis=-1)
-        )
-        kps.append(pc[np.argmin(dist, -1)])
-
-    npos = fp_sum = fn_sum = 0
-    for ground_truths, kpcd in zip(gts, kps):
-        dist = np.sqrt(
-            np.sum(
-                (np.expand_dims(kpcd, 1) - np.expand_dims(ground_truths, 0)) ** 2,
-                axis=-1,
-            )
-        )
-        npos += dist.shape[1]
-        fp_sum += np.sum(np.min(dist, -1) > threshold)
-        fn_sum += np.sum(np.min(dist, -2) > threshold)
-
-    return (npos - fn_sum) / (npos + fp_sum)
-
-def mIoU(kpn_ds, predicted, pcd_path):
+def mIoU(kpn_ds, gt_nkps, pred_nkps, out_centroid, out_scale, pcd_path):
     """
     calculates the mean Intersection over Union (mIoU) for the predicted keypoints against the ground truth keypoints.
     predicted keypoints are projected back on to the original cloud surface before distance calculation, to measure geometric alignment.
@@ -221,22 +174,20 @@ def mIoU(kpn_ds, predicted, pcd_path):
     thresholds = np.linspace(0.0, 0.1)
     kps = []
     gts = []
-    for entry, kpcd, nfact in zip(kpn_ds, predicted["kpcd"], predicted["nfact"]):
+    for entry, ngt, npred, c, s in zip(kpn_ds, gt_nkps, pred_nkps, out_centroid, out_scale):
         cid = entry["class_id"]
         mid = entry["model_id"]
         pc = naive_read_pcd(pcd_path / cid / f"{mid}.pcd")
-        dmax, dmin = nfact
 
         ground_truths = [pc[kp["pcd_info"]["point_index"]] for kp in entry["keypoints"]]
         gts.append(ground_truths)
 
-        npc = (pc - dmin) / (dmax - dmin)
-        npc = 2.0 * (npc - 0.5)
+        npc = normalize_to_box(pc, centroid=c, furthest_distance=s)
 
         dist = np.sqrt(
-            np.sum((np.expand_dims(kpcd, 1) - np.expand_dims(npc, 0)) ** 2, axis=-1)
+            np.sum((np.expand_dims(npred, 1) - np.expand_dims(npc, 0)) ** 2, axis=-1)
         )
-        kps.append(pc[np.argmin(dist, -1)])
+        kps.append(npc[np.argmin(dist, -1)])
     for threshold in thresholds:
         npos = fp_sum = fn_sum = 0
         for ground_truths, kpcd in zip(gts, kps):
@@ -251,9 +202,9 @@ def mIoU(kpn_ds, predicted, pcd_path):
             fn_sum += np.sum(np.min(dist, -2) > threshold)
         yield (npos - fn_sum) / (npos + fp_sum)
 
-def mIoU_curve_plot(kpn_ds, predicted, pcd_path, out_root):
+def mIoU_curve_plot(kpn_ds, gt_nkps, pred_nkps, centroids, scales, pcd_path, out_root):
     plt.style.use("seaborn")
-    miou_curve = list(mIoU(kpn_ds, predicted, pcd_path))
+    miou_curve = list(mIoU(kpn_ds, gt_nkps, pred_nkps, centroids, scales, pcd_path))
     plt.plot(np.linspace(0.0, 0.1), miou_curve)
     plt.title("mIoU Curve")
     plt.xlabel("Distance Threshold")
@@ -354,7 +305,10 @@ def make_loader(opt: argparse.Namespace) -> DataLoader:
 def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output")):
     cds, emds = [], []
     recons, gts, inputs, names, patsam_names = [], [], [], [], []
-    kps = []
+    kps, gt_kps = [], []
+    kpn_ds_ordered = []
+    out_centroid, out_scale = [], []
+    kp_gt_exists = []
 
     model.model.eval()
     model.model.cuda()
@@ -385,41 +339,55 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
             # build up input list of dicts
             kpn_ds = json.load(open(annotation_json))
             kpn_ds_batch = []
-            mids = batch['target_model_id']
+            mids = batch['target_file']
             cids = batch['target_category']
             
-            model_found = [False]*B
+            kp_gt_exists_batch = [False]*B
+            # loop to find the matching entries, can't think of a better way
+            # the full kp list will be filled to calculate kp metrics together later
+            out_centroid.extend(batch['target_centroid'])  # TODO: check type
+            out_scale.extend(batch['target_scale'])
             for idx, (cid, mid) in enumerate(zip(cids, mids)):
                 for entry in kpn_ds:
-                    if entry["model_id"] == mid and entry["class_id"] == cid:
+                    # print(entry["model_id"], mid)
+                    # print(entry["class_id"], str(cid.numpy()))
+                    # input()
+                    scid = str(cid.numpy()).zfill(8)
+                    if entry["model_id"] == mid and entry["class_id"] == scid:
                         kpn_ds_batch.append(entry)
-                        model_found[idx] = True
+                        kpn_ds_ordered.append(entry)
+                        kp_gt_exists_batch[idx] = True
+                        
+                        # gt kp per entry
+                        ground_truths = []
+                        for kp in entry["keypoints"]:
+                            # normalize as well, using the to_box method
+                            center = batch['target_centroid'][idx]
+                            scale = batch['target_scale'][idx]
+                            nkp = torch.Tensor(kp["xyz"]) - center
+                            nkp = nkp / scale
+                            ground_truths.append(nkp)
+                        
+                        gt_kps.append(ground_truths)
                         break
-            
-            # calculate the metrics for the batch
-            nfact_batch = [[maxP, minP] for maxP, minP in zip(batch["nfact_max"], batch["nfact_min"])]
-            fwd_batch = fwd_alignment_scores(kpn_ds_batch, {"kpcd": kp_batch.cpu().numpy(), "nfact": nfact_batch})
-            
-            # convert the format of the gt kp
-
-            
-            # ---------------- load gt keypoints ----------------
+            kp_gt_exists.extend(kp_gt_exists_batch)
+            # ---------------------------------------------------
 
 
             # ---------------- hacky filter for the recon ----------------
-            dist_thresh = 3
-            mean_pt = torch.mean(recon_batch.cpu().numpy(), 1).unsqueeze(1)  # [B, 1, 3]
-            dist_from_mean = np.linalg.norm(recon_batch - mean_pt, axis=2)
-            in_mask = dist_from_mean < dist_thresh
-            while not np.all(in_mask):
-                recon_batch = recon_batch.cpu().numpy()[in_mask]
-                mean_pt = torch.mean(recon_batch, 1).unsqueeze(1)  # [B, 1, 3]
-                dist_from_mean = np.linalg.norm(recon_batch - mean_pt, axis=2)
-                in_mask = dist_from_mean < dist_thresh
+            # dist_thresh = 3
+            # mean_pt = torch.mean(recon_batch.cpu().numpy(), 1).unsqueeze(1)  # [B, 1, 3]
+            # dist_from_mean = np.linalg.norm(recon_batch - mean_pt, axis=2)
+            # in_mask = dist_from_mean < dist_thresh
+            # while not np.all(in_mask):
+            #     recon_batch = recon_batch.cpu().numpy()[in_mask]
+            #     mean_pt = torch.mean(recon_batch, 1).unsqueeze(1)  # [B, 1, 3]
+            #     dist_from_mean = np.linalg.norm(recon_batch - mean_pt, axis=2)
+            #     in_mask = dist_from_mean < dist_thresh
                 
-            # make sure recon_batch still has the same number of points as gt_batch
-            n_pts = recon_batch.shape[1]
-            gt_batch = gt_batch[:, :n_pts, :]
+            # # make sure recon_batch still has the same number of points as gt_batch
+            # n_pts = recon_batch.shape[1]
+            # gt_batch = gt_batch[:, :n_pts, :]
             # -----------------------------------------------------------
 
             # One call for all candidates
@@ -435,8 +403,32 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
             names.extend(name_batch)
             patsam_names.extend(patsam_batch)
             kps.extend(list(kp_batch.cpu().numpy()))
+            
+            # for testing
+            if len(cds) >= 300:
+                break
 
-    save_recon_geoms(recons, gts, inputs, names, patsam_names, kps, cds, emds, opt, out_dir=out_dir)
+    # calculate kp metrics together for all valid samples
+    # mask out samples without kp annotation
+    # TODO: figure out how to separate das and miou into per batch so it can be labeled
+    # TODO: otherwise calculate das and miou in for loop above per batch
+    import pdb; pdb.set_trace()
+    
+    assert len(kpn_ds_ordered) == sum(kp_gt_exists) == len(gt_kps)
+    assert len(kp_gt_exists) == len(kps)
+    kps_filtered = np.array(kps)[kp_gt_exists]
+    out_centroid_filtered = np.array(out_centroid)[kp_gt_exists]
+    out_scale_filtered = np.array(out_scale)[kp_gt_exists]
+    fwd = fwd_alignment_scores_gtn(kpn_ds_ordered, kps_filtered, gt_kps)
+    bwd = bwd_alignment_scores_gtn(kpn_ds_ordered, kps_filtered, gt_kps)
+    dual = (fwd + bwd) / 2.0
+    miou_at_01 = mIoU_curve_plot(kpn_ds, gt_kps, kps_filtered, out_centroid_filtered, out_scale_filtered, opt.pcd_path, out_root=out_dir)
+
+    # extend gt_kps to match the full list length
+    gt_kps_extended = np.full_like(kp_gt_exists, None, dtype=float)
+    gt_kps_extended[kp_gt_exists] = gt_kps
+
+    save_recon_geoms(recons, gts, inputs, names, patsam_names, kps, gt_kps_extended, cds, emds, opt, out_dir=out_dir)
 
     cd_mean = np.mean(cds)
     emd_mean = np.mean(emds)

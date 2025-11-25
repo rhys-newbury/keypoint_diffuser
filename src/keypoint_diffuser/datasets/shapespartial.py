@@ -68,6 +68,7 @@ class ShapesPartial(torch.utils.data.Dataset):
     SYNSETOFFSET2CATEGORY = {v: k for k, v in CATEGORY2SYNSETOFFSET.items()}
 
     PARTIALSAMPLEMODES = ['default', 'myopia', 'patch', 'tac', 'all']
+    # PARTIALSAMPLEMODES = ['default', 'myopia', 'patch', 'all']
 
     @staticmethod
     def modify_commandline_options(parser):
@@ -211,21 +212,31 @@ class ShapesPartial(torch.utils.data.Dataset):
         )
 
     def _get_partial_pointcloud_path(self, name, category=None):
-        n = random.randint(0, self.n_partial_samples)
+        n = random.randint(0, self.n_partial_samples-1)
         nmode = random.randint(0, len(self.mode_list)-1)
         if self.opt.partial_view_mode == 'all':
             mode = self.mode_list[nmode]
         else:
             mode = self.opt.partial_view_mode
-        return os.path.join(
+        
+        path_root = os.path.join(
             self.opt.points_dir,
             (str(category).zfill(8) if category is not None else self.opt.category),
             name,
             "models",
+        )
+        
+        partial_pc_path = os.path.join(
+            path_root, 
             f"partial_samples_{mode}_{n}.npy",
             # different sample numbers are still in the same frame, no need to match
-        ), n
-    
+        )
+        partial_coverage_path = os.path.join(
+            path_root, 
+            f"coverage_{mode}.csv",
+        )
+        return partial_pc_path, partial_coverage_path, n, mode
+        
     def _get_coverage_csv_path(self, name, category=None):
         if self.opt.partial_view_mode is None:
             raise ValueError("Partial view mode is not set.")
@@ -281,29 +292,32 @@ class ShapesPartial(torch.utils.data.Dataset):
         points = torch.from_numpy(points).float()
 
         # get partial point cloud
-        partial_path, n = self._get_partial_pointcloud_path(name, category)
+        partial_path, csv_path, n, mode_name = self._get_partial_pointcloud_path(name, category)
         partial = np.load(partial_path)
         partial = self.random_downsample(partial, 2048)
         partial = torch.from_numpy(partial).float()
 
         # get partial point cloud coverage fraction
-        if is_test:
-            csv_path = self._get_coverage_csv_path(name, category)
-            with open(csv_path, newline="") as f:
-                reader = csv.reader(f)
-                for row in reader:
-                    try:
-                        partial_path, coverage, radius = row
-                    except:
-                        continue
-                    m = re.search(r"_(\d+)\.npy$", partial_path)
-                    if m and int(m.group(1)) == n:
-                        coverage = float(coverage)
-                        radius = float(radius)
-                        break
-        else:
-            coverage = 0    # making them 0 instead of None so it works with training
-            radius = 0
+        with open(csv_path, newline="") as f:
+            reader = csv.reader(f)
+            coverage = None
+            radius = None
+            for row in reader:
+                # hack for crappy initial tac csv files
+                try:
+                    p, c, r = row
+                except ValueError:
+                    p, c = row
+                    r = -1.0
+                    
+                m = re.search(r"_(\d+)\.npy$", p)
+                if m and int(m.group(1)) == n:
+                    coverage = float(c)
+                    radius = float(r)
+                    break
+            # didn't find matching case by the end
+            if coverage is None or radius is None:
+                raise RuntimeError(f"failed to find matching coverage values for {partial_path} in {csv_path}")
         
         # normalize point clouds
         points[:, :3], partial[:, :3], center, scale = self.normalize(points[:, :3], partial[:, :3])
@@ -328,9 +342,12 @@ class ShapesPartial(torch.utils.data.Dataset):
             "partial_label": partial_label,
             "cat": self.opt.category,
             "file": name,
+            "partial_sample_name": f"{mode_name}_{n}",
             "category": category,
             "coverage": coverage,
             "radius": radius,
+            "centroid": center,
+            "scale": scale
         }
         if pc_path.is_file() and is_test:
             pc = np.load(pc_path)
@@ -372,8 +389,6 @@ class ShapesPartial(torch.utils.data.Dataset):
 
         result = {"source_" + k: v for k, v in source_data.items()}
         result.update({"target_" + k: v for k, v in target_data.items()})
-        result.update({"source_name": name})
-        result.update({"target_name": name_2})
 
         return result
 

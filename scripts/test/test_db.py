@@ -74,7 +74,7 @@ def main():
         description="Loop train_runs and call get_das for all checkpoints."
     )
     ap.add_argument(
-        "--db", type=Path, required=True, help="Path to results.db (has train_runs)"
+        "--db", type=Path, required=True, help="Path to training results.db (has train_runs)"
     )
     ap.add_argument(
         "--script", type=Path, default=Path("get_das.py"), help="Path to get_das.py"
@@ -92,7 +92,7 @@ def main():
         "--eval-db-path",
         type=Path,
         default=None,
-        help="DB passed to get_das --db-path (default: same as --db)",
+        help="path to output evaluation db (default: same as --db)",
     )
     ap.add_argument(
         "--table-name",
@@ -114,7 +114,8 @@ def main():
     
     args = ap.parse_args()
     eval_db_path = args.eval_db_path or args.db
-
+    eval_db_path.parent.mkdir(parents=True, exist_ok=True)
+    
     con = sqlite3.connect(str(args.db))
     cur = con.cursor()
 
@@ -142,6 +143,7 @@ def main():
         if algo == "Ours2": # hack
             algo = "Ours"
         try:
+            # TODO: clean up logic ##################################################################################################################
             ckpt_list = list_ckpts(ckpt_dir)
             for f in ckpt_list:
                 if "net_final" in str(f):
@@ -150,17 +152,20 @@ def main():
             epoch_num_list = []
             
             if args.only_epoch is not None:
+                filtered_f = []
                 for f in ckpt_list:
                     m = EPOCH_RE.search(f.name)
                     if m and (int(m.group("epoch")) == args.only_epoch):
-                        ckpt_list = [f]
+                        filtered_f.append(f)
                         epoch_num_list.append(int(m.group("epoch")))
                         break
                     elif "net_final.pth" in f.name:
                         final_f = f
                 # if the only_epoch was not found, use the final epoch
-                ckpt_list = [final_f]
-                epoch_num_list.append(args.only_epoch)
+                if not filtered_f:
+                    filtered_f.append(final_f)
+                    epoch_num_list.append(args.only_epoch)
+                ckpt_list = filtered_f
             elif arg.start_epoch is not None:
                 filtered = []
                 for f in ckpt_list:
@@ -201,7 +206,8 @@ def main():
                 ckpt_list = ckpt_list[: args.limit]
 
             # append the final model net_final as well
-            ckpt_list.append(final_path)
+            # ckpt_list.append(final_path)
+            ###################################################################################################################
 
             if not ckpt_list:
                 print(f"[run_id={rid}] !! no checkpoints to process after filtering")
@@ -236,9 +242,11 @@ def main():
                         str(eval_db_path),
                         "--input-type",
                         str(args.input_type), 
-                        "--output-dir",
-                        str(args.output_dir / f"epoch_{epoch_num_list.pop(0)}"), 
-                        "--save", 
+                        "--source-points-dir",
+                        "/mnt/slow/shapenetcorev2-source", 
+                        # "--output-dir",
+                        # str(args.output_dir / f"epoch_{epoch_num_list.pop(0)}"), 
+                        # "--save", 
                     ]
                 elif "get_reconstruction" in str(args.script):
                     cmd = [
@@ -259,7 +267,6 @@ def main():
                         str(args.output_dir / f"epoch_{epoch_num_list.pop(0)}"),
                         "--input-type",
                         str(args.input_type),
-                        "--save-kps",
                     ]
                 else:
                     raise SystemExit(f"Unknown script: {args.script}")

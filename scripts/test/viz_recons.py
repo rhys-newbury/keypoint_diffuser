@@ -16,7 +16,7 @@ def plot_recon_collage(
     recon_point_size=2,
     gt_color="gray",
     recon_color="red",
-    alpha_gt=0.5,
+    alpha_gt=1,
     worst: bool = False,  # <<< show worst (highest CD) first
     plot_kps: bool = False,
     kps_root: Path = None, 
@@ -78,8 +78,12 @@ def plot_recon_collage(
         m = root / "meta.json"
         try:
             pred_kp = np.load(kps_dir / "pred_kp.npy")
-            gt_kp = np.load(kps_dir / "gt_kp.npy")
+            # reshape to (N, 3)
+            if not 3 in pred_kp.shape:
+                pred_kp = pred_kp.reshape(-1, 3)
+            # gt_kp = np.load(kps_dir / "gt_kp.npy")
         except FileNotFoundError:
+            print(f"Cannot find files {kps_dir / 'pred_kp.npy'}")
             continue
         
         if m.exists():
@@ -129,7 +133,7 @@ def plot_recon_collage(
             gt[:, 0], gt[:, 2], gt[:, 1], s=gt_point_size, c=gt_color, alpha=alpha_gt
         )
         ax.scatter(
-            inpc[:, 0], inpc[:, 2], inpc[:, 1], s=0.5, c="green", alpha=alpha_gt
+            inpc[:, 0], inpc[:, 2], inpc[:, 1], s=0.5, c="green", alpha=alpha_gt/2
         )
         ax.scatter(
             recon[:, 0],

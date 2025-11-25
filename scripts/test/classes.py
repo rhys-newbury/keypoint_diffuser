@@ -25,7 +25,7 @@ try:
 except ImportError:
     Ours = None
 try:
-    from keypoin_diffuser.test_partial import Partial
+    from keypoint_diffuser.test_partial import Partial
 except ImportError:
     Partial = None
 
