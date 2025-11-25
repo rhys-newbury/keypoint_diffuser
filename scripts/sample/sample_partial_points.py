@@ -13,7 +13,7 @@ from PIL import Image
 import pyrender
 import yaml
 import argparse
-from synset_utils import load_taxonomy_maps, names_to_synsets, synsets_to_names
+from keypoint_diffuser.utils.synset_utils import load_taxonomy_maps, names_to_synsets, synsets_to_names
 from coverage_utils import compute_coverage_for_profile, plot_coverage_histogram
 
 TRAINABLE = [

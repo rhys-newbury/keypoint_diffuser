@@ -28,3 +28,8 @@ scripts/eval_logs
 scripts/train/train_summary
 scripts/train/wandb
 *.db
+*out*/
+*vs_coverage*/
+*.csv
+*.html
+configs/*/

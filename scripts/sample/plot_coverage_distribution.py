@@ -55,7 +55,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # Shared taxonomy helpers
-from synset_utils import (
+from keypoint_diffuser.utils.synset_utils import (
     names_to_synsets,
     synsets_to_names,
 )
@@ -313,6 +313,7 @@ def main():
         modes = [m.strip() for m in args.mode.split(",") if m.strip()]
 
     # Collect
+    print(f"Getting classes: {classes_raw}; modes: {modes}")
     all_values, by_mode, by_class, by_mode_cls = collect_grouped_coverages(
         root=root,
         modes=modes,
@@ -369,6 +370,7 @@ def main():
         print("  Top classes by count:")
         for name, vals in top_classes:
             print(f"    - {name:>16}: n={len(vals)}, mean={np.mean(vals):.4f}, std={np.std(vals):.4f}")
+    print(f"    - {name:>16}: n={len(vals)}, mean={np.mean(vals):.4f}, std={np.std(vals):.4f}")
 
 
 if __name__ == "__main__":
