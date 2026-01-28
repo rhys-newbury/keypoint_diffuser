@@ -59,6 +59,9 @@ from keypoint_diffuser.utils.synset_utils import (
     names_to_synsets,
     synsets_to_names,
 )
+from coverage_utils import compute_coverage_for_profile
+
+from tqdm import tqdm
 
 
 # ---------------------- helpers ----------------------
@@ -285,6 +288,7 @@ def main():
     ap.add_argument("--logy", action="store_true", help="Use log-scale on Y axis.")
     ap.add_argument("--outdir", type=str, default="coverage_plots",
                     help="Directory to save output plots (created under --root unless absolute).")
+    ap.add_argument("--gen-csv-first", action="store_true", help="Calculate the coverage and output to csv, use if they do not exist already")
     args = ap.parse_args()
 
     root = Path(args.root).expanduser().resolve()
@@ -311,6 +315,32 @@ def main():
             return
     else:
         modes = [m.strip() for m in args.mode.split(",") if m.strip()]
+
+    # Generate the csvs first
+    print(classes_raw)
+    print(type(classes_raw))
+    print(allowed_synsets)
+    print(type(allowed_synsets))
+    if args.gen_csv_first:
+        # collect list of models
+        folders_dict = {entry: [] for entry in classes_raw}
+        # list contains dirs using synset ids
+        for l in open(root / "list.txt"):
+            if l.strip().split("/")[1] in allowed_synsets:
+                # get index of id and convert to class name
+                i = allowed_synsets.index(l.strip().split("/")[1])
+                # write dir into list with class name as key
+                folders_dict[classes_raw[i]].append(l.strip())
+
+        # generate csvs
+        for c in classes_raw:
+            print(f"Processing class: {c}")
+            folders_to_run = folders_dict[c]
+            for mode in modes:
+                print(f"Processing mode: {mode}")
+                # loop through each object folder
+                for idx, i in tqdm(enumerate(folders_to_run), total=len(folders_to_run)):
+                    coverage_list = compute_coverage_for_profile(i, root, root, mode, max_n=args.n, overwrite=True, output_csv=True)
 
     # Collect
     print(f"Getting classes: {classes_raw}; modes: {modes}")

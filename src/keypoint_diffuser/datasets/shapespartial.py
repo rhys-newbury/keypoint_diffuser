@@ -15,7 +15,7 @@ import csv
 import re
 
 from ..utils.utils import normalize_to_box_multi
-
+from ..utils.synset_utils import synsets_to_names
 
 class ShapesPartial(torch.utils.data.Dataset):
     MESH_FILE_EXT = "obj"
@@ -67,7 +67,7 @@ class ShapesPartial(torch.utils.data.Dataset):
     # }
     SYNSETOFFSET2CATEGORY = {v: k for k, v in CATEGORY2SYNSETOFFSET.items()}
 
-    PARTIALSAMPLEMODES = ['default', 'myopia', 'patch', 'tac', 'all']
+    PARTIALSAMPLEMODES = ['default', 'myopia', 'patch', 'tac', 'all', 'uniform']
     # PARTIALSAMPLEMODES = ['default', 'myopia', 'patch', 'all']
 
     @staticmethod
@@ -203,13 +203,27 @@ class ShapesPartial(torch.utils.data.Dataset):
         return dataset
 
     def _get_pointcloud_path(self, name, category=None):            
-        return os.path.join(
+        pth = os.path.join(
             self.opt.points_dir,
             (str(category).zfill(8) if category is not None else self.opt.category),
             name,
             "models",
             f"new_samples_{random.randint(0, 4)}.npy",
         )
+        for _ in range(20):
+        # while not Path(pth).is_file():
+            pth = os.path.join(
+                self.opt.points_dir,
+                (str(category).zfill(8) if category is not None else self.opt.category),
+                name,
+                "models",
+                f"new_samples_{random.randint(0, 4)}.npy",
+            )
+            if Path(pth).is_file():
+                return pth
+            else:
+                continue
+        raise Exception(f"Point cloud file not found: {pth}")
 
     def _get_partial_pointcloud_path(self, name, category=None):
         n = random.randint(0, self.n_partial_samples-1)
@@ -226,15 +240,31 @@ class ShapesPartial(torch.utils.data.Dataset):
             "models",
         )
         
-        partial_pc_path = os.path.join(
-            path_root, 
-            f"partial_samples_{mode}_{n}.npy",
-            # different sample numbers are still in the same frame, no need to match
-        )
-        partial_coverage_path = os.path.join(
-            path_root, 
-            f"coverage_{mode}.csv",
-        )
+        if mode == 'uniform':
+            # different naming scheme for uniform partial samples
+            partial_pc_path = os.path.join(
+                path_root, 
+                f"partial_samples_uniform_dist_{n}.npy",
+                # different sample numbers are still in the same frame, no need to match
+            )
+            category_name = synsets_to_names([str(category).zfill(8)], Path(self.opt.points_dir) / "filtered_taxonomy.json")[0]
+            partial_coverage_path = os.path.join(
+                # self.opt.points_dir, 
+                # f"uniform_sampling_metadata_{category_name}.csv",
+                path_root, 
+                f"coverage_{mode}.csv",
+            )
+        else:
+            partial_pc_path = os.path.join(
+                path_root, 
+                f"partial_samples_{mode}_{n}.npy",
+                # different sample numbers are still in the same frame, no need to match
+            )
+            partial_coverage_path = os.path.join(
+                path_root, 
+                f"coverage_{mode}.csv",
+            )
+        
         return partial_pc_path, partial_coverage_path, n, mode
         
     def _get_coverage_csv_path(self, name, category=None):
@@ -297,24 +327,49 @@ class ShapesPartial(torch.utils.data.Dataset):
         partial = self.random_downsample(partial, 2048)
         partial = torch.from_numpy(partial).float()
 
-        # get partial point cloud coverage fraction
+        # get partial point cloud coverage fraction from metadata csv
         with open(csv_path, newline="") as f:
-            reader = csv.reader(f)
+            # format and contents can differ between 'uniform' and other modes
+            reader = csv.DictReader(f)
             coverage = None
             radius = None
             for row in reader:
+                c = row["coverage"]
                 # hack for crappy initial tac csv files
                 try:
-                    p, c, r = row
-                except ValueError:
-                    p, c = row
+                    p = row["partial_pc_path"]
+                except KeyError:
+                    # 'uniform' mode case, the name of the model instance also needs to be matched
+                    p = row["model_id"]
+                    
+                # loop until the correct name is found
+                if name not in p:
+                    print(name)
+                    print(type(name))
+                    print(p)
+                    print(type(p))
+                    input()
+                    continue
+                
+                try:
+                    r = row["radius"]   # this is the radius between points used to calculate coverage (not camera radius)
+                except KeyError:
                     r = -1.0
                     
-                m = re.search(r"_(\d+)\.npy$", p)
-                if m and int(m.group(1)) == n:
-                    coverage = float(c)
-                    radius = float(r)
-                    break
+                # search for the matching sample index, either from the path or as a separate field
+                if len(p) == 1:   # it is sample_index
+                    if row["sample_index"] == n:
+                        coverage = float(c)
+                        radius = float(r)
+                        break
+                elif len(p) > 1:  # it is partial_pc_path
+                    m = re.search(r"_(\d+)\.npy$", p)
+                    if m and int(m.group(1)) == n:
+                        coverage = float(c)
+                        radius = float(r)
+                        break
+                else:
+                    raise RuntimeError("Unknown case for searching pattern")
             # didn't find matching case by the end
             if coverage is None or radius is None:
                 raise RuntimeError(f"failed to find matching coverage values for {partial_path} in {csv_path}")

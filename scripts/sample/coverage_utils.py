@@ -111,7 +111,11 @@ def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default"
     for n in range(max_n):
         save_path = save_root_dir / i / "models"
         
-        partial_pc_path = save_path / f"partial_samples_{mode}_{n}.npy"
+        if mode == 'uniform':
+            partial_pc_path = save_path / f"partial_samples_uniform_dist_{n}.npy"
+        else:
+            partial_pc_path = save_path / f"partial_samples_{mode}_{n}.npy"
+            
         
         # load the partial point cloud
         for idx in range(5):  # try max of 5 times, sometimes the file is still being saved and need to be loaded again
@@ -133,7 +137,10 @@ def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default"
         coverage, radius, covered_points, not_covered_points = surface_coverage_pointwise(surface_points, partial_points)
         
         # save name and coverage to lists
-        path_to_save = Path(i) / "models" / f"partial_samples_{mode}_{n}.npy"
+        if mode == 'uniform':
+            path_to_save = Path(i) / "models" / f"partial_samples_uniform_dist_{n}.npy"
+        else:
+            path_to_save = Path(i) / "models" / f"partial_samples_{mode}_{n}.npy"
         path_list.append(str(path_to_save))
         coverage_list.append(coverage)
         radius_list.append(radius)
@@ -205,10 +212,9 @@ def compute_coverage_for_profile(i, data_root_dir, save_root_dir, mode="default"
 
     return coverage_list
 
-def plot_coverage_histogram(save_root_dir, coverage_values, mode, log_scale=False):
+def plot_coverage_histogram(save_root_dir, coverage_values, log_scale=False, file_name=None):
     """
     Plot histogram of coverage values and save to file.
-    Meant for values on a per-mode basis.
     """
     plt.figure(figsize=(6,4))
     plt.hist(coverage_values, bins=20, edgecolor='black', alpha=0.7)
@@ -218,7 +224,9 @@ def plot_coverage_histogram(save_root_dir, coverage_values, mode, log_scale=Fals
     plt.grid(alpha=0.3)
     if log_scale:
         plt.yscale("log")
-    plt.savefig(save_root_dir / f"coverage_distribution_{mode}.png", dpi=300, bbox_inches='tight')
+    if file_name is not None:
+        file_name = f"coverage_distribution.png"
+    plt.savefig(save_root_dir / file_name, dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"Mean coverage for profile {mode}: {np.mean(coverage_values):.4f} ± {np.std(coverage_values):.4f}")
+    print(f"Mean coverage: {np.mean(coverage_values):.4f} ± {np.std(coverage_values):.4f}")
