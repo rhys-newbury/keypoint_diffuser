@@ -39,15 +39,15 @@ class Partial(TestBase):
                 continue
             # subset specific data, keep and remove subset prefix str
             elif k.startswith(key):
-                d[k[len(key) + 1 :]] = v
+                d[k[len(key) + 1 :]] = v.cuda()
             # shared data, keep
             elif type(v) == list:
                 d[k] = v
             else:
-                d[k] = v
+                d[k] = v.cuda()
         return d
 
-    def get_reconstruction(self, data: dict[str, Any], key="orig") -> tuple[torch.Tensor, torch.Tensor]:
+    def get_reconstruction(self, data: dict[str, Any], key="orig") -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         z0, mu, logvar = self.model.encode(self.get_network_data(data, key=key))
         z_aux = reparameterize(mu, logvar)  # sampled from q(z|x)
         z0 = z0.reshape(z0.shape[0], -1)
@@ -64,5 +64,6 @@ class Partial(TestBase):
         return (
             recons.unsqueeze(1),
             input_pc,
-            full_pc
+            full_pc,
+            z0
         )

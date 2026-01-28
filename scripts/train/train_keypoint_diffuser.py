@@ -10,9 +10,10 @@ import torch
 import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
-from db_utils import save_train_run
+from db_utils import save_train_run, find_checkpoint_from_db_dir
 from einops import repeat
 from keypoint_diffuser.datasets.H5Datset import H5Dataset
+# from keypoint_diffuser.datasets.shapes import Shapes
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.models.encoder_models.common import get_linear_scheduler
 from keypoint_diffuser.options.ae_options import AEConfig, AEOptions
@@ -97,7 +98,8 @@ def get_network_data(data: dict[str, Any], key="orig"):
 def train(opt: AEConfig):
     ckpt_dir = opt.ckpt_dir / wandb.run.name
     ckpt_dir.mkdir()
-    save_train_run(opt.db, "Ours2", opt.category, ckpt_dir, opt.key_points)
+    opt.db.parent.mkdir(exist_ok=True)
+    save_train_run(opt.db, "Ours", opt.category, ckpt_dir, opt.key_points)
 
     t = transforms.Compose(
         [
@@ -128,7 +130,7 @@ def train(opt: AEConfig):
         ]
     )
 
-    DATASET = "/app/shapenetcorev2_hdf5_2048/train/"
+    DATASET = "/mnt/slow/shapenetcorev2-h5/shapenetcorev2_hdf5_2048/train/"
     h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
     dataset = H5Dataset(
         h5_files,
@@ -153,6 +155,20 @@ def train(opt: AEConfig):
     )
 
     net = AutoEncoder(opt).cuda()
+    # to continue on previous training
+    if opt.pretrained_root is not None:
+        pretrained_root = opt.pretrained_root
+        if str(pretrained_root).endswith(".pth"):
+            # path provided is a pth file, read directly
+            pretrained_dir = pretrained_root
+        else:
+            # path provided is a dir to training db files, which contains the ckpt_dir
+            pretrained_dir = find_checkpoint_from_db_dir(pretrained_root, opt.category, opt.pretrained_iterations, use_max_epoch=opt.pretrained_use_final)
+        # db files save (opt.ckpt_dir / wandb.run.name)
+        pretrained = torch.load(pretrained_dir)
+        
+        net.load_state_dict(pretrained["states"])
+    
     net.train()
     t = 0
 
@@ -173,6 +189,7 @@ def train(opt: AEConfig):
     cur_nimg = 0
 
     iter_time_start = time.time()
+    epoch_time_start = time.time()
 
     lambda_0 = opt.lambda_0
     lambda_1 = opt.lambda_1
@@ -248,7 +265,7 @@ def train(opt: AEConfig):
             loss.backward()
 
             if (t + 1) % accumulation_steps == 0:
-                print(f"Gradient step at iteration {t + 1}")
+                # print(f"Gradient step at iteration {t + 1}")
                 clip_grad_norm_(net.parameters(), opt.max_grad_norm)
                 optimizer.step()
                 scheduler.step()
@@ -256,22 +273,35 @@ def train(opt: AEConfig):
 
             cur_nimg += opt.batch_size
 
-            if t % opt.save_interval == 0:
-                os.path.join(ckpt_dir, "outputs", "%07d" % t)
-                save_network(
-                    net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=e
-                )
+            # if t % opt.save_interval == 0:
+                # os.path.join(ckpt_dir, "outputs", "%07d" % t)
+                # save_network(
+                    # net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=t
+                # )
 
             iter_time = time.time() - iter_time_start
             iter_time_start = time.time()
 
-            if t % opt.log_interval == 0:
-                samples_sec = opt.batch_size / iter_time
-                losses_str = str(loss)
-                log_str = f"{t:d}: iter {iter_time:.1f} sec, {samples_sec:.1f} samples/sec {losses_str}"
-                print(log_str)
+            # if t % opt.log_interval == 0:
+            #     samples_sec = opt.batch_size / iter_time
+            #     losses_str = str(loss)
+            #     log_str = f"{t:d}: iter {iter_time:.1f} sec, {samples_sec:.1f} samples/sec {losses_str}"
+            #     print(log_str)
 
             t += 1
+            
+        if e % opt.save_interval == 0:
+            os.path.join(ckpt_dir, "outputs", "%07d" % t)
+            save_network(
+                net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=e
+            )
+            
+        epoch_time = time.time() - epoch_time_start
+        epoch_time_start = time.time()
+        if e % opt.log_interval == 0:
+            losses_str = str(loss)
+            log_str = f"epoch {e:d}, iter {t:d}: epoch {epoch_time:.1f} sec"
+            print(log_str)
 
     save_network(net, ckpt_dir, network_label="net", epoch_label="final")
 

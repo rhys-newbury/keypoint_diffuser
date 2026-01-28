@@ -98,17 +98,20 @@ def get_network_data(data: dict[str, Any], key="orig"):
             continue
         # subset specific data, keep and remove subset prefix str
         elif k.startswith(key):
-            d[k[len(key) + 1 :]] = v
+            d[k[len(key) + 1 :]] = v.cuda()
         # shared data, keep
-        else:
+        elif type(v) == list:
             d[k] = v
+        else:
+            d[k] = v.cuda()
     return d
 
 
 def train(opt: AEConfig):
     ckpt_dir = opt.ckpt_dir / wandb.run.name
     ckpt_dir.mkdir()
-    save_train_run(opt.db_root / opt.db, "Partial", opt.category, ckpt_dir, opt.key_points)
+    opt.db.parent.mkdir(exist_ok=True)
+    save_train_run(opt.db, "Partial", opt.category, ckpt_dir, opt.key_points)
 
     t = transforms.Compose(
         [
@@ -186,6 +189,7 @@ def train(opt: AEConfig):
     cur_nimg = 0
 
     iter_time_start = time.time()
+    epoch_time_start = time.time()
 
     lambda_0 = opt.lambda_0
     lambda_1 = opt.lambda_1
@@ -282,9 +286,9 @@ def train(opt: AEConfig):
 
             deformed_matrix = data["deformed_transformation"].view(
                 data["orig_offset"].shape[0], -1, 3
-            )
+            ).cuda()
 
-            kp_orig = code_.reshape(code.shape[0], -1, 3)
+            kp_orig = code_.reshape(code.shape[0], -1, 3).cuda()
             deformed_code, _, _ = net(get_network_data(data, "deformed"))
             kp_deformed = deformed_code.reshape(code.shape[0], -1, 3)
             kp_transformed = torch.bmm(kp_orig, deformed_matrix.transpose(1, 2))
@@ -327,7 +331,7 @@ def train(opt: AEConfig):
             loss.backward()
 
             if (t + 1) % accumulation_steps == 0:
-                print(f"Gradient step at iteration {t + 1}")
+                # print(f"Gradient step at iteration {t + 1}")
                 clip_grad_norm_(net.parameters(), opt.max_grad_norm)
                 optimizer.step()
                 scheduler.step()
@@ -335,22 +339,35 @@ def train(opt: AEConfig):
 
             cur_nimg += opt.batch_size
 
-            if t % opt.save_interval == 0:
-                os.path.join(ckpt_dir, "outputs", "%07d" % t)
-                save_network(
-                    net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=e
-                )
+            # if t % opt.save_interval == 0:
+                # os.path.join(ckpt_dir, "outputs", "%07d" % t)
+                # save_network(
+                    # net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=t
+                # )
 
             iter_time = time.time() - iter_time_start
             iter_time_start = time.time()
 
-            if t % opt.log_interval == 0:
-                samples_sec = opt.batch_size / iter_time
-                losses_str = str(loss)
-                log_str = f"{t:d}: iter {iter_time:.1f} sec, {samples_sec:.1f} samples/sec {losses_str}"
-                print(log_str)
+            # if t % opt.log_interval == 0:
+            #     samples_sec = opt.batch_size / iter_time
+            #     losses_str = str(loss)
+            #     log_str = f"{t:d}: iter {iter_time:.1f} sec, {samples_sec:.1f} samples/sec {losses_str}"
+            #     print(log_str)
 
             t += 1
+            
+        if e % opt.save_interval == 0 and e != 0:
+            os.path.join(ckpt_dir, "outputs", "%07d" % t)
+            save_network(
+                net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=e
+            )
+            
+        epoch_time = time.time() - epoch_time_start
+        epoch_time_start = time.time()
+        if e % opt.log_interval == 0:
+            losses_str = str(loss)
+            log_str = f"epoch {e:d}, iter {t:d}: epoch {epoch_time:.1f} sec"
+            print(log_str)
 
     save_network(net, ckpt_dir, network_label="net", epoch_label="final")
 

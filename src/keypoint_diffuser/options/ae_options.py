@@ -29,10 +29,10 @@ class AEConfig:
     max_schedule: int = 100000
     print_options: bool = False
     phase: str = "train"
-    iteration: int = None
+    iterations: int = None
     epochs: int = 100
-    save_interval: int = 10
-    log_interval: int = 5
+    save_interval: int = 100
+    log_interval: int = 1
     key_points: int = 10
     extra_latent: int = 5
     num_steps: int = 200
@@ -46,23 +46,25 @@ class AEConfig:
     weight_decay: float = 0
     max_grad_norm: float = 10
     end_lr: float = 1e-3
-    sched_start_epoch: int = 150 * THOUSAND
-    sched_end_epoch: int = 300 * THOUSAND
+    sched_start_epoch: int = 15 * THOUSAND
+    sched_end_epoch: int = 30 * THOUSAND
     normalization: str = "none"
     seed: int = 0
     n_workers: int = 0
     mesh_dir: str = None
     keypoints_dir: str = None
     freeze_decoder: bool = False
-    pretrained_root: Path = Path("db/train/")
+    pretrained_root: Path = None #Path("db/train/")
     pretrained_epoch: int = None
+    pretrained_iterations: int = None
+    pretrained_use_final: bool = False  # either use this with True or pretrained_epoch
 
-    db_root: Path = Path("./db/train")
-    db: Path = Path("results.db")
+    db: Path = Path("./db/train/results.db")
     ckpt_dir: Path = Path("./logs")
 
     use_old: bool = False
-    use_edm: bool = False
+    # use_edm: bool = False
+    use_edm: bool = True
 
     segmentations_dir: str = None
     seg_split_dir: str = None
@@ -91,15 +93,15 @@ class AEConfig:
     lambda_0: int = 1
     lambda_1: int = 1
     lambda_2: int = 1
-    lambda_3: int = 1
+    lambda_3: int = 10
     lambda_4: int = 1
     lambda_p: int = 1
 
-    max_stretch_factor: float = 2.2
-    max_bending_factor: float = 1.8
-    max_twist_factor: float = 1.9
-    max_taper_factor: float = 1.6
-    max_rotation_angle: float = np.pi / 6
+    max_stretch_factor: float = 1.4
+    max_bending_factor: float = 0.3
+    max_twist_factor: float = 0.7
+    max_taper_factor: float = 0.35
+    max_rotation_angle: float = np.pi / 3
 
 
 class AEOptions:
