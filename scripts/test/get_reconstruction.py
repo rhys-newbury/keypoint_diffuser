@@ -25,7 +25,9 @@ import sqlite3
 from glob import glob
 from pathlib import Path
 import time
+import collections
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import tqdm
@@ -68,7 +70,7 @@ def save_recon_geoms(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     saved = 0
-    for (recon, gt, inpc, name, patsam, kp, gt_kps, cd, emd) in zip(recons, gts, inputs, names, partial_sample_names, kps, gt_kps, cds, emds):
+    for (recon, gt, inpc, name, psn, kp, gt_kp, cd, emd) in zip(recons, gts, inputs, names, partial_sample_names, kps, gt_kps, cds, emds):
         # recon: [M, 3], gt: [N, 3]
         dst = out_dir / name
         dst.mkdir(parents=True, exist_ok=True)
@@ -77,6 +79,7 @@ def save_recon_geoms(
         np.save(dst / "gt.npy", np.asarray(gt, dtype=np.float32))
         np.save(dst / "input.npy", np.asarray(inpc, dtype=np.float32))
         np.save(dst / "pred_kp.npy", np.asarray(kp, dtype=np.float32))
+        np.save(dst / "gt_kp.npy", np.asarray(gt_kp, dtype=np.float32))
 
         meta = {
             "model": opt.model,
@@ -86,7 +89,7 @@ def save_recon_geoms(
             "num_gt": int(gt.shape[0]),
             "cd": float(cd),
             "emd": float(emd),
-            "partial_sample_name": patsam
+            "partial_sample_name": psn
         }
         with open(dst / "meta.json", "w") as f:
             json.dump(meta, f, indent=2)
@@ -115,9 +118,10 @@ def build_argparser() -> argparse.ArgumentParser:
         try_add_arg(sp, "--category", type=str, default="chair")
         try_add_arg(sp, "--batch-size", type=int, default=16)
         try_add_arg(sp, "--num-workers", type=int, default=8)
+        try_add_arg(sp, "--pcd-path", type=Path, default=Path("/mnt/slow/shapenetcorev2-h5/pcds/"))
         try_add_arg(sp, "--db-path", type=Path, default=Path("results.db"))
         try_add_arg(sp, "--key-points", type=int, default=10)
-        try_add_arg(sp, "--output-dir", type=Path, default=Path("recons_out"))
+        try_add_arg(sp, "--output-dir", type=Path, default=Path("recons_out_new"))
         try_add_arg(sp, "--input-type", type=str, default="full", choices=["full", *PARTIAL_VIEW_MODES, "all"])
 
     return p
@@ -126,12 +130,26 @@ def build_argparser() -> argparse.ArgumentParser:
 # ----------------------------
 # KP metrics utils
 # ----------------------------
+def naive_read_pcd(path):
+    with open(path) as f:
+        lines = f.readlines()
+    idx = -1
+    for i, line in enumerate(lines):
+        if line.startswith("DATA ascii"):
+            idx = i + 1
+            break
+    lines = lines[idx:]
+    lines = [line.rstrip().split(" ") for line in lines]
+    data = np.asarray(lines)
+    pc = np.array(data[:, :3], dtype=np.float32)
+    return pc
 
 def fwd_alignment_scores_gtn(kpn_ds, gt_nkps, pred_nkps):
     """
     uses already normalised gt keypoints gtn_kps and predicted keypoints pred_nkps produced from normalized point clouds
     """
     preds = []
+    assignments = []  # store GT indices for each pred
     for entry, ngt, npred in zip(kpn_ds, gt_nkps, pred_nkps):
         ground_truths = np.array(ngt)
         dist = np.sum(
@@ -139,8 +157,8 @@ def fwd_alignment_scores_gtn(kpn_ds, gt_nkps, pred_nkps):
         )
         argminfwd = np.argmin(dist, -1)
         preds.append([entry["keypoints"][argm]["semantic_id"] for argm in argminfwd])
+        assignments.append(argminfwd)
         
-    import pdb; pdb.set_trace()
     acc = [np.mean(np.array(pa) == np.array(pb)) for pa in preds for pb in preds]
 
     return np.mean(acc)
@@ -177,13 +195,16 @@ def mIoU(kpn_ds, gt_nkps, pred_nkps, out_centroid, out_scale, pcd_path):
     for entry, ngt, npred, c, s in zip(kpn_ds, gt_nkps, pred_nkps, out_centroid, out_scale):
         cid = entry["class_id"]
         mid = entry["model_id"]
-        pc = naive_read_pcd(pcd_path / cid / f"{mid}.pcd")
+        pc = torch.Tensor(naive_read_pcd(pcd_path / cid / f"{mid}.pcd"))
 
+        # xyz coordinates for each keypoint in the entry, list of tensors
+        # the same as just reading entry["keypoints"][idx]["xyz"] for each keypoint
         ground_truths = [pc[kp["pcd_info"]["point_index"]] for kp in entry["keypoints"]]
         gts.append(ground_truths)
 
-        npc = normalize_to_box(pc, centroid=c, furthest_distance=s)
+        npc, _, _ = normalize_to_box(pc, centroid=c, furthest_distance=s)
 
+        # for each pred kp, find the closest point in the point cloud
         dist = np.sqrt(
             np.sum((np.expand_dims(npred, 1) - np.expand_dims(npc, 0)) ** 2, axis=-1)
         )
@@ -191,9 +212,11 @@ def mIoU(kpn_ds, gt_nkps, pred_nkps, out_centroid, out_scale, pcd_path):
     for threshold in thresholds:
         npos = fp_sum = fn_sum = 0
         for ground_truths, kpcd in zip(gts, kps):
+            gt = torch.stack(ground_truths)
+            # kpcd is the points from the point cloud closest to the pred kps collected from above
             dist = np.sqrt(
                 np.sum(
-                    (np.expand_dims(kpcd, 1) - np.expand_dims(ground_truths, 0)) ** 2,
+                    (np.expand_dims(kpcd, 1) - np.expand_dims(gt, 0)) ** 2,
                     axis=-1,
                 )
             )
@@ -216,6 +239,45 @@ def mIoU_curve_plot(kpn_ds, gt_nkps, pred_nkps, centroids, scales, pcd_path, out
 # ----------------------------
 # Dataset & Prediction
 # ----------------------------
+def make_h5loader(opt: argparse.Namespace) -> DataLoader:
+    h5_files = glob(f"/mnt/slow/shapenetcorev2-h5/shapenetcorev2_hdf5_2048/test/**/*.h5", recursive=True)
+    t = (
+        transforms.Compose(
+            [
+                GridSample(
+                    keys=("coord",),
+                    hash_type="fnv",
+                    mode="train",
+                    return_grid_coord=True,
+                ),
+                ToTensor(),
+                Collect(
+                    keys=("coord", "grid_coord"),
+                    feat_keys=("coord",),
+                ),
+            ]
+        )
+        if opt.model == "Ours"
+        else None
+    )
+
+    dataset = H5Dataset(
+        h5_files,
+        normalize=True,
+        get_two=opt.model == "KPD",
+        include_label=False,
+        object_name=opt.category,
+        transform=t,
+    )
+    # if your project has a custom collate_fn for dicts, reuse it
+    return DataLoader(
+        dataset,
+        batch_size=opt.batch_size,
+        shuffle=False,
+        num_workers=opt.num_workers,
+        collate_fn=collate_fn if opt.model == "Ours" else None,
+        drop_last=False,
+    )
 
 
 def make_loader(opt: argparse.Namespace) -> DataLoader:
@@ -275,7 +337,7 @@ def make_loader(opt: argparse.Namespace) -> DataLoader:
         if cfg_kwargs.get("normalization") == "none":
             cfg_kwargs["normalization"] = None
 
-        # manually add values
+        # TODO hard coded: manually add values 
         cfg_kwargs["name"] = "recon"
         cfg_kwargs["split"] = "test"
         cfg_kwargs["mesh_dir"] = "/mnt/slow/shapenetcorev2-source/"
@@ -297,14 +359,14 @@ def make_loader(opt: argparse.Namespace) -> DataLoader:
         dataset,
         batch_size=opt.batch_size,
         shuffle=False,
-        num_workers=opt.num_workers,
+        num_workers=0,
         collate_fn=collate_fn if (opt.model == "Ours") or (opt.model == "Partial") else None,
         drop_last=False,
     )
 
 def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output")):
     cds, emds = [], []
-    recons, gts, inputs, names, patsam_names = [], [], [], [], []
+    recons, gts, inputs, names, psns = [], [], [], [], []
     kps, gt_kps = [], []
     kpn_ds_ordered = []
     out_centroid, out_scale = [], []
@@ -328,10 +390,10 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
             input_batch = input_pc.float()
             gt_batch = full_pc.float()
             name_batch = batch["target_file"]
-            patsam_batch = batch["target_partial_sample_name"]
+            psn_batch = batch["target_partial_sample_name"]
             B = gt_batch.shape[0]
 
-            recon_batch = recon_batch.squeeze()    # [B, 1, 2048, 3] to [B, 2048, 3]
+            recon_batch = recon_batch.squeeze(1)    # [B, 1, 2048, 3] to [B, 2048, 3]
 
             # ---------------- load gt keypoints ----------------
             # load the kp annotation file
@@ -345,7 +407,7 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
             kp_gt_exists_batch = [False]*B
             # loop to find the matching entries, can't think of a better way
             # the full kp list will be filled to calculate kp metrics together later
-            out_centroid.extend(batch['target_centroid'])  # TODO: check type
+            out_centroid.extend(batch['target_centroid'])
             out_scale.extend(batch['target_scale'])
             for idx, (cid, mid) in enumerate(zip(cids, mids)):
                 for entry in kpn_ds:
@@ -366,7 +428,7 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
                             scale = batch['target_scale'][idx]
                             nkp = torch.Tensor(kp["xyz"]) - center
                             nkp = nkp / scale
-                            ground_truths.append(nkp)
+                            ground_truths.append(nkp.numpy())
                         
                         gt_kps.append(ground_truths)
                         break
@@ -391,6 +453,8 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
             # -----------------------------------------------------------
 
             # One call for all candidates
+            if recon_batch.dtype != gt_batch.dtype:
+                gt_batch = gt_batch.to(recon_batch.dtype)
             res = EMD_CD_recon(recon_batch, gt_batch, reduced=False)
             cd_all = res["CD"].detach().cpu().numpy()  # shape [B]
             emd_all = res["EMD"].detach().cpu().numpy()  # shape [B]
@@ -401,34 +465,39 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
             gts.extend(list(gt_batch.cpu().numpy()))
             inputs.extend(list(input_batch.cpu().numpy()))
             names.extend(name_batch)
-            patsam_names.extend(patsam_batch)
+            psns.extend(psn_batch)
+            kp_batch = torch.reshape(kp_batch, (B, opt.key_points, 3))
             kps.extend(list(kp_batch.cpu().numpy()))
             
             # for testing
-            if len(cds) >= 300:
-                break
+            # if len(cds) >= 20:
+                # break
 
     # calculate kp metrics together for all valid samples
     # mask out samples without kp annotation
-    # TODO: figure out how to separate das and miou into per batch so it can be labeled
-    # TODO: otherwise calculate das and miou in for loop above per batch
-    import pdb; pdb.set_trace()
+    # das and miou are calculated pair-wise, so they can only be calculated as a average for the overall dataset
+    # thus they will not be labeled or attached to any specific object instances
     
     assert len(kpn_ds_ordered) == sum(kp_gt_exists) == len(gt_kps)
     assert len(kp_gt_exists) == len(kps)
+    # use the bool list to pick out the batch instances that have gt information
     kps_filtered = np.array(kps)[kp_gt_exists]
-    out_centroid_filtered = np.array(out_centroid)[kp_gt_exists]
-    out_scale_filtered = np.array(out_scale)[kp_gt_exists]
-    fwd = fwd_alignment_scores_gtn(kpn_ds_ordered, kps_filtered, gt_kps)
-    bwd = bwd_alignment_scores_gtn(kpn_ds_ordered, kps_filtered, gt_kps)
+    out_centroid_filtered = torch.stack(out_centroid, dim=0)[kp_gt_exists].numpy()
+    out_scale_filtered = torch.stack(out_scale, dim=0)[kp_gt_exists].numpy()
+    fwd = fwd_alignment_scores_gtn(kpn_ds_ordered, gt_kps, kps_filtered)
+    bwd = bwd_alignment_scores_gtn(kpn_ds_ordered, gt_kps, kps_filtered)
     dual = (fwd + bwd) / 2.0
     miou_at_01 = mIoU_curve_plot(kpn_ds, gt_kps, kps_filtered, out_centroid_filtered, out_scale_filtered, opt.pcd_path, out_root=out_dir)
 
     # extend gt_kps to match the full list length
-    gt_kps_extended = np.full_like(kp_gt_exists, None, dtype=float)
-    gt_kps_extended[kp_gt_exists] = gt_kps
+    # each populated element in gt_kps_extended should be a np.ndarray of keypoints ()
+    # since gt kps can have different number of kps per instance in a batch, the outcome array may be staggered
+    # annoying to do it with np masked assignment
+    # gt_kps_extended = np.full_like(kp_gt_exists, None, dtype=object)
+    # gt_kps_extended[kp_gt_exists] = gt_kps
+    gt_kps_extended = [np.array(k) if m else None for k, m in zip(gt_kps, kp_gt_exists)]
 
-    save_recon_geoms(recons, gts, inputs, names, patsam_names, kps, gt_kps_extended, cds, emds, opt, out_dir=out_dir)
+    save_recon_geoms(recons, gts, inputs, names, psns, kps, gt_kps_extended, cds, emds, opt, out_dir=out_dir)
 
     cd_mean = np.mean(cds)
     emd_mean = np.mean(emds)
@@ -505,6 +574,7 @@ def main():
 
     print(f"[✓] Running reconstruction evaluation for model={opt.model}, category={opt.category}")
     print(f"[✓] Output dir: {opt.output_dir}")
+    opt.output_dir.mkdir(parents=True, exist_ok=True)
     cd, emd = run_reconstruction(model, loader, opt, out_dir=opt.output_dir)
 
     print(f"Chamfer Distance (mean): {cd:.6f}")
