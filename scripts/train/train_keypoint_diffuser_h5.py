@@ -13,7 +13,7 @@ import torch.utils.data.distributed
 from db_utils import save_train_run, find_checkpoint_from_db_dir
 from einops import repeat
 from keypoint_diffuser.datasets.H5Datset import H5Dataset
-from keypoint_diffuser.datasets.shapespartial import ShapesPartial
+# from keypoint_diffuser.datasets.shapes import Shapes
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.models.encoder_models.common import get_linear_scheduler
 from keypoint_diffuser.options.ae_options import AEConfig, AEOptions
@@ -97,8 +97,8 @@ def get_network_data(data: dict[str, Any], key="orig"):
 
 def train(opt: AEConfig):
     ckpt_dir = opt.ckpt_dir / wandb.run.name
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    opt.db.parent.mkdir(parents=True, exist_ok=True)
+    ckpt_dir.mkdir()
+    opt.db.parent.mkdir(exist_ok=True)
     save_train_run(opt.db, "Ours", opt.category, ckpt_dir, opt.key_points)
 
     t = transforms.Compose(
@@ -109,8 +109,6 @@ def train(opt: AEConfig):
                 max_twist_factor=opt.max_twist_factor,
                 max_taper_factor=opt.max_taper_factor,
                 max_rotation_angle=opt.max_rotation_angle,
-                max_scaling_factor=opt.max_scaling_factor,
-                max_translation_offset=opt.max_translation_offset
             ),  # Forks into two versions: original and deformed
             ApplyToBoth(
                 transforms.Compose(
@@ -132,7 +130,15 @@ def train(opt: AEConfig):
         ]
     )
 
-    dataset = ShapesPartial(opt, transform=t)
+    DATASET = "/mnt/slow/shapenetcorev2-h5/shapenetcorev2_hdf5_2048/train/"
+    h5_files = glob(f"{DATASET}**/*.h5", recursive=True)
+    dataset = H5Dataset(
+        h5_files,
+        normalize=True,
+        include_label=False,
+        object_name=opt.category,
+        transform=t,
+    )
 
     print("Using regular DataLoader (no DistributedSampler).")
     train_sampler = None
@@ -234,20 +240,13 @@ def train(opt: AEConfig):
             data["deformed_shape"].view(data["orig_offset"].shape[0], -1, 3)
 
             deformed_matrix = data["deformed_transformation"].view(
-                data["orig_offset"].shape[0], -1, 4
+                data["orig_offset"].shape[0], -1, 3
             )
 
             kp_orig = code_.reshape(code.shape[0], -1, 3)
-            # extend to homogeneous form
-            homogeneous_kp = torch.cat(
-                [kp_orig, torch.ones(kp_orig.shape[0], kp_orig.shape[1], 1, device=kp_orig.device)], dim=-1
-            )  # (B, N, 3) -> (B, N, 4)
-            kp_transformed = torch.bmm(homogeneous_kp, deformed_matrix.transpose(1, 2))
-            # convert back
-            kp_transformed = kp_transformed[:, :, :3] / kp_transformed[:, :, 3:]
-            
             deformed_code, _, _ = net(get_network_data(data, "deformed"))
             kp_deformed = deformed_code.reshape(code.shape[0], -1, 3)
+            kp_transformed = torch.bmm(kp_orig, deformed_matrix.transpose(1, 2))
             mse_loss = torch.mean((kp_transformed - kp_deformed) ** 2)
 
             loss_ = (

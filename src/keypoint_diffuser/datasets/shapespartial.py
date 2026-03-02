@@ -14,7 +14,7 @@ import torch
 import csv
 import re
 
-from ..utils.utils import normalize_to_box_multi
+from ..utils.utils import normalize_to_box_multi, normalize_scale_min_max
 from ..utils.synset_utils import synsets_to_names
 
 class ShapesPartial(torch.utils.data.Dataset):
@@ -67,7 +67,7 @@ class ShapesPartial(torch.utils.data.Dataset):
     # }
     SYNSETOFFSET2CATEGORY = {v: k for k, v in CATEGORY2SYNSETOFFSET.items()}
 
-    PARTIALSAMPLEMODES = ['default', 'myopia', 'patch', 'tac', 'all', 'uniform']
+    PARTIALSAMPLEMODES = ['full', 'default', 'myopia', 'patch', 'tac', 'all', 'uniform']
     # PARTIALSAMPLEMODES = ['default', 'myopia', 'patch', 'all']
 
     @staticmethod
@@ -75,11 +75,26 @@ class ShapesPartial(torch.utils.data.Dataset):
         return parser
 
     def normalize(self, x, xp):
+        # xp is partial pc, need to normalize using same values as full pc x for consistency
         if self.opt.normalize == "unit_box":
+            # keeps spatial and geometric structure
             pc, pcp, center, scale = normalize_to_box_multi(x, xp)
+            norm_vals = (center, scale)
+        elif self.opt.normalize == "minmax_scaling":
+            # translate to zero mean before
+            x = x - x.mean(axis=0)
+            xp = xp - x.mean(axis=0)    # same mean as full pc to keep relative position consistent
+            # default normalization by original dataset
+            pc, dmin, dmax = normalize_scale_min_max(x)
+            pcp, _, _ = normalize_scale_min_max(xp, dmin, dmax)
+            norm_vals = (dmin, dmax)
+            # translate to zero mean after
+            # pc = pc - pc.mean(axis=0)
+            # pcp = pcp - pc.mean(axis=0)    # same mean as full pc to keep relative position consistent
         else:
             raise ValueError()
-        return pc, pcp, center, scale
+        
+        return pc, pcp, norm_vals
 
     def __init__(self, opt, transform=None):
         self.opt = opt
@@ -254,6 +269,12 @@ class ShapesPartial(torch.utils.data.Dataset):
                 path_root, 
                 f"coverage_{mode}.csv",
             )
+        elif mode == 'full':    # shouldn't really be here, hack case for now
+            partial_pc_path = os.path.join(
+                path_root, 
+                f"new_samples_{n}.npy",
+            )
+            partial_coverage_path = None
         else:
             partial_pc_path = os.path.join(
                 path_root, 
@@ -318,64 +339,69 @@ class ShapesPartial(torch.utils.data.Dataset):
         # print(f"point_cloud: {self._get_pointcloud_path(name, category)}")
         # print(f"partial_point_cloud: {self._get_partial_pointcloud_path(name, category)}")
         points = np.load(self._get_pointcloud_path(name, category))
-        points = self.random_downsample(points, 2048)
+        if self.opt.num_point < points.shape[0]:
+            points = self.random_downsample(points, self.opt.num_point)
         points = torch.from_numpy(points).float()
 
         # get partial point cloud
         partial_path, csv_path, n, mode_name = self._get_partial_pointcloud_path(name, category)
         partial = np.load(partial_path)
-        partial = self.random_downsample(partial, 2048)
+        if self.opt.num_point < points.shape[0]:
+            points = self.random_downsample(points, self.opt.num_point)
         partial = torch.from_numpy(partial).float()
 
         # get partial point cloud coverage fraction from metadata csv
-        with open(csv_path, newline="") as f:
-            # format and contents can differ between 'uniform' and other modes
-            reader = csv.DictReader(f)
-            coverage = None
-            radius = None
-            for row in reader:
-                c = row["coverage"]
-                # hack for crappy initial tac csv files
-                try:
-                    p = row["partial_pc_path"]
-                except KeyError:
-                    # 'uniform' mode case, the name of the model instance also needs to be matched
-                    p = row["model_id"]
+        if csv_path is not None:
+            with open(csv_path, newline="") as f:
+                # format and contents can differ between 'uniform' and other modes
+                reader = csv.DictReader(f)
+                coverage = None
+                radius = None
+                for row in reader:
+                    c = row["coverage"]
+                    # hack for crappy initial tac csv files
+                    try:
+                        p = row["partial_pc_path"]
+                    except KeyError:
+                        # 'uniform' mode case, the name of the model instance also needs to be matched
+                        p = row["model_id"]
+                        
+                    # loop until the correct name is found
+                    if name not in p:
+                        print(name)
+                        print(type(name))
+                        print(p)
+                        print(type(p))
+                        continue
                     
-                # loop until the correct name is found
-                if name not in p:
-                    print(name)
-                    print(type(name))
-                    print(p)
-                    print(type(p))
-                    input()
-                    continue
-                
-                try:
-                    r = row["radius"]   # this is the radius between points used to calculate coverage (not camera radius)
-                except KeyError:
-                    r = -1.0
-                    
-                # search for the matching sample index, either from the path or as a separate field
-                if len(p) == 1:   # it is sample_index
-                    if row["sample_index"] == n:
-                        coverage = float(c)
-                        radius = float(r)
-                        break
-                elif len(p) > 1:  # it is partial_pc_path
-                    m = re.search(r"_(\d+)\.npy$", p)
-                    if m and int(m.group(1)) == n:
-                        coverage = float(c)
-                        radius = float(r)
-                        break
-                else:
-                    raise RuntimeError("Unknown case for searching pattern")
-            # didn't find matching case by the end
-            if coverage is None or radius is None:
-                raise RuntimeError(f"failed to find matching coverage values for {partial_path} in {csv_path}")
+                    try:
+                        r = row["radius"]   # this is the radius between points used to calculate coverage (not camera radius)
+                    except KeyError:
+                        r = -1.0
+                        
+                    # search for the matching sample index, either from the path or as a separate field
+                    if len(p) == 1:   # it is sample_index
+                        if row["sample_index"] == n:
+                            coverage = float(c)
+                            radius = float(r)
+                            break
+                    elif len(p) > 1:  # it is partial_pc_path
+                        m = re.search(r"_(\d+)\.npy$", p)
+                        if m and int(m.group(1)) == n:
+                            coverage = float(c)
+                            radius = float(r)
+                            break
+                    else:
+                        raise RuntimeError("Unknown case for searching pattern")
+                # didn't find matching case by the end
+                if coverage is None or radius is None:
+                    raise RuntimeError(f"failed to find matching coverage values for {partial_path} in {csv_path}")
+        else:
+            coverage = 0    # hack case for mode 'full'
+            radius = 0
         
         # normalize point clouds
-        points[:, :3], partial[:, :3], center, scale = self.normalize(points[:, :3], partial[:, :3])
+        points[:, :3], partial[:, :3], norm_vals = self.normalize(points[:, :3], partial[:, :3])
         points = points.clone()
         partial = partial.clone()
 
@@ -386,7 +412,10 @@ class ShapesPartial(torch.utils.data.Dataset):
         partial_normals = partial[:, 3:6].clone()
         partial_label = partial[:, -1].clone()
         partial_shape = partial[:, :3].clone()
-
+        
+        norm_val_0 = float(norm_vals[0]) if len(norm_vals[0].shape) <= 1 else norm_vals[0]
+        norm_val_1 = float(norm_vals[1])
+        
         # build result dict
         result = {
             "shape": shape,
@@ -401,13 +430,15 @@ class ShapesPartial(torch.utils.data.Dataset):
             "category": category,
             "coverage": coverage,
             "radius": radius,
-            "centroid": center,
-            "scale": scale
+            "normalization": self.opt.normalize, 
+            "norm_val_0": norm_val_0, 
+            "norm_val_1": norm_val_1, 
         }
         if pc_path.is_file() and is_test:
             pc = np.load(pc_path)
-            pc = torch.from_numpy(self.random_downsample(pc, 5000))
-            pc[:, :3] = (pc[:, :3] - center) / scale
+            if self.opt.num_point < points.shape[0]:
+                points = self.random_downsample(points, self.opt.num_point)
+            pc, _, _ = self.normalize(pc, pc)
             result.update({"sampled_points": pc})
 
         return result
@@ -486,15 +517,15 @@ class ShapesPartial(torch.utils.data.Dataset):
                 sample = {
                     **sample,
                     **{
-                        f"orig_{key}": value#.cuda()
+                        f"orig_{key}": value.cuda()
                         for key, value in transformed.items()
                     },
                     **{
-                        f"deformed_{key}": value#.cuda()
+                        f"deformed_{key}": value.cuda()
                         for key, value in deformed.items()
                     },
                     **{
-                        f"partial_orig_{key}": value#.cuda()
+                        f"partial_orig_{key}": value.cuda()
                         for key, value in partial.items()
                     },
                     # **{

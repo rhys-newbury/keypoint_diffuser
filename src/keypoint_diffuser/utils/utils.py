@@ -31,7 +31,15 @@ def sample_farthest_points(points, num_samples, return_index=False):
         return sampled
 
 
-def normalize_to_box(inp):
+def normalize_scale_min_max(pc, dmin=None, dmax=None):
+    if dmin is None or dmax is None:
+        dmin = pc.min()
+        dmax = pc.max()
+    pc = (pc - dmin) / (dmax - dmin)
+    pc = 2.0 * (pc - 0.5)
+    return pc, dmin, dmax
+
+def normalize_to_box(inp, centroid=None, furthest_distance=None):
     """
     normalize point cloud to unit bounding box
     center = (max - min)/2
@@ -52,26 +60,31 @@ def normalize_to_box(inp):
     else:
         raise ValueError()
 
-    if isinstance(inp, np.ndarray):
-        maxP = np.amax(inp, axis=axis, keepdims=True)
-        minP = np.amin(inp, axis=axis, keepdims=True)
-        centroid = (maxP + minP) / 2
+    if centroid is not None and furthest_distance is not None:
         inp = inp - centroid
-        furthest_distance = np.amax(np.abs(inp), axis=(axis, -1), keepdims=True)
         inp = inp / furthest_distance
-    elif isinstance(inp, torch.Tensor):
-        maxP = torch.max(inp, dim=axis, keepdim=True)[0]
-        minP = torch.min(inp, dim=axis, keepdim=True)[0]
-        centroid = (maxP + minP) / 2
-        inp = inp - centroid
-        in_shape = [*list(inp.shape[:axis]), P * D]
-        furthest_distance = torch.max(
-            torch.abs(inp).reshape(in_shape), dim=axis, keepdim=True
-        )[0]
-        furthest_distance = furthest_distance.unsqueeze(-1)
-        inp = inp / furthest_distance
+        return inp, centroid, furthest_distance
     else:
-        raise ValueError()
+        if isinstance(inp, np.ndarray):
+            maxP = np.amax(inp, axis=axis, keepdims=True)
+            minP = np.amin(inp, axis=axis, keepdims=True)
+            centroid = (maxP + minP) / 2
+            inp = inp - centroid
+            furthest_distance = np.amax(np.abs(inp), axis=(axis, -1), keepdims=True)
+            inp = inp / furthest_distance
+        elif isinstance(inp, torch.Tensor):
+            maxP = torch.max(inp, dim=axis, keepdim=True)[0]
+            minP = torch.min(inp, dim=axis, keepdim=True)[0]
+            centroid = (maxP + minP) / 2
+            inp = inp - centroid
+            in_shape = [*list(inp.shape[:axis]), P * D]
+            furthest_distance = torch.max(
+                torch.abs(inp).reshape(in_shape), dim=axis, keepdim=True
+            )[0]
+            furthest_distance = furthest_distance.unsqueeze(-1)
+            inp = inp / furthest_distance
+        else:
+            raise ValueError()
 
     return inp, centroid, furthest_distance
 

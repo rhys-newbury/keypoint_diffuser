@@ -37,7 +37,7 @@ from keypoint_diffuser.datasets.shapespartial import ShapesPartial
 from keypoint_diffuser.options.ae_options import AEConfig, AEOptions
 from keypoint_diffuser.utils.eval_metrics import EMD_CD_recon
 from keypoint_diffuser.utils.pc_utils import collate_fn
-from keypoint_diffuser.utils.utils import normalize_to_box
+from keypoint_diffuser.utils.utils import normalize_to_box, normalize_scale_min_max
 from keypoint_diffuser.utils.transforms import (
     ApplyToBoth,
     Collect,
@@ -50,7 +50,7 @@ from torchvision import transforms
 
 
 TESTSET = "/mnt/slow/shapenetcorev2-h5/shapenetcorev2_hdf5_2048/test"
-PARTIAL_VIEW_MODES = ["default", "myopia", "patch", "tac"]
+PARTIAL_VIEW_MODES = ["default", "myopia", "patch", "tac", "uniform"]
 
 # ----------------------------
 # CLI
@@ -123,6 +123,7 @@ def build_argparser() -> argparse.ArgumentParser:
         try_add_arg(sp, "--key-points", type=int, default=10)
         try_add_arg(sp, "--output-dir", type=Path, default=Path("recons_out_new"))
         try_add_arg(sp, "--input-type", type=str, default="full", choices=["full", *PARTIAL_VIEW_MODES, "all"])
+        try_add_arg(sp, "--no-save", action="store_true", help="If set, do not save reconstructions to disk (only compute metrics)")
 
     return p
 
@@ -184,7 +185,7 @@ def bwd_alignment_scores_gtn(kpn_ds, gt_nkps, pred_nkps):
     
     return np.mean(q)
 
-def mIoU(kpn_ds, gt_nkps, pred_nkps, out_centroid, out_scale, pcd_path):
+def mIoU(kpn_ds, gt_nkps, pred_nkps, out_norm_val_0s, out_norm_val_1s, pcd_path):
     """
     calculates the mean Intersection over Union (mIoU) for the predicted keypoints against the ground truth keypoints.
     predicted keypoints are projected back on to the original cloud surface before distance calculation, to measure geometric alignment.
@@ -192,7 +193,7 @@ def mIoU(kpn_ds, gt_nkps, pred_nkps, out_centroid, out_scale, pcd_path):
     thresholds = np.linspace(0.0, 0.1)
     kps = []
     gts = []
-    for entry, ngt, npred, c, s in zip(kpn_ds, gt_nkps, pred_nkps, out_centroid, out_scale):
+    for entry, ngt, npred, n0, n1 in zip(kpn_ds, gt_nkps, pred_nkps, out_norm_val_0s, out_norm_val_1s):
         cid = entry["class_id"]
         mid = entry["model_id"]
         pc = torch.Tensor(naive_read_pcd(pcd_path / cid / f"{mid}.pcd"))
@@ -202,7 +203,7 @@ def mIoU(kpn_ds, gt_nkps, pred_nkps, out_centroid, out_scale, pcd_path):
         ground_truths = [pc[kp["pcd_info"]["point_index"]] for kp in entry["keypoints"]]
         gts.append(ground_truths)
 
-        npc, _, _ = normalize_to_box(pc, centroid=c, furthest_distance=s)
+        npc, _, _ = normalize_scale_min_max(pc, dmin=n0, dmax=n1)
 
         # for each pred kp, find the closest point in the point cloud
         dist = np.sqrt(
@@ -225,9 +226,9 @@ def mIoU(kpn_ds, gt_nkps, pred_nkps, out_centroid, out_scale, pcd_path):
             fn_sum += np.sum(np.min(dist, -2) > threshold)
         yield (npos - fn_sum) / (npos + fp_sum)
 
-def mIoU_curve_plot(kpn_ds, gt_nkps, pred_nkps, centroids, scales, pcd_path, out_root):
+def mIoU_curve_plot(kpn_ds, gt_nkps, pred_nkps, norm_val_0s, norm_val_1s, pcd_path, out_root):
     plt.style.use("seaborn")
-    miou_curve = list(mIoU(kpn_ds, gt_nkps, pred_nkps, centroids, scales, pcd_path))
+    miou_curve = list(mIoU(kpn_ds, gt_nkps, pred_nkps, norm_val_0s, norm_val_1s, pcd_path))
     plt.plot(np.linspace(0.0, 0.1), miou_curve)
     plt.title("mIoU Curve")
     plt.xlabel("Distance Threshold")
@@ -337,13 +338,15 @@ def make_loader(opt: argparse.Namespace) -> DataLoader:
         if cfg_kwargs.get("normalization") == "none":
             cfg_kwargs["normalization"] = None
 
-        # TODO hard coded: manually add values 
+        # hard coded: manually added values 
         cfg_kwargs["name"] = "recon"
         cfg_kwargs["split"] = "test"
         cfg_kwargs["mesh_dir"] = "/mnt/slow/shapenetcorev2-source/"
         cfg_kwargs["points_dir"] = "/mnt/slow/shapenetcorev2-source/"
-        cfg_kwargs["split_file"] = "./data/shapenet_split/splits_out.csv"
-        cfg_kwargs["n_partial_samples"] = 2
+        # cfg_kwargs["split_file"] = "./data/shapenet_split/splits_out.csv"
+        cfg_kwargs["split_file"] = "./data/shapenet_split/all.csv"
+        cfg_kwargs["n_partial_samples"] = 1
+        # cfg_kwargs["normalize"] = "minmax_scaling"
         # cfg_kwargs["phase"] = "test"
         # cfg_kwargs["ckpt_dir"] = "logs/original-50k-iters/"
         # cfg_kwargs["db"] = "airplane-10kpt-50k-iters-train-results.db"
@@ -364,12 +367,12 @@ def make_loader(opt: argparse.Namespace) -> DataLoader:
         drop_last=False,
     )
 
-def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output")):
+def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"), no_save=False):
     cds, emds = [], []
     recons, gts, inputs, names, psns = [], [], [], [], []
     kps, gt_kps = [], []
     kpn_ds_ordered = []
-    out_centroid, out_scale = [], []
+    out_norm_val_0, out_norm_val_1 = [], []
     kp_gt_exists = []
 
     model.model.eval()
@@ -407,8 +410,8 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
             kp_gt_exists_batch = [False]*B
             # loop to find the matching entries, can't think of a better way
             # the full kp list will be filled to calculate kp metrics together later
-            out_centroid.extend(batch['target_centroid'])
-            out_scale.extend(batch['target_scale'])
+            out_norm_val_0.extend(batch['target_norm_val_0'])
+            out_norm_val_1.extend(batch['target_norm_val_1'])
             for idx, (cid, mid) in enumerate(zip(cids, mids)):
                 for entry in kpn_ds:
                     # print(entry["model_id"], mid)
@@ -423,11 +426,10 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
                         # gt kp per entry
                         ground_truths = []
                         for kp in entry["keypoints"]:
-                            # normalize as well, using the to_box method
-                            center = batch['target_centroid'][idx]
-                            scale = batch['target_scale'][idx]
-                            nkp = torch.Tensor(kp["xyz"]) - center
-                            nkp = nkp / scale
+                            # normalize as well
+                            norm_val_0 = batch['target_norm_val_0'][idx]
+                            norm_val_1 = batch['target_norm_val_1'][idx]
+                            nkp, _, _ = normalize_scale_min_max(torch.Tensor(kp["xyz"]), dmin=norm_val_0, dmax=norm_val_1)
                             ground_truths.append(nkp.numpy())
                         
                         gt_kps.append(ground_truths)
@@ -461,13 +463,14 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
             cds.extend(list(cd_all))
             emds.extend(list(emd_all))
 
-            recons.extend(list(recon_batch.cpu().numpy()))
-            gts.extend(list(gt_batch.cpu().numpy()))
-            inputs.extend(list(input_batch.cpu().numpy()))
-            names.extend(name_batch)
-            psns.extend(psn_batch)
-            kp_batch = torch.reshape(kp_batch, (B, opt.key_points, 3))
-            kps.extend(list(kp_batch.cpu().numpy()))
+            if not no_save:
+                recons.extend(list(recon_batch.cpu().numpy()))
+                gts.extend(list(gt_batch.cpu().numpy()))
+                inputs.extend(list(input_batch.cpu().numpy()))
+                names.extend(name_batch)
+                psns.extend(psn_batch)
+                kp_batch = torch.reshape(kp_batch, (B, opt.key_points, 3))
+                kps.extend(list(kp_batch.cpu().numpy()))
             
             # for testing
             # if len(cds) >= 20:
@@ -482,12 +485,12 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
     assert len(kp_gt_exists) == len(kps)
     # use the bool list to pick out the batch instances that have gt information
     kps_filtered = np.array(kps)[kp_gt_exists]
-    out_centroid_filtered = torch.stack(out_centroid, dim=0)[kp_gt_exists].numpy()
-    out_scale_filtered = torch.stack(out_scale, dim=0)[kp_gt_exists].numpy()
+    out_norm_val_0_filtered = torch.stack(out_norm_val_0, dim=0)[kp_gt_exists].numpy()
+    out_norm_val_1_filtered = torch.stack(out_norm_val_1, dim=0)[kp_gt_exists].numpy()
     fwd = fwd_alignment_scores_gtn(kpn_ds_ordered, gt_kps, kps_filtered)
     bwd = bwd_alignment_scores_gtn(kpn_ds_ordered, gt_kps, kps_filtered)
     dual = (fwd + bwd) / 2.0
-    miou_at_01 = mIoU_curve_plot(kpn_ds, gt_kps, kps_filtered, out_centroid_filtered, out_scale_filtered, opt.pcd_path, out_root=out_dir)
+    miou_at_01 = mIoU_curve_plot(kpn_ds, gt_kps, kps_filtered, out_norm_val_0_filtered, out_norm_val_1_filtered, opt.pcd_path, out_root=out_dir)
 
     # extend gt_kps to match the full list length
     # each populated element in gt_kps_extended should be a np.ndarray of keypoints ()
@@ -497,11 +500,12 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
     # gt_kps_extended[kp_gt_exists] = gt_kps
     gt_kps_extended = [np.array(k) if m else None for k, m in zip(gt_kps, kp_gt_exists)]
 
-    save_recon_geoms(recons, gts, inputs, names, psns, kps, gt_kps_extended, cds, emds, opt, out_dir=out_dir)
+    if not no_save:
+        save_recon_geoms(recons, gts, inputs, names, psns, kps, gt_kps_extended, cds, emds, opt, out_dir=out_dir)
 
     cd_mean = np.mean(cds)
     emd_mean = np.mean(emds)
-    return cd_mean, emd_mean
+    return cd_mean, emd_mean, dual, miou_at_01
 
 
 # ----------------------------
@@ -566,22 +570,27 @@ def main():
     model.load_model(opt.ckpt, opt)
 
     if opt.input_type == "full":
-        opt.partial_view_mode = "default"   # hack, the partial pc will not be used
+        opt.partial_view_mode = "full"   # hack, the partial pc will not be used
     else:
         opt.partial_view_mode = opt.input_type
     
+    # TODO: maybe automate choosing between loaders (requires changes to other files)
     loader = make_loader(opt)
+    # loader = make_h5loader(opt)
 
     print(f"[✓] Running reconstruction evaluation for model={opt.model}, category={opt.category}")
     print(f"[✓] Output dir: {opt.output_dir}")
     opt.output_dir.mkdir(parents=True, exist_ok=True)
-    cd, emd = run_reconstruction(model, loader, opt, out_dir=opt.output_dir)
+    cd, emd, das, miou = run_reconstruction(model, loader, opt, out_dir=opt.output_dir, no_save=opt.no_save)
 
     print(f"Chamfer Distance (mean): {cd:.6f}")
     print(f"EMD (Sinkhorn)   (mean): {emd:.6f}")
+    print(f"Dual Alignment Score: {das:.6f}")
+    print(f"MIoU: {miou:.6f}")
 
-    run_id = save_run(opt.db_path, opt, cd, emd)
-    print(f"[✓] saved to {opt.db_path} (run_id={run_id})")
+    if not opt.no_save:
+        run_id = save_run(opt.db_path, opt, cd, emd)
+        print(f"[✓] saved to {opt.db_path} (run_id={run_id})")
 
 
 if __name__ == "__main__":

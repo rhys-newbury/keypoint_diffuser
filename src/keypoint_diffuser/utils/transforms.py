@@ -226,28 +226,37 @@ class Deform:
         max_twist_factor: float = 1.9,
         max_taper_factor: float = 1.6,
         max_rotation_angle: float = torch.pi / 6,  # 30 degrees max
+        max_scaling_factor: float = 1.5,
+        max_translation_offset: float = 0.5,
     ):
         self.max_stretch_factor = max_stretch_factor
         self.max_bending_factor = max_bending_factor
         self.max_twist_factor = max_twist_factor
         self.max_taper_factor = max_taper_factor
         self.max_rotation_angle = max_rotation_angle
+        self.max_scaling_factor = max_scaling_factor
+        self.max_translation_offset = max_translation_offset
 
     def __call__(self, data_dict):
         original = copy.deepcopy(data_dict)
 
         new_pc, transformation = apply_general_deformation(
+            # torch.Tensor(data_dict["coord"][None, :, :]).cuda(),
             torch.Tensor(data_dict["coord"][None, :, :]),
             max_stretch_factor=self.max_stretch_factor,
             max_bending_factor=self.max_bending_factor,
             max_twist_factor=self.max_twist_factor,
             max_taper_factor=self.max_taper_factor,
             max_rotation_angle=self.max_rotation_angle,
+            max_scaling_factor=self.max_scaling_factor,
+            max_translation_offset=self.max_translation_offset,
             apply_stretch=True,
             apply_bend=True,
             apply_twist=True,
             apply_taper=True,
             apply_rotation=True,
+            apply_scaling=True,
+            apply_translation=True,
         )
 
         data_dict["shape"] = new_pc.cpu().numpy().squeeze()

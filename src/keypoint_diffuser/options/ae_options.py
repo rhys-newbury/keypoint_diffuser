@@ -79,7 +79,7 @@ class AEConfig:
     split: str = None
     fixed_source_index: int = None
     fixed_target_index: int = None
-    normalize: str = "unit_box"
+    normalize: str = "minmax_scaling"   # "unit_box"
     multiply: int = 1
     load_cages_test_pairs: bool = False
     load_test_pairs: bool = False
@@ -102,6 +102,8 @@ class AEConfig:
     max_twist_factor: float = 0.7
     max_taper_factor: float = 0.35
     max_rotation_angle: float = np.pi / 3
+    max_scaling_factor: float = 2.0
+    max_translation_offset: float = 0.3
 
 
 class AEOptions:

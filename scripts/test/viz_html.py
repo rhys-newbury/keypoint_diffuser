@@ -24,7 +24,7 @@ def load_sample_dirs(root_pattern: Path):
         and (d / "recon.npy").exists()
         and (d / "gt.npy").exists()
         and (d / "pred_kp.npy").exists()
-        and (d / "input.npy").exists()
+        # and (d / "input.npy").exists()
     ]
 
 
@@ -169,7 +169,10 @@ def plot_recon_collage_interactive(
     for idx, root in enumerate(dirs):
         recon = np.load(root / "recon.npy")
         gt = np.load(root / "gt.npy")
-        inp = np.load(root / "input.npy")
+        try:
+            inp = np.load(root / "input.npy")
+        except Exception:
+            inp = None
         kp = np.load(root / "pred_kp.npy")
         if 3 not in kp.shape:
             kp = kp.reshape(-1, 3)
@@ -208,29 +211,33 @@ def plot_recon_collage_interactive(
             parts.append(f"EMD={meta['emd']:.4e}")
 
         # Try read DAS/mIoU from meta; if missing, compute on the fly (per-sample)
-        das_val = meta.get("das", None)
-        miou_val = meta.get("miou_at_0_1", None)
+        # ** Since DAS should be calculated with pairs of point clouds it doesn't really make sense to compute it here individually **
+        # das_val = meta.get("das", None)
+        # miou_val = meta.get("miou_at_0_1", None)
 
-        if das_val is None and gt_kp is not None:
-            try:
-                das_val = compute_dual_alignment_score(kp, gt_kp)
-            except Exception:
-                das_val = None
-        if miou_val is None and gt_kp is not None:
-            try:
-                miou_val = compute_miou_at_threshold(kp, gt_kp, thr=0.1)
-            except Exception:
-                miou_val = None
+        # if das_val is None and gt_kp is not None:
+        #     try:
+        #         das_val = compute_dual_alignment_score(kp, gt_kp)
+        #     except Exception:
+        #         das_val = None
+        # if miou_val is None and gt_kp is not None:
+        #     try:
+        #         miou_val = compute_miou_at_threshold(kp, gt_kp, thr=0.1)
+        #     except Exception:
+        #         miou_val = None
 
-        if das_val is not None:
-            parts.append(f"DAS~={float(das_val):.3f}")
-        if miou_val is not None:
-            parts.append(f"mIoU@0.1~={float(miou_val):.3f}")
+        # if das_val is not None:
+        #     parts.append(f"DAS~={float(das_val):.3f}")
+        # if miou_val is not None:
+        #     parts.append(f"mIoU@0.1~={float(miou_val):.3f}")
 
         title = "  |  ".join(parts)
 
         # 5 traces per sample: GT cloud, Recon cloud, Input cloud, Pred KPs, GT KPs
-        traces_per_sample = 5
+        if inp is not None:
+            traces_per_sample = 5
+        else:
+            traces_per_sample = 4
         visible = [False] * (traces_per_sample * len(dirs))
 
         # Ground-Truth cloud
@@ -256,15 +263,16 @@ def plot_recon_collage_interactive(
         )
 
         # Input point cloud
-        fig.add_trace(
-            go.Scatter3d(
-                x=inp[:, 0], y=inp[:, 1], z=inp[:, 2],
-                mode="markers",
-                marker={"size": 2, "color": input_color, "opacity": 1.0},
-                name="Input",
-                visible=(idx == 0),
+        if inp is not None:
+            fig.add_trace(
+                go.Scatter3d(
+                    x=inp[:, 0], y=inp[:, 1], z=inp[:, 2],
+                    mode="markers",
+                    marker={"size": 2, "color": input_color, "opacity": 1.0},
+                    name="Input",
+                    visible=(idx == 0),
+                )
             )
-        )
 
         # Predicted keypoints
         fig.add_trace(
@@ -356,33 +364,38 @@ def plot_recon_collage_interactive(
     print(f"[✓] Saved interactive HTML to {out_path}")
 
 
-def simple_plot(points_list: list[np.ndarray], out_html: Path):
+def simple_plot(points_list: list[np.ndarray], name_list, out_html: Path, write=False):
     import plotly.graph_objects as go
     fig = go.Figure()
     
     traces = len(points_list)
     visible = [False] * (traces)
     
-    for points in points_list:
+    for points, name in zip(points_list, name_list):
         shape = points.shape
+        # assume it is object point cloud if a lot of points
         if np.max(shape) > 1000:
             # randomise color for each point cloud
-            marker = {"size": 2, "opacity": 1.0, "color": np.random.randint(0, 255, size=3)}
+            marker = {"size": 2, "opacity": 1.0}
+        # else assume it is keypoints
         else:
-            marker = {"size": 6, "opacity": 1.0, "color": np.random.randint(0, 255, size=3), "symbol": "diamond", "line": {"width": 1, "color": "black"}}
+            marker = {"size": 3, "opacity": 1.0, "color": np.random.randint(0, 255, size=3), "symbol": "diamond", "line": {"width": 2, "color": "black"}}
             
         fig.add_trace(
             go.Scatter3d(
                 x=points[:, 0], y=points[:, 1], z=points[:, 2],
                 mode="markers",
-                marker={"size": 2, "opacity": 1.0},
-                name=f"Trace {len(fig.data)+1}",
+                marker=marker,
+                name=name,
             )
         )
     
-    out_html.parent.mkdir(parents=True, exist_ok=True)
-    fig.write_html(out_html, include_plotlyjs=True, full_html=True)
-    print(f"[✓] Saved interactive HTML to {out_path}")
+    if write:
+        out_html.parent.mkdir(parents=True, exist_ok=True)
+        fig.write_html(out_html, include_plotlyjs=True, full_html=True)
+        print(f"[✓] Saved interactive HTML to {out_html}")
+    else:
+        return fig  # return for customization of layout or other features
     
 
 if __name__ == "__main__":
