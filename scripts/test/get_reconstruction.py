@@ -124,6 +124,7 @@ def build_argparser() -> argparse.ArgumentParser:
         try_add_arg(sp, "--output-dir", type=Path, default=Path("recons_out_new"))
         try_add_arg(sp, "--input-type", type=str, default="full", choices=["full", *PARTIAL_VIEW_MODES, "all"])
         try_add_arg(sp, "--no-save", action="store_true", help="If set, do not save reconstructions to disk (only compute metrics)")
+        try_add_arg(sp, "--gt-kp-src", type=Path, default=None, help="Where to get the gt kps for das calculation. Loads human annotations if None")
 
     return p
 
@@ -291,14 +292,25 @@ def make_loader(opt: argparse.Namespace) -> DataLoader:
                     [
                         GridSample(
                             keys=("coord",),
+                            coord_key="coord",
                             hash_type="fnv",
                             mode="train",
                             return_grid_coord=True,
                         ),
+                        GridSample(
+                            keys=("partial_coord",), 
+                            coord_key="partial_coord", 
+                            prefix="partial_", # prevents overwriting
+                            hash_type="fnv",
+                            mode="train",
+                            return_grid_coord=True 
+                        ),
                         ToTensor(),
                         Collect(
-                            keys=("coord", "grid_coord", "transformation", "shape"),
+                            keys=("coord", "grid_coord", "transformation", "shape", 
+                                  "partial_coord", "partial_grid_coord", "partial_shape"),
                             feat_keys=("coord",),
+                            partial_feat_keys=("partial_coord",),
                         ),
                     ]
                 )
@@ -343,10 +355,10 @@ def make_loader(opt: argparse.Namespace) -> DataLoader:
         cfg_kwargs["split"] = "test"
         cfg_kwargs["mesh_dir"] = "/mnt/slow/shapenetcorev2-source/"
         cfg_kwargs["points_dir"] = "/mnt/slow/shapenetcorev2-source/"
-        # cfg_kwargs["split_file"] = "./data/shapenet_split/splits_out.csv"
-        cfg_kwargs["split_file"] = "./data/shapenet_split/all.csv"
+        cfg_kwargs["split_file"] = "./data/shapenet_split/splits_out.csv"
+        # cfg_kwargs["split_file"] = "./data/shapenet_split/all.csv"
         cfg_kwargs["n_partial_samples"] = 1
-        # cfg_kwargs["normalize"] = "minmax_scaling"
+        cfg_kwargs["normalize"] = "minmax_scaling"
         # cfg_kwargs["phase"] = "test"
         # cfg_kwargs["ckpt_dir"] = "logs/original-50k-iters/"
         # cfg_kwargs["db"] = "airplane-10kpt-50k-iters-train-results.db"
@@ -383,7 +395,7 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
             if opt.input_type == "full":
                 key = "orig"
             else:
-                key = "partial_orig"
+                key = "orig_partial"
             
             if opt.model == "Ours" or opt.model == "Partial":
                 recon_batch, input_pc, full_pc, kp_batch = model.get_reconstruction(batch, key=key)
@@ -399,6 +411,30 @@ def run_reconstruction(model, loader, opt=None, save=True, out_dir=Path("output"
             recon_batch = recon_batch.squeeze(1)    # [B, 1, 2048, 3] to [B, 2048, 3]
 
             # ---------------- load gt keypoints ----------------
+            if opt.gt_kp_src is not None:
+                # try to match the original way done with the json file
+                # which is to build up a the list gt_kps by appending to it normalized kps
+                # where each kp is a [3, N] numpy array    *check
+                # the src should be the recon_out output dir of an existing reconstruction, using the original paradigm
+                # when testing on the sampled data, the generated kps are under something like:
+                # whatever_dir/epoch_N/Ours/CATEGORY/OBJECT_ID/gt_kp.npy
+                # TODO: if want to use that generated from h5 data, the object id is not contained in the outputs, need to change
+                
+                kp_gt_exists_batch = [True]*B
+                for idx, mid in enumerate(name_batch):
+                    # load kp
+                    gt_kp_file = opt.gt_kp_src / f"{mid}/gt_kp.npy"
+                    if not gt_kp_file.exists():
+                        kp_gt_exists_batch[idx] = False
+                        continue
+                    kp = np.load(gt_kp_file)
+                    # normalize
+                    norm_val_0 = batch['target_norm_val_0'][idx]
+                    norm_val_1 = batch['target_norm_val_1'][idx]
+                    nkp, _, _ = normalize_scale_min_max(torch.Tensor(kp["xyz"]), dmin=norm_val_0, dmax=norm_val_1)
+                    gt_kps.append(nkp.numpy())
+                
+                
             # load the kp annotation file
             annotation_json = Path(f"/mnt/slow/shapenetcorev2-h5/annotations/{batch['target_cat'][0]}.json")
             # build up input list of dicts

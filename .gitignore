@@ -33,3 +33,5 @@ scripts/train/wandb
 *.csv
 *.html
 configs/*/
+shapenetcorev2-source
+real_data

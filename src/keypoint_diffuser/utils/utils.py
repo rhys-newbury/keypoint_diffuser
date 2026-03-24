@@ -32,6 +32,11 @@ def sample_farthest_points(points, num_samples, return_index=False):
 
 
 def normalize_scale_min_max(pc, dmin=None, dmax=None):
+    """
+    normalize point cloud to [-1, 1] range,
+    based on the largest coordinate range across all dimensions,
+    regardless of the location of the point cloud mean or centroid
+    """
     if dmin is None or dmax is None:
         dmin = pc.min()
         dmax = pc.max()
@@ -99,7 +104,7 @@ def normalize_to_box_multi(inp, pinp):
 
     From https://github.com/yifita/pytorch_points
     """
-    assert pinp.shape == inp.shape
+    assert len(pinp.shape) == len(inp.shape)
     if len(inp.shape) == 2:
         axis = 0
         P = inp.shape[0]

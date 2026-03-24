@@ -14,6 +14,8 @@ class GridSample:
         hash_type="fnv",
         mode="train",
         keys=("coord", "color", "normal", "segment"),
+        coord_key="coord",
+        prefix="",
         return_inverse=False,
         return_grid_coord=False,
         return_min_coord=False,
@@ -25,6 +27,8 @@ class GridSample:
         assert mode in ["train", "test"]
         self.mode = mode
         self.keys = keys
+        self.coord_key = coord_key
+        self.prefix = prefix
         self.return_inverse = return_inverse
         self.return_grid_coord = return_grid_coord
         self.return_min_coord = return_min_coord
@@ -32,8 +36,8 @@ class GridSample:
         self.project_displacement = project_displacement
 
     def __call__(self, data_dict):
-        assert "coord" in data_dict
-        scaled_coord = data_dict["coord"] / np.array(self.grid_size)
+        assert self.coord_key in data_dict
+        scaled_coord = data_dict[self.coord_key] / np.array(self.grid_size)
         grid_coord = np.floor(scaled_coord).astype(int)
         min_coord = grid_coord.min(0)
         grid_coord -= min_coord
@@ -49,30 +53,34 @@ class GridSample:
                 + np.random.randint(0, count.max(), count.size) % count
             )
             idx_unique = idx_sort[idx_select]
-            if "sampled_index" in data_dict:
-                # for ScanNet data efficient, we need to make sure labeled point is sampled.
+            if f"{self.prefix}sampled_index" in data_dict:
                 idx_unique = np.unique(
-                    np.append(idx_unique, data_dict["sampled_index"])
+                    np.append(idx_unique, data_dict[f"{self.prefix}sampled_index"])
                 )
-                mask = np.zeros_like(data_dict["segment"]).astype(bool)
-                mask[data_dict["sampled_index"]] = True
-                data_dict["sampled_index"] = np.where(mask[idx_unique])[0]
+                mask = np.zeros_like(data_dict[f"{self.prefix}segment"]).astype(bool)
+                mask[data_dict[f"{self.prefix}sampled_index"]] = True
+                data_dict[f"{self.prefix}sampled_index"] = np.where(mask[idx_unique])[0]
+                
             if self.return_inverse:
-                data_dict["inverse"] = np.zeros_like(inverse)
-                data_dict["inverse"][idx_sort] = inverse
+                data_dict[f"{self.prefix}inverse"] = np.zeros_like(inverse)
+                data_dict[f"{self.prefix}inverse"][idx_sort] = inverse
+                
             if self.return_grid_coord:
-                data_dict["grid_coord"] = grid_coord[idx_unique]
+                data_dict[f"{self.prefix}grid_coord"] = grid_coord[idx_unique]
+                
             if self.return_min_coord:
-                data_dict["min_coord"] = min_coord.reshape([1, 3])
+                data_dict[f"{self.prefix}min_coord"] = min_coord.reshape([1, 3])
+                
             if self.return_displacement:
                 displacement = (
                     scaled_coord - grid_coord - 0.5
                 )  # [0, 1] -> [-0.5, 0.5] displacement to center
                 if self.project_displacement:
                     displacement = np.sum(
-                        displacement * data_dict["normal"], axis=-1, keepdims=True
+                        displacement * data_dict[f"{self.prefix}normal"], axis=-1, keepdims=True
                     )
-                data_dict["displacement"] = displacement[idx_unique]
+                data_dict[f"{self.prefix}displacement"] = displacement[idx_unique]
+                
             for key in self.keys:
                 data_dict[key] = data_dict[key][idx_unique]
             return data_dict
@@ -82,23 +90,31 @@ class GridSample:
             for i in range(count.max()):
                 idx_select = np.cumsum(np.insert(count, 0, 0)[0:-1]) + i % count
                 idx_part = idx_sort[idx_select]
-                data_part = {"index": idx_part}
+                
+                # Apply prefix to index
+                data_part = {f"{self.prefix}index": idx_part}
+                
                 if self.return_inverse:
-                    data_dict["inverse"] = np.zeros_like(inverse)
-                    data_dict["inverse"][idx_sort] = inverse
+                    data_dict[f"{self.prefix}inverse"] = np.zeros_like(inverse)
+                    data_dict[f"{self.prefix}inverse"][idx_sort] = inverse
+                    
                 if self.return_grid_coord:
-                    data_part["grid_coord"] = grid_coord[idx_part]
+                    data_part[f"{self.prefix}grid_coord"] = grid_coord[idx_part]
+                    
                 if self.return_min_coord:
-                    data_part["min_coord"] = min_coord.reshape([1, 3])
+                    data_part[f"{self.prefix}min_coord"] = min_coord.reshape([1, 3])
+                    
                 if self.return_displacement:
                     displacement = (
                         scaled_coord - grid_coord - 0.5
                     )  # [0, 1] -> [-0.5, 0.5] displacement to center
                     if self.project_displacement:
                         displacement = np.sum(
-                            displacement * data_dict["normal"], axis=-1, keepdims=True
+                            displacement * data_dict[f"{self.prefix}normal"], axis=-1, keepdims=True
                         )
-                    data_dict["displacement"] = displacement[idx_part]
+                    # Fixed original bug: assigned to data_part instead of data_dict
+                    data_part[f"{self.prefix}displacement"] = displacement[idx_part]
+                    
                 for key in data_dict:
                     if key in self.keys:
                         data_part[key] = data_dict[key][idx_part]
@@ -185,7 +201,8 @@ class Collect:
         e.g. Collect(keys=[coord], feat_keys=[coord, color])
         """
         if offset_keys_dict is None:
-            offset_keys_dict = {"offset": "coord"}
+            offset_keys_dict = {"offset": "coord",
+                                "partial_offset": "partial_coord"}
         self.keys = keys
         self.offset_keys = offset_keys_dict
         self.kwargs = kwargs
@@ -258,42 +275,73 @@ class Deform:
             apply_scaling=True,
             apply_translation=True,
         )
+        
+        # apply transformation manually to partial point cloud
+        pcp = torch.Tensor(data_dict["partial_coord"][None, :, :])
+        hompcp = torch.cat([pcp, torch.ones(pcp.shape[0], pcp.shape[1], 1, device=pcp.device)], dim=-1)
+        defpcp = torch.bmm(hompcp, transformation.transpose(1, 2))
+        new_pcp = defpcp[:, :, :3] / defpcp[:, :, 3:]
 
         data_dict["shape"] = new_pc.cpu().numpy().squeeze()
         data_dict["coord"] = new_pc.cpu().numpy().squeeze()
+        data_dict["partial_shape"] = new_pcp.cpu().numpy().squeeze()
+        data_dict["partial_coord"] = new_pcp.cpu().numpy().squeeze()
         data_dict["transformation"] = transformation.cpu().numpy().squeeze()
 
         return original, data_dict
 
-# class ApplyToAll:
-#     def __init__(self, transform):
-#         """Applies the same transformation to both versions"""
-#         self.transform = transform
-
-#     def __call__(self, samples):
-#         original, partial, deformed = samples
-#         return self.transform(original), self.transform(partial), self.transform(deformed)
-
 
 # class DeformWithPartial:
-#     # def __call__(self, data_dict, partial_data_dict):
-#     def __call__(self, full_data_dict):
-#         data_dict = {"coord": full_data_dict["target_shape"].cpu().numpy()}
-#         partial_data_dict = {"coord": full_data_dict["target_partial_shape"].cpu().numpy()}
+#     def __init__(
+#         self,
+#         max_stretch_factor: float = 2.2,
+#         max_bending_factor: float = 1.8,
+#         max_twist_factor: float = 1.9,
+#         max_taper_factor: float = 1.6,
+#         max_rotation_angle: float = torch.pi / 6,  # 30 degrees max
+#         max_scaling_factor: float = 1.5,
+#         max_translation_offset: float = 0.5,
+#     ):
+#         self.max_stretch_factor = max_stretch_factor
+#         self.max_bending_factor = max_bending_factor
+#         self.max_twist_factor = max_twist_factor
+#         self.max_taper_factor = max_taper_factor
+#         self.max_rotation_angle = max_rotation_angle
+#         self.max_scaling_factor = max_scaling_factor
+#         self.max_translation_offset = max_translation_offset
+    
+#     def __call__(self, data_dict):
 #         original = copy.deepcopy(data_dict)
-#         partial = copy.deepcopy(partial_data_dict)
 
+#         # apply transformation to full point cloud
 #         new_pc, transformation = apply_general_deformation(
-#             torch.Tensor(data_dict["coord"][None, :, :]).cuda(),
+#             torch.Tensor(data_dict["coord"][None, :, :]),
+#             max_stretch_factor=self.max_stretch_factor,
+#             max_bending_factor=self.max_bending_factor,
+#             max_twist_factor=self.max_twist_factor,
+#             max_taper_factor=self.max_taper_factor,
+#             max_rotation_angle=self.max_rotation_angle,
+#             max_scaling_factor=self.max_scaling_factor,
+#             max_translation_offset=self.max_translation_offset,
 #             apply_stretch=True,
 #             apply_bend=True,
 #             apply_twist=True,
 #             apply_taper=True,
-#             apply_noise=False,
+#             apply_rotation=True,
+#             apply_scaling=True,
+#             apply_translation=True,
 #         )
+#         # apply transformation manually to partial point cloud
+#         import pdb; pdb.set_trace()
+#         pcp = torch.Tensor(data_dict["partial_coord"][None, :, :])
+#         hompcp = torch.cat([pcp, torch.ones(pcp.shape[0], pcp.shape[1], 1, device=pcp.device)], dim=-1)
+#         defpcp = torch.bmm(hompcp, transformation.transpose(1, 2))
+#         new_pcp = defpcp[:, :, :3] / defpcp[:, :, 3:]
 
 #         data_dict["shape"] = new_pc.cpu().numpy().squeeze()
 #         data_dict["coord"] = new_pc.cpu().numpy().squeeze()
+#         data_dict["partial_shape"] = new_pcp.cpu().numpy().squeeze()
+#         data_dict["partial_coord"] = new_pcp.cpu().numpy().squeeze()
 #         data_dict["transformation"] = transformation.cpu().numpy().squeeze()
 
-#         return original, partial, data_dict
+#         return original, data_dict

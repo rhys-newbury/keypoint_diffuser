@@ -29,17 +29,18 @@ class Ours(TestBase):
         # key is the subset 
         # original keys were (orig, deformed)
         # add new with (orig, deformed, partial_orig, partial_deformed)
-        opplist = ("orig", "deformed", "partial_orig", "partial_deformed")
+        opplist = ("orig", "deformed", "orig_partial", "deformed_partial")
         opp = tuple(o for o in opplist if o != key)
 
         d = {}
         for k, v in data.items():
-            # skips if it belongs to another subset
-            if k.startswith(opp):
-                continue
             # subset specific data, keep and remove subset prefix str
-            elif k.startswith(key):
+            # need to check for this first since orig_partial also starts with orig
+            if k.startswith(key):
                 d[k[len(key) + 1 :]] = v.cuda()
+            # skips if it belongs to another subset
+            elif k.startswith(opp):
+                continue
             # shared data, keep
             elif type(v) == list:
                 d[k] = v
@@ -65,10 +66,11 @@ class Ours(TestBase):
         z0 = z0.reshape(z0.shape[0], -1)
         z_full = torch.cat([z0, z_aux], dim=1)
 
+        # always gets undeformed inputs
         if key=="orig":
             input_pc = data["target_shape"].reshape(z0.shape[0], -1, 3).cuda()
             full_pc = data["target_shape"].reshape(z0.shape[0], -1, 3).cuda()
-        elif key == "partial_orig":
+        elif key == "orig_partial":
             input_pc = data["target_partial_shape"].reshape(z0.shape[0], -1, 3).cuda()
             full_pc = data["target_shape"].reshape(z0.shape[0], -1, 3).cuda()
 

@@ -82,8 +82,9 @@ class ShapesPartial(torch.utils.data.Dataset):
             norm_vals = (center, scale)
         elif self.opt.normalize == "minmax_scaling":
             # translate to zero mean before
-            x = x - x.mean(axis=0)
-            xp = xp - x.mean(axis=0)    # same mean as full pc to keep relative position consistent
+            mean_shift = x.mean(axis=0)
+            x = x - mean_shift
+            xp = xp - mean_shift    # same mean as full pc to keep relative position consistent
             # default normalization by original dataset
             pc, dmin, dmax = normalize_scale_min_max(x)
             pcp, _, _ = normalize_scale_min_max(xp, dmin, dmax)
@@ -223,7 +224,8 @@ class ShapesPartial(torch.utils.data.Dataset):
             (str(category).zfill(8) if category is not None else self.opt.category),
             name,
             "models",
-            f"new_samples_{random.randint(0, 4)}.npy",
+            # f"new_samples_{random.randint(0, 4)}.npy",
+            f"surface_samples_2048.npy",
         )
         for _ in range(20):
         # while not Path(pth).is_file():
@@ -232,7 +234,8 @@ class ShapesPartial(torch.utils.data.Dataset):
                 (str(category).zfill(8) if category is not None else self.opt.category),
                 name,
                 "models",
-                f"new_samples_{random.randint(0, 4)}.npy",
+                # f"new_samples_{random.randint(0, 4)}.npy",
+                f"surface_samples_2048.npy",
             )
             if Path(pth).is_file():
                 return pth
@@ -272,7 +275,8 @@ class ShapesPartial(torch.utils.data.Dataset):
         elif mode == 'full':    # shouldn't really be here, hack case for now
             partial_pc_path = os.path.join(
                 path_root, 
-                f"new_samples_{n}.npy",
+                f"surface_samples_2048.npy",
+                # f"new_samples_{n}.npy",
             )
             partial_coverage_path = None
         else:
@@ -311,7 +315,8 @@ class ShapesPartial(torch.utils.data.Dataset):
 
     def random_downsample(self, point_cloud, target_num_points):
         """
-        Randomly downsamples a point cloud to the target number of points.
+        Downsamples a point cloud to the target number of points using 
+        Farthest Point Sampling (FPS) for even spatial distribution.
 
         Args:
             point_cloud (ndarray): The input point cloud of shape (N, 3).
@@ -320,12 +325,35 @@ class ShapesPartial(torch.utils.data.Dataset):
         Returns:
             downsampled_point_cloud: The downsampled point cloud of shape (target_num_points, 3).
         """
-        if point_cloud.shape[0] <= target_num_points:
+        N = point_cloud.shape[0]
+        if N <= target_num_points:
             return point_cloud  # Return original if already small enough
-        indices = np.random.choice(
-            point_cloud.shape[0], target_num_points, replace=False
-        )
-        return point_cloud[indices]
+
+        # Initialize array to hold the indices of the selected points
+        farthest_indices = np.zeros(target_num_points, dtype=int)
+
+        # Array to keep track of the shortest distance from every point 
+        # to the currently selected set of points. Initialize with infinity.
+        distances = np.full(N, np.inf)
+
+        # Select a random initial point to start the process
+        farthest_indices[0] = np.random.randint(0, N)
+
+        for i in range(1, target_num_points):
+            # Get the coordinates of the last added point
+            last_added_point = point_cloud[farthest_indices[i - 1]]
+
+            # Calculate squared distances from the last added point to all other points
+            # (Skipping the square root for performance, as we only need relative distances)
+            dist_to_last = np.sum((point_cloud - last_added_point) ** 2, axis=1)
+
+            # Update the minimum distance to the selected set for each point
+            distances = np.minimum(distances, dist_to_last)
+
+            # The next selected point is the one with the maximum minimum-distance
+            farthest_indices[i] = np.argmax(distances)
+
+        return point_cloud[farthest_indices]
 
     def get_item_by_name(
         self, name, category, is_test, sample_mesh=False, load_mesh=False
@@ -434,12 +462,12 @@ class ShapesPartial(torch.utils.data.Dataset):
             "norm_val_0": norm_val_0, 
             "norm_val_1": norm_val_1, 
         }
-        if pc_path.is_file() and is_test:
-            pc = np.load(pc_path)
-            if self.opt.num_point < points.shape[0]:
-                points = self.random_downsample(points, self.opt.num_point)
-            pc, _, _ = self.normalize(pc, pc)
-            result.update({"sampled_points": pc})
+        # if pc_path.is_file() and is_test:
+        #     pc = np.load(pc_path)
+        #     if self.opt.num_point < points.shape[0]:
+        #         points = self.random_downsample(points, self.opt.num_point)
+        #     pc, _, _ = self.normalize(pc, pc)
+        #     result.update({"sampled_points": pc})
 
         return result
 
@@ -501,7 +529,8 @@ class ShapesPartial(torch.utils.data.Dataset):
             if self.transform:
                 # original deformation transform
                 transformed, deformed = self.transform(
-                    {"coord": sample["target_shape"].cpu().numpy()}
+                    {"coord": sample["target_shape"].cpu().numpy(),
+                     "partial_coord": sample["target_partial_shape"].cpu().numpy()}
                 )  # Apply transform
                 
                 # unused alt transform function
@@ -510,10 +539,9 @@ class ShapesPartial(torch.utils.data.Dataset):
                 # )  # Apply transform
                 
                 # also transform partial view point cloud
-                partial, _ = self.transform(
-                    {"coord": sample["target_partial_shape"].cpu().numpy()}
-                )
-                
+                # partial, partial_deformed = self.transform(
+                #     {"coord": sample["target_partial_shape"].cpu().numpy()}
+                # )
                 sample = {
                     **sample,
                     **{
@@ -524,10 +552,10 @@ class ShapesPartial(torch.utils.data.Dataset):
                         f"deformed_{key}": value.cuda()
                         for key, value in deformed.items()
                     },
-                    **{
-                        f"partial_orig_{key}": value.cuda()
-                        for key, value in partial.items()
-                    },
+                    # **{
+                    #     f"partial_orig_{key}": value.cuda()
+                    #     for key, value in partial.items()
+                    # },
                     # **{
                     #     f"partial_deformed_{key}": value.cuda()
                     #     for key, value in partial_deformed.items()
