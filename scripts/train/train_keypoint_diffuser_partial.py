@@ -88,17 +88,17 @@ def get_network_data(data: dict[str, Any], key="orig"):
     # key is the subset 
     # original keys were (orig, deformed)
     # add new with (orig, deformed, partial_orig, partial_deformed)
-    opplist = ("orig", "deformed", "partial_orig", "partial_deformed")
+    opplist = ("orig", "deformed", "orig_partial", "deformed_partial")
     opp = tuple(o for o in opplist if o != key)
 
     d = {}
     for k, v in data.items():
-        # skips if it belongs to another subset
-        if k.startswith(opp):
-            continue
         # subset specific data, keep and remove subset prefix str
-        elif k.startswith(key):
+        if k.startswith(key):
             d[k[len(key) + 1 :]] = v.cuda()
+        # skips if it belongs to another subset
+        elif k.startswith(opp):
+            continue
         # shared data, keep
         elif type(v) == list:
             d[k] = v
@@ -109,9 +109,9 @@ def get_network_data(data: dict[str, Any], key="orig"):
 
 def train(opt: AEConfig):
     ckpt_dir = opt.ckpt_dir / wandb.run.name
-    ckpt_dir.mkdir()
-    opt.db.parent.mkdir(exist_ok=True)
-    save_train_run(opt.db, "Partial", opt.category, ckpt_dir, opt.key_points)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    opt.db.parent.mkdir(parents=True, exist_ok=True)
+    save_train_run(opt.db, "Ours", opt.category, ckpt_dir, opt.key_points)
 
     t = transforms.Compose(
         [
@@ -121,20 +121,33 @@ def train(opt: AEConfig):
                 max_twist_factor=opt.max_twist_factor,
                 max_taper_factor=opt.max_taper_factor,
                 max_rotation_angle=opt.max_rotation_angle,
+                max_scaling_factor=opt.max_scaling_factor,
+                max_translation_offset=opt.max_translation_offset
             ),  # Forks into two versions: original and deformed
             ApplyToBoth(
                 transforms.Compose(
                     [
                         GridSample(
                             keys=("coord",),
+                            coord_key="coord",
                             hash_type="fnv",
                             mode="train",
                             return_grid_coord=True,
                         ),
+                        GridSample(
+                            keys=("partial_coord",), 
+                            coord_key="partial_coord", 
+                            prefix="partial_", # prevents overwriting
+                            hash_type="fnv",
+                            mode="train",
+                            return_grid_coord=True 
+                        ),
                         ToTensor(),
                         Collect(
-                            keys=("coord", "grid_coord", "transformation", "shape"),
+                            keys=("coord", "grid_coord", "transformation", "shape", 
+                                  "partial_coord", "partial_grid_coord", "partial_shape"),
                             feat_keys=("coord",),
+                            partial_feat_keys=("partial_coord",),
                         ),
                     ]
                 )
@@ -232,8 +245,7 @@ def train(opt: AEConfig):
             # get the partial keypoints, but with the full point cloud as the reconstruction target
             
             # extracted from the autoencoder get_loss method: #######
-            partial_data = get_network_data(data, "partial_orig")
-
+            partial_data = get_network_data(data, "orig_partial")
             z0, partial_mu, partial_logvar = net.encode(partial_data)
             z_aux = reparameterize(partial_mu, partial_logvar)
             partial_code = torch.cat([z0.reshape((z0.shape[0], -1)), z_aux], dim=1)
@@ -285,19 +297,44 @@ def train(opt: AEConfig):
             data["deformed_shape"].view(data["orig_offset"].shape[0], -1, 3)
 
             deformed_matrix = data["deformed_transformation"].view(
-                data["orig_offset"].shape[0], -1, 3
+                data["orig_offset"].shape[0], -1, 4
             ).cuda()
 
             kp_orig = code_.reshape(code.shape[0], -1, 3).cuda()
+            # extend to homogeneous form
+            homogeneous_kp = torch.cat(
+                [kp_orig, torch.ones(kp_orig.shape[0], kp_orig.shape[1], 1, device=kp_orig.device)], dim=-1
+            )  # (B, N, 3) -> (B, N, 4)
+            kp_transformed = torch.bmm(homogeneous_kp, deformed_matrix.transpose(1, 2))
+            # convert back
+            kp_transformed = kp_transformed[:, :, :3] / kp_transformed[:, :, 3:]
+            
             deformed_code, _, _ = net(get_network_data(data, "deformed"))
             kp_deformed = deformed_code.reshape(code.shape[0], -1, 3)
-            kp_transformed = torch.bmm(kp_orig, deformed_matrix.transpose(1, 2))
-            mse_loss = torch.mean((kp_transformed - kp_deformed) ** 2)
+            mse_loss_deformed = torch.mean((kp_transformed - kp_deformed) ** 2)
+            
+            # partial deformation consistency mse (partial point cloud & differentialble transformation)
+            data["deformed_partial_shape"].view(data["orig_offset"].shape[0], -1, 3)
+            # deformed_transformation is shared between full and partial pc
+
+            kp_orig_partial = partial_code_.reshape(code.shape[0], -1, 3).cuda()
+            # extend to homogeneous form
+            homogeneous_kp_partial = torch.cat(
+                [kp_orig_partial, 
+                 torch.ones(kp_orig_partial.shape[0], kp_orig_partial.shape[1], 1, device=kp_orig_partial.device)], dim=-1
+            )  # (B, N, 3) -> (B, N, 4)
+            kp_transformed_partial = torch.bmm(homogeneous_kp_partial, deformed_matrix.transpose(1, 2))
+            # convert back
+            kp_transformed_partial = kp_transformed_partial[:, :, :3] / kp_transformed_partial[:, :, 3:]
+            
+            deformed_code_partial, _, _ = net(get_network_data(data, "deformed_partial"))
+            kp_deformed_partial = deformed_code_partial.reshape(code.shape[0], -1, 3)
+            mse_loss_deformed_partial = torch.mean((kp_transformed_partial - kp_deformed_partial) ** 2)
             
             # partial view consistency mse (full point cloud & partial view)
             # use keypoint predictions from the encoder process
             kp_partial = partial_code_.reshape(partial_code.shape[0], -1, 3)
-            partial_mse_loss = torch.mean((kp_orig - kp_partial) ** 2)
+            mse_loss_partial = torch.mean((kp_orig - kp_partial) ** 2)
             
             # partial warmup
             if opt.lambda_p == 0:
@@ -310,7 +347,7 @@ def train(opt: AEConfig):
             total_fps_loss = fps_loss + lambda_p * partial_fps_loss
             total_kl_loss = kl + lambda_p * partial_kl
             total_chamfer_loss = chamfer_loss + lambda_p * partial_chamfer_loss
-            total_mse_loss = mse_loss + lambda_p * partial_mse_loss
+            total_mse_loss = mse_loss_deformed + lambda_p * mse_loss_partial + lambda_p * mse_loss_deformed_partial
             
             loss_ = (
                 lambda_0 * total_fps_loss
@@ -320,8 +357,10 @@ def train(opt: AEConfig):
                 + lambda_4 * total_kl_loss
             )
             
-            wandb.log({"chamfer_loss": chamfer_loss, "mse_loss": mse_loss}, step=t)
-            wandb.log({"partial_chamfer_loss": partial_chamfer_loss, "partial_mse_loss": partial_mse_loss}, step=t)
+            wandb.log({"chamfer_loss": chamfer_loss, "mse_loss": mse_loss_deformed}, step=t)
+            wandb.log({"partial_chamfer_loss": partial_chamfer_loss, 
+                       "partial_mse_loss": mse_loss_partial, 
+                       "partial_deformed_mse_loss": mse_loss_deformed_partial}, step=t)
 
             # END modified partial loss ######################################################
 
