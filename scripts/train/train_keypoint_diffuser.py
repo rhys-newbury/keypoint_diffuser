@@ -12,12 +12,15 @@ import torch.utils.data
 import torch.utils.data.distributed
 from db_utils import save_train_run, find_checkpoint_from_db_dir
 from einops import repeat
-from keypoint_diffuser.datasets.H5Datset import H5Dataset
+from pathlib import Path
+# from keypoint_diffuser.datasets.H5Datset import H5Dataset
 from keypoint_diffuser.datasets.shapespartial import ShapesPartial
 from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.models.encoder_models.common import get_linear_scheduler
 from keypoint_diffuser.options.ae_options import AEConfig, AEOptions
 from keypoint_diffuser.utils.nn import save_network
+from keypoint_diffuser.utils.utils import simple_plot
+from keypoint_diffuser.utils.loss import local_repulsion
 from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
 from torch.nn.utils import clip_grad_norm_
@@ -41,6 +44,81 @@ from torchvision import transforms
 
 CHECKPOINTS_DIR = "checkpoints"
 CHECKPOINT_EXT = ".pth"
+
+
+# --- NEW VISUALIZATION FUNCTION ---
+def plot_instances_with_dropdown(instances_points: list[list[np.ndarray]], instances_names: list[list[str]], out_html: str | Path):
+    """
+    Saves an interactive Plotly HTML file containing multiple dataloader instances.
+    Uses a dropdown menu to toggle visibility between instances (acting as tabs).
+    """
+    import plotly.graph_objects as go
+    fig = go.Figure()
+
+    traces_per_instance = [len(pts) for pts in instances_points]
+    total_traces = sum(traces_per_instance)
+    
+    for i, (points_list, name_list) in enumerate(zip(instances_points, instances_names)):
+        for points, name in zip(points_list, name_list):
+            shape = points.shape
+            # assume it is object point cloud if a lot of points
+            if np.max(shape) > 1000:
+                marker = {"size": 2, "opacity": 1.0}
+            else:
+                # generate a random color string for Plotly
+                color_str = f"rgb({np.random.randint(0, 256)}, {np.random.randint(0, 256)}, {np.random.randint(0, 256)})"
+                marker = {"size": 3, "opacity": 1.0, "color": color_str, "symbol": "diamond", "line": {"width": 2, "color": "black"}}
+                
+            fig.add_trace(
+                go.Scatter3d(
+                    x=points[:, 0], y=points[:, 1], z=points[:, 2],
+                    mode="markers",
+                    marker=marker,
+                    name=f"Inst {i} - {name}",
+                    visible=(i == 0) # Only the first instance is visible by default
+                )
+            )
+            
+    # Create dropdown menu buttons
+    buttons = []
+    start_idx = 0
+    for i in range(len(instances_points)):
+        num_traces = traces_per_instance[i]
+        
+        # Boolean array where only the traces for the current instance are True
+        visible_array = [False] * total_traces
+        for j in range(start_idx, start_idx + num_traces):
+            visible_array[j] = True
+            
+        button = dict(
+            label=f"Instance {i}",
+            method="update",
+            args=[{"visible": visible_array},
+                  {"title": f"Viewing Dataloader Instance {i}"}]
+        )
+        buttons.append(button)
+        start_idx += num_traces
+
+    fig.update_layout(
+        updatemenus=[
+            dict(
+                active=0,
+                buttons=buttons,
+                x=0.05,
+                xanchor="left",
+                y=1.1,
+                yanchor="top"
+            )
+        ],
+        title="Viewing Dataloader Instance 0",
+        scene=dict(aspectmode="data")
+    )
+    
+    out_html = Path(out_html)
+    out_html.parent.mkdir(parents=True, exist_ok=True)
+    fig.write_html(str(out_html), include_plotlyjs=True, full_html=True)
+    print(f"[✓] Saved interactive multi-tab HTML to {out_html}")
+# ----------------------------------
 
 
 def get_data(dataset, data):
@@ -96,7 +174,11 @@ def get_network_data(data: dict[str, Any], key="orig"):
 
 
 def train(opt: AEConfig):
-    ckpt_dir = opt.ckpt_dir / wandb.run.name
+    if wandb.run.name is None:
+        run_name = "debug_run"
+    else:
+        run_name = wandb.run.name
+    ckpt_dir = opt.ckpt_dir / run_name
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     opt.db.parent.mkdir(parents=True, exist_ok=True)
     save_train_run(opt.db, "Ours", opt.category, ckpt_dir, opt.key_points)
@@ -203,7 +285,7 @@ def train(opt: AEConfig):
             )
 
             diffusion_loss, code, mu, logvar = net.get_loss(
-                get_network_data(data), step=t
+                get_network_data(data, key="orig"), step=t,
             )
 
             code_ = code[:, : opt.key_points * 3].reshape(
@@ -219,18 +301,31 @@ def train(opt: AEConfig):
             wandb.log({"diffusion_loss": diffusion_loss}, step=t)
             wandb.log({"kl_divergence": kl}, step=t)
 
-            fps = sample_farthest_points(target_shape_t, opt.key_points + 10).transpose(
+            fps = sample_farthest_points(target_shape_t, opt.key_points + 2).transpose(
                 2, 1
             )
 
-            fps_loss, _ = pytorch3d.loss.chamfer_distance(fps, code_)
+            # drives keypoints closer to fps points
+            fps_to_pred, _ = pytorch3d.loss.chamfer_distance(fps, code_, single_directional=True, batch_reduction=None)
+            pred_to_fps, _ = pytorch3d.loss.chamfer_distance(code_, fps, single_directional=True, batch_reduction=None)
+            
+            fps_loss = 1.5 * fps_to_pred.mean() + 0.5 * pred_to_fps.mean()  # make the full surface better covered
 
             wandb.log({"fps_loss": fps_loss}, step=t)
 
+            # chamfer loss (full point cloud)
+            # drives keypoints closer to surface
             max_schedule = opt.max_schedule
             chamfer_loss, _ = pytorch3d.loss.chamfer_distance(
-                code_, target_shape_t.transpose(2, 1)
+                code_, target_shape_t.transpose(2, 1), single_directional=True, batch_reduction=None
             )
+            # keypoint coverage loss
+            kp_coverage_loss, _ = pytorch3d.loss.chamfer_distance(
+                    target_shape_t.transpose(2, 1), code_, single_directional=True, batch_reduction=None)
+            chamfer_loss = 0.5 * chamfer_loss.mean() + 1.5 * kp_coverage_loss.mean()
+            # also add repulsion factor
+            chamfer_loss = chamfer_loss + 0.1 * local_repulsion(code_, k=8, margin=0.01).mean()            
+            
             data["deformed_shape"].view(data["orig_offset"].shape[0], -1, 3)
 
             deformed_matrix = data["deformed_transformation"].view(
@@ -242,10 +337,12 @@ def train(opt: AEConfig):
             homogeneous_kp = torch.cat(
                 [kp_orig, torch.ones(kp_orig.shape[0], kp_orig.shape[1], 1, device=kp_orig.device)], dim=-1
             )  # (B, N, 3) -> (B, N, 4)
+            # transformed keypoints
             kp_transformed = torch.bmm(homogeneous_kp, deformed_matrix.transpose(1, 2))
             # convert back
             kp_transformed = kp_transformed[:, :, :3] / kp_transformed[:, :, 3:]
             
+            # output keypoints from deformed inputs
             deformed_code, _, _ = net(get_network_data(data, "deformed"))
             kp_deformed = deformed_code.reshape(code.shape[0], -1, 3)
             mse_loss = torch.mean((kp_transformed - kp_deformed) ** 2)
@@ -291,6 +388,48 @@ def train(opt: AEConfig):
 
             t += 1
             
+        # save a quick html visualization of the various used pcs
+        if e % opt.log_interval == 0: # Adjust this condition as needed (e.g. t % opt.log_interval == 0)
+            num_instances_to_plot = min(4, opt.batch_size) # Extract a few items from the batch
+            instances_points = []
+            instances_names = []
+            
+            for b in range(num_instances_to_plot):
+                # --- USER TODO: Define your point clouds and names for instance 'b' here ---
+                # Ensure tensors are detached, moved to CPU, and converted to NumPy arrays.
+                #
+                # Example:
+                # pc_target = target_shape_t[b].transpose(0, 1).detach().cpu().numpy()
+                # pc_kp = kp_orig[b].detach().cpu().numpy()
+                #
+                # points_list = [pc_target, pc_kp]
+                # name_list = ["Target Shape", "Keypoints"]
+                
+                # full point cloud
+                vog = data["target_shape"].view(data["orig_offset"].shape[0], -1, 3)[b].detach().cpu().numpy()
+                # deformed point cloud
+                vdf = data["deformed_shape"].view(data["orig_offset"].shape[0], -1, 3)[b].detach().cpu().numpy()
+                # full keypoints
+                vkp = kp_orig[b].detach().cpu().numpy()
+                # transformed keypoints
+                vtk = kp_transformed[b].detach().cpu().numpy()
+                # keypoints from deformed inputs
+                vkd = kp_deformed[b].detach().cpu().numpy()
+                # fps keypoints
+                vkf = fps[b].detach().cpu().numpy()
+                
+                points_list = [vog, vdf, vkp, vtk, vkd, vkf]
+                name_list = ["Target Shape", "Deformed Shape", "Keypoints", "Transformed Keypoints", "Keypoints from Deformed Input", "FPS Keypoints"]
+                # -------------------------------------------------------------------------
+                
+                if len(points_list) > 0:
+                    instances_points.append(points_list)
+                    instances_names.append(name_list)
+
+            if len(instances_points) > 0:
+                html_path = ckpt_dir / "outputs" / f"visualization_step_{t}.html"
+                plot_instances_with_dropdown(instances_points, instances_names, html_path)
+                    
         if e % opt.save_interval == 0:
             os.path.join(ckpt_dir, "outputs", "%07d" % t)
             save_network(
