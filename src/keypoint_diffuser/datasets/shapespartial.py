@@ -67,7 +67,7 @@ class ShapesPartial(torch.utils.data.Dataset):
     # }
     SYNSETOFFSET2CATEGORY = {v: k for k, v in CATEGORY2SYNSETOFFSET.items()}
 
-    PARTIALSAMPLEMODES = ['full', 'default', 'myopia', 'patch', 'tac', 'all', 'uniform']
+    PARTIALSAMPLEMODES = ['full', 'default', 'myopia', 'patch', 'tac', 'all', 'uniform', 'uniform-combined']
     # PARTIALSAMPLEMODES = ['default', 'myopia', 'patch', 'all']
 
     @staticmethod
@@ -124,6 +124,9 @@ class ShapesPartial(torch.utils.data.Dataset):
 
         self.dataset = self.load_dataset()
         self.transform = transform  # Store transform function
+        self.dr = opt.domain_randomization
+        self.max_scaling_factor = opt.max_scaling_factor
+        self.max_translation_offset = opt.max_translation_offset
 
         print("dataset size %d" % len(self))
 
@@ -241,13 +244,19 @@ class ShapesPartial(torch.utils.data.Dataset):
                 return pth
             else:
                 continue
-        raise Exception(f"Point cloud file not found: {pth}")
+        print(f"[WARN] Point cloud file not found after multiple attempts: {pth}")
+        return None
+        # raise Exception(f"Point cloud file not found: {pth}")
 
     def _get_partial_pointcloud_path(self, name, category=None):
         n = random.randint(0, self.n_partial_samples-1)
         nmode = random.randint(0, len(self.mode_list)-1)
         if self.opt.partial_view_mode == 'all':
             mode = self.mode_list[nmode]
+        elif self.opt.partial_view_mode == 'uniform-combined':
+            full_sample_thresh = 0.3
+            full_sample_rand = random.random()
+            mode = 'uniform' if full_sample_rand > full_sample_thresh else 'full'
         else:
             mode = self.opt.partial_view_mode
         
@@ -444,6 +453,55 @@ class ShapesPartial(torch.utils.data.Dataset):
         norm_val_0 = float(norm_vals[0]) if len(norm_vals[0].shape) <= 1 else norm_vals[0]
         norm_val_1 = float(norm_vals[1])
         
+        if self.dr and not is_test:
+            # convert points to homogeneous coordinates for transformation
+            device = shape.device
+            homogeneous_points = torch.cat(
+                [shape, torch.ones(shape.shape[0], 1, device=device)], dim=-1
+            )  # (N, 3) -> (N, 4)
+            homogeneous_partial = torch.cat(
+                [partial_shape, torch.ones(partial_shape.shape[0], 1, device=device)], dim=-1
+            )  # (M, 3) -> (M, 4)
+            deformation_matrix = torch.eye(4, device=device)
+            # random scaling #####################################################################
+            # symmetric log-uniform scaling for equal probability of scaling up and down #########
+            # logsc = torch.log(torch.tensor(self.max_scaling_factor, device=device))
+            # scaling_factors = torch.rand(1, device=device) * logsc * 2 - logsc
+            # scaling_factors = torch.exp(scaling_factors)
+            # uniform scaling ####################################################################
+            scaling_factors = torch.empty(1, device=device).uniform_(
+                1.0 / self.max_scaling_factor,
+                self.max_scaling_factor,
+            )
+            ######################################################################################
+            # translate to zero mean first
+            scale_matrix_1 = torch.eye(4, device=device)
+            scale_matrix_1[:-1, -1] = -torch.mean(shape, dim=0)
+            # apply scaling
+            scale_matrix_2 = torch.eye(4, device=device)
+            scale_matrix_2[0, 0] = scaling_factors
+            scale_matrix_2[1, 1] = scaling_factors
+            scale_matrix_2[2, 2] = scaling_factors
+            # translate back to original mean
+            scale_matrix_3 = torch.eye(4, device=device)
+            scale_matrix_3[:-1, -1] = torch.mean(shape, dim=0)
+            
+            sm = scale_matrix_1 @ scale_matrix_2 @ scale_matrix_3
+            deformation_matrix = deformation_matrix @ sm
+            
+            # random translation
+            translation_offsets = torch.rand(3, device=device) * (self.max_translation_offset * 2) - self.max_translation_offset
+            trans_matrix = torch.eye(4, device=device)
+            trans_matrix[:-1, -1] = translation_offsets
+            deformation_matrix = deformation_matrix @ trans_matrix
+            
+            # Apply transformation
+            deformed_cloud = homogeneous_points @ deformation_matrix.transpose(0, 1)
+            deformed_partial = homogeneous_partial @ deformation_matrix.transpose(0, 1)
+            # convert back to non-homogeneous coordinates
+            shape = deformed_cloud[:, :3] / deformed_cloud[:, 3:]
+            partial_shape = deformed_partial[:, :3] / deformed_partial[:, 3:]
+            
         # build result dict
         result = {
             "shape": shape,
@@ -461,6 +519,9 @@ class ShapesPartial(torch.utils.data.Dataset):
             "normalization": self.opt.normalize, 
             "norm_val_0": norm_val_0, 
             "norm_val_1": norm_val_1, 
+            "scaling_factor": scaling_factors.item() if self.dr else -1,
+            "translation_offset": translation_offsets.cpu() if self.dr else -1,
+            
         }
         # if pc_path.is_file() and is_test:
         #     pc = np.load(pc_path)
@@ -487,6 +548,22 @@ class ShapesPartial(torch.utils.data.Dataset):
         else:
             name_2 = self.dataset["name"][index_2]
             cat_2 = self.dataset["category"][index_2]
+
+        # bit of a hack, check both paths exist first, if not use a different index
+        ppath = self._get_pointcloud_path(name, cat)
+        ppath_2 = self._get_pointcloud_path(name_2, cat_2)
+        pindex = index
+        pindex_2 = index_2
+        
+        while ppath is None or ppath_2 is None:
+            pindex = pindex + 1
+            pindex_2 = pindex_2 + 1
+            name = self.dataset["name"][pindex]
+            cat = self.dataset["category"][pindex]
+            name_2 = self.dataset["name"][pindex_2]
+            cat_2 = self.dataset["category"][pindex_2]
+            ppath = self._get_pointcloud_path(name, cat)
+            ppath_2 = self._get_pointcloud_path(name_2, cat_2)
 
         sample_mesh = self.opt.sample_mesh or self.opt.points_dir is None
         is_test = self.opt.phase == "test"
@@ -562,7 +639,21 @@ class ShapesPartial(torch.utils.data.Dataset):
                     # },
                 }
                 
+            for k, v in sample.items():
+                if v is None:
+                    print(k)
+                    import pdb; pdb.set_trace()
             return sample
+
+    @staticmethod
+    def input_domain_randomization(self, points):
+        # points are loaded as 
+        # example randomization: random scaling
+        scale = random.uniform(0.8, 1.2)
+        for key in sample:
+            if key.startswith("orig_") or key.startswith("deformed_"):
+                sample[key] = sample[key] * scale
+        return sample
 
     @classmethod
     def collate(cls, batch):

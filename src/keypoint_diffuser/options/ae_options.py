@@ -104,7 +104,8 @@ class AEConfig:
     max_rotation_angle: float = np.pi / 3
     max_scaling_factor: float = 2.0
     max_translation_offset: float = 0.3
-
+    
+    domain_randomization: bool = False
 
 class AEOptions:
     def __init__(self):
