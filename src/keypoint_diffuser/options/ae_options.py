@@ -15,6 +15,9 @@ class AEConfig:
     dataset: str = "shapes"
     partial_view_mode: str = None
     n_partial_samples: int = 2
+    fixed_partial_sample_index: int = None  # fix sample index for view consistent eval
+    enumerate_partial_samples: bool = False # enumerate every partial sample on disk instead of drawing one at random
+    get_two: bool = False   # specific setting for keypointDeformer which needs a source and a target point clouds
     test_partial_samples: bool = False
     num_point: int = 2048
     points_dir: str = None
@@ -106,6 +109,9 @@ class AEConfig:
     max_translation_offset: float = 0.3
     
     domain_randomization: bool = False
+
+    point_noise_std: float = 0.0    # per-point gaussian jitter for loaded cloud. std is in the units of normlized cloud, 0 to distable
+    point_noise_target: str = "both"    # "both", "full" or "partial"
 
 class AEOptions:
     def __init__(self):

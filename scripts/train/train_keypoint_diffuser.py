@@ -284,8 +284,14 @@ def train(opt: AEConfig):
                 .cuda()
             )
 
+            # reconstruction target is the noise-free cloud: when opt.point_noise_std > 0
+            # the encoder input carries the per-point jitter but the decoder is still
+            # asked to reconstruct the clean surface. datasets that hand out no clean
+            # copy never jitter, so their target_shape is already noise free.
+            recon_target = data.get("target_shape_clean", data["target_shape"])
+
             diffusion_loss, code, mu, logvar = net.get_loss(
-                get_network_data(data, key="orig"), step=t,
+                get_network_data(data, key="orig"), step=t, target=recon_target,
             )
 
             code_ = code[:, : opt.key_points * 3].reshape(
@@ -300,6 +306,15 @@ def train(opt: AEConfig):
 
             wandb.log({"diffusion_loss": diffusion_loss}, step=t)
             wandb.log({"kl_divergence": kl}, step=t)
+
+            # copied from partial
+            # fps (full point cloud)
+            # if t > opt.fps_steps and lambda_0 > 0:
+            #     print("turning off FPS loss")
+            #     lambda_0 = 0
+            # fps = sample_farthest_points(target_shape_t, opt.key_points + 10).transpose(
+            #     2, 1
+            # )
 
             fps = sample_farthest_points(target_shape_t, opt.key_points + 2).transpose(
                 2, 1
@@ -389,7 +404,8 @@ def train(opt: AEConfig):
             t += 1
             
         # save a quick html visualization of the various used pcs
-        if e % opt.log_interval == 0: # Adjust this condition as needed (e.g. t % opt.log_interval == 0)
+        # if False: # disable
+        if e % opt.save_interval == 0: # Adjust this condition as needed (e.g. t % opt.log_interval == 0)
             num_instances_to_plot = min(4, opt.batch_size) # Extract a few items from the batch
             instances_points = []
             instances_names = []

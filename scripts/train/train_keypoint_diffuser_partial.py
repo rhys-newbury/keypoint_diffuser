@@ -315,9 +315,15 @@ def train(opt: AEConfig):
                 .cuda()
             )
 
+            # reconstruction target is the noise-free cloud: when opt.point_noise_std > 0
+            # the encoder input carries the per-point jitter but the decoder is still
+            # asked to reconstruct the clean surface. datasets that hand out no clean
+            # copy never jitter, so their target_shape is already noise free.
+            recon_target = data.get("target_shape_clean", data["target_shape"])
+
             # diffusion loss (full point cloud)
             diffusion_loss, code, mu, logvar = net.get_loss(
-                get_network_data(data, key="orig"), step=t, target=data["target_shape"]
+                get_network_data(data, key="orig"), step=t, target=recon_target
             )
             
             # code is z0 (entire latent including kp and aux), extract kp only to code_
@@ -357,9 +363,9 @@ def train(opt: AEConfig):
             wandb.log({"partial_kl_divergence": partial_kl}, step=t)
             
             # fps (full point cloud)
-            if t > opt.fps_steps and lambda_0 > 0:
-                print("turning off FPS loss")
-                lambda_0 = 0
+            # if t > opt.fps_steps and lambda_0 > 0:
+            #     print("turning off FPS loss")
+            #     lambda_0 = 0
             fps = sample_farthest_points(target_shape_t, opt.key_points + 10).transpose(
                 2, 1
             )
