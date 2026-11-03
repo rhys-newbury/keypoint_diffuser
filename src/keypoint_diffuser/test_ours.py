@@ -22,13 +22,34 @@ class Ours(TestBase):
         load_network(self.model, str(model_path))
         self.model.eval()  # optional: set to evaluation mode
 
-    def get_keypoints(self, pcd: np.ndarray) -> np.ndarray:
+    def get_keypoints(self, batch):
+        """
+        encoding function call for point clouds from a source other than the dataloader
+        mainly used for das calculation loaded from h5 point cloud files
+        need to build own batch dict following dataloader structure
+        """
         return self.model.encode(pcd)[0].cpu().numpy()
 
+    def get_keypoints_from_batch(
+        self, data: dict[str, Any], key="orig"
+    ) -> torch.Tensor:
+        """
+        get keypoints from a collated batch dict from the dataloader
+        uses the same method as get_reconstruction, only returns the keypoints and skips the diffusion decode
+        """
+        z_kp, _, _ = self.model.encode(self.get_network_data(data, key=key))
+        return z_kp.reshape(z_kp.shape[0], -1, 3).detach()
+
     def get_network_data(self, data: dict[str, Any], key="orig"):
+        """
+        takes input of a collated batch dict from the dataloader
+        returns a dict of the subset data for the network, with the subset prefix removed
+        the subset is specified by the key, which is one of ("orig", "deformed", "orig_partial", "deformed_partial")
+        "deformed_partial" is not currently used, included for completeness
+        """
         # key is the subset 
         # original keys were (orig, deformed)
-        # add new with (orig, deformed, partial_orig, partial_deformed)
+        # add new with (orig, deformed, orig_partial, deformed_partial)
         opplist = ("orig", "deformed", "orig_partial", "deformed_partial")
         opp = tuple(o for o in opplist if o != key)
 
@@ -67,12 +88,15 @@ class Ours(TestBase):
         z_full = torch.cat([z0, z_aux], dim=1)
 
         # always gets undeformed inputs
-        if key=="orig":
+        if key == "orig":
             input_pc = data["target_shape"].reshape(z0.shape[0], -1, 3).cuda()
             full_pc = data["target_shape"].reshape(z0.shape[0], -1, 3).cuda()
+        # in case there are leftover artifacts, "partial_orig" is an older version of this key
         elif key == "orig_partial":
             input_pc = data["target_partial_shape"].reshape(z0.shape[0], -1, 3).cuda()
             full_pc = data["target_shape"].reshape(z0.shape[0], -1, 3).cuda()
+        else:
+            raise ValueError(f"unknown subset key: {key}")
 
         recons = self.model.decode(z_full, 2048).detach()
         return (
