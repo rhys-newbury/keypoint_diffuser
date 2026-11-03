@@ -32,12 +32,13 @@ class AEConfig:
     max_schedule: int = 100000
     print_options: bool = False
     phase: str = "train"
-    iterations: int = None
-    epochs: int = 100
+    iterations: int = 500_000   # 200 epochs of airplanes = 566,400 instances, give or take due to drop last
+    epochs: int = None  # 200
     save_interval: int = 100
     log_interval: int = 1
     key_points: int = 10
     extra_latent: int = 5
+    use_pos_enc: bool = True  # Fourier positional encoding on encoder features before keypoint attention
     num_steps: int = 200
     beta_1: float = 1e-4
     beta_t: float = 0.05
@@ -90,7 +91,7 @@ class AEConfig:
     sample_mesh: bool = False
     test_pairs_file: str = None
 
-    test_category: str = None
+    test_category: str = None   # for training a model on all categories and testing on a specific category
     eval_on_same: bool = False
 
     lambda_0: int = 1
@@ -110,8 +111,37 @@ class AEConfig:
     
     domain_randomization: bool = False
 
-    point_noise_std: float = 0.0    # per-point gaussian jitter for loaded cloud. std is in the units of normlized cloud, 0 to distable
+    point_noise_std: float = 0.0    # per-point gaussian jitter for loaded cloud. std is in the units of normlized cloud, 0 to disable
     point_noise_target: str = "both"    # "both", "full" or "partial"
+
+def str2bool(v):
+    """Parse a boolean the way a config file writes one.
+
+    Config file entries reach argparse as plain strings, so a bare `type=bool`
+    turns "False" into True (every non-empty string is truthy). This does the
+    conversion properly instead.
+    """
+    if isinstance(v, bool):
+        return v
+    if v.strip().lower() in ("yes", "true", "t", "y", "1"):
+        return True
+    if v.strip().lower() in ("no", "false", "f", "n", "0", ""):
+        return False
+    raise configargparse.ArgumentTypeError(f"boolean value expected, got {v!r}")
+
+
+def str2path(v):
+    """Parse a path, mapping an explicit "None" to None.
+
+    Same reason as str2bool: `pretrained_root: None` in a config would otherwise
+    become PosixPath("None") rather than a real None.
+    """
+    if v is None or isinstance(v, Path):
+        return v
+    if v.strip().lower() in ("none", "null", ""):
+        return None
+    return Path(v)
+
 
 class AEOptions:
     def __init__(self):
@@ -132,9 +162,11 @@ class AEOptions:
             is_config_file=True,
             help="test config file path",
         )
+        converters = {bool: str2bool, Path: str2path}
         for field_name, field_def in AEConfig.__dataclass_fields__.items():
+            arg_type = converters.get(field_def.type, field_def.type)
             parser.add_argument(
-                f"--{field_name}", type=field_def.type, default=field_def.default
+                f"--{field_name}", type=arg_type, default=field_def.default
             )
         self.initialized = True
         return parser

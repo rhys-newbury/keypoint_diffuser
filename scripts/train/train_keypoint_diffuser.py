@@ -1,3 +1,4 @@
+import itertools
 import os
 import time
 from glob import glob
@@ -180,6 +181,7 @@ def train(opt: AEConfig):
         run_name = wandb.run.name
     ckpt_dir = opt.ckpt_dir / run_name
     ckpt_dir.mkdir(parents=True, exist_ok=True)
+    # see wandb for the training log
     opt.db.parent.mkdir(parents=True, exist_ok=True)
     save_train_run(opt.db, "Ours", opt.category, ckpt_dir, opt.key_points)
 
@@ -246,7 +248,10 @@ def train(opt: AEConfig):
         net.load_state_dict(pretrained["states"])
     
     net.train()
+    # t is the step count for the dataloader batches
     t = 0
+    # step count for object instances seen
+    n = 0
 
     optimizer = torch.optim.Adam(
         net.parameters(), lr=opt.lr, weight_decay=opt.weight_decay
@@ -275,8 +280,48 @@ def train(opt: AEConfig):
 
     kl_warmup_steps = opt.kl_warmup_steps
 
-    for e in range(opt.epochs):
+    # visualization function mid training
+    def dump_visualization():
+        # uses data/kp_orig/kp_transformed/kp_deformed/fps/t from the enclosing scope,
+        # i.e. whatever the most recently processed batch was
+        num_instances_to_plot = min(4, opt.batch_size) # Extract a few items from the batch
+        instances_points = []
+        instances_names = []
+
+        for b in range(num_instances_to_plot):
+            # full point cloud
+            vog = data["target_shape"].view(data["orig_offset"].shape[0], -1, 3)[b].detach().cpu().numpy()
+            # deformed point cloud
+            vdf = data["deformed_shape"].view(data["orig_offset"].shape[0], -1, 3)[b].detach().cpu().numpy()
+            # full keypoints
+            vkp = kp_orig[b].detach().cpu().numpy()
+            # transformed keypoints
+            vtk = kp_transformed[b].detach().cpu().numpy()
+            # keypoints from deformed inputs
+            vkd = kp_deformed[b].detach().cpu().numpy()
+            # fps keypoints
+            vkf = fps[b].detach().cpu().numpy()
+
+            points_list = [vog, vdf, vkp, vtk, vkd, vkf]
+            name_list = ["Target Shape", "Deformed Shape", "Keypoints", "Transformed Keypoints", "Keypoints from Deformed Input", "FPS Keypoints"]
+
+            if len(points_list) > 0:
+                instances_points.append(points_list)
+                instances_names.append(name_list)
+
+        if len(instances_points) > 0:
+            html_path = ckpt_dir / "outputs" / f"visualization_step_{t}.html"
+            plot_instances_with_dropdown(instances_points, instances_names, html_path)
+
+    # infinite epoch loop with itertools
+    for e in itertools.count():
+        # stop based on epochs e or iterations n (number of object instances seen)
+        if (opt.epochs is not None and e >= opt.epochs) or (
+            opt.iterations is not None and n >= opt.iterations
+        ):
+            break
         for _, data in enumerate(dataloader):
+            # input point cloud (full shape)
             target_shape_t = (
                 data["target_shape"]
                 .view(data["orig_offset"].shape[0], -1, 3)
@@ -284,11 +329,15 @@ def train(opt: AEConfig):
                 .cuda()
             )
 
-            # reconstruction target is the noise-free cloud: when opt.point_noise_std > 0
-            # the encoder input carries the per-point jitter but the decoder is still
-            # asked to reconstruct the clean surface. datasets that hand out no clean
-            # copy never jitter, so their target_shape is already noise free.
+            # reconstruct target is the noise free point cloud
             recon_target = data.get("target_shape_clean", data["target_shape"])
+            # noise free point cloud for extracting fps points
+            target_shape_clean_t = (
+                recon_target
+                .view(data["orig_offset"].shape[0], -1, 3)
+                .transpose(1, 2)
+                .cuda()
+            )
 
             diffusion_loss, code, mu, logvar = net.get_loss(
                 get_network_data(data, key="orig"), step=t, target=recon_target,
@@ -312,13 +361,15 @@ def train(opt: AEConfig):
             # if t > opt.fps_steps and lambda_0 > 0:
             #     print("turning off FPS loss")
             #     lambda_0 = 0
-            # fps = sample_farthest_points(target_shape_t, opt.key_points + 10).transpose(
-            #     2, 1
-            # )
-
-            fps = sample_farthest_points(target_shape_t, opt.key_points + 2).transpose(
+            
+            # sampled from the clean cloud
+            fps = sample_farthest_points(target_shape_clean_t, opt.key_points + 10).transpose(
                 2, 1
             )
+
+            # fps = sample_farthest_points(target_shape_clean_t, opt.key_points + 2).transpose(
+            #     2, 1
+            # )
 
             # drives keypoints closer to fps points
             fps_to_pred, _ = pytorch3d.loss.chamfer_distance(fps, code_, single_directional=True, batch_reduction=None)
@@ -332,11 +383,11 @@ def train(opt: AEConfig):
             # drives keypoints closer to surface
             max_schedule = opt.max_schedule
             chamfer_loss, _ = pytorch3d.loss.chamfer_distance(
-                code_, target_shape_t.transpose(2, 1), single_directional=True, batch_reduction=None
+                code_, target_shape_clean_t.transpose(2, 1), single_directional=True, batch_reduction=None
             )
             # keypoint coverage loss
             kp_coverage_loss, _ = pytorch3d.loss.chamfer_distance(
-                    target_shape_t.transpose(2, 1), code_, single_directional=True, batch_reduction=None)
+                    target_shape_clean_t.transpose(2, 1), code_, single_directional=True, batch_reduction=None)
             chamfer_loss = 0.5 * chamfer_loss.mean() + 1.5 * kp_coverage_loss.mean()
             # also add repulsion factor
             chamfer_loss = chamfer_loss + 0.1 * local_repulsion(code_, k=8, margin=0.01).mean()            
@@ -402,61 +453,28 @@ def train(opt: AEConfig):
             #     print(log_str)
 
             t += 1
-            
-        # save a quick html visualization of the various used pcs
-        # if False: # disable
-        if e % opt.save_interval == 0: # Adjust this condition as needed (e.g. t % opt.log_interval == 0)
-            num_instances_to_plot = min(4, opt.batch_size) # Extract a few items from the batch
-            instances_points = []
-            instances_names = []
-            
-            for b in range(num_instances_to_plot):
-                # --- USER TODO: Define your point clouds and names for instance 'b' here ---
-                # Ensure tensors are detached, moved to CPU, and converted to NumPy arrays.
-                #
-                # Example:
-                # pc_target = target_shape_t[b].transpose(0, 1).detach().cpu().numpy()
-                # pc_kp = kp_orig[b].detach().cpu().numpy()
-                #
-                # points_list = [pc_target, pc_kp]
-                # name_list = ["Target Shape", "Keypoints"]
-                
-                # full point cloud
-                vog = data["target_shape"].view(data["orig_offset"].shape[0], -1, 3)[b].detach().cpu().numpy()
-                # deformed point cloud
-                vdf = data["deformed_shape"].view(data["orig_offset"].shape[0], -1, 3)[b].detach().cpu().numpy()
-                # full keypoints
-                vkp = kp_orig[b].detach().cpu().numpy()
-                # transformed keypoints
-                vtk = kp_transformed[b].detach().cpu().numpy()
-                # keypoints from deformed inputs
-                vkd = kp_deformed[b].detach().cpu().numpy()
-                # fps keypoints
-                vkf = fps[b].detach().cpu().numpy()
-                
-                points_list = [vog, vdf, vkp, vtk, vkd, vkf]
-                name_list = ["Target Shape", "Deformed Shape", "Keypoints", "Transformed Keypoints", "Keypoints from Deformed Input", "FPS Keypoints"]
-                # -------------------------------------------------------------------------
-                
-                if len(points_list) > 0:
-                    instances_points.append(points_list)
-                    instances_names.append(name_list)
+            prev_n, n = n, n + data["orig_offset"].shape[0]   # increment by the size of this batch
+            # instance-based trigger: fires once per crossing of a save_interval multiple
+            if prev_n // opt.save_interval != n // opt.save_interval:
+                save_network(
+                    net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=n
+                )
+                dump_visualization()
+            if opt.iterations is not None and n >= opt.iterations:
+                break
 
-            if len(instances_points) > 0:
-                html_path = ckpt_dir / "outputs" / f"visualization_step_{t}.html"
-                plot_instances_with_dropdown(instances_points, instances_names, html_path)
-                    
+        # epoch-based trigger: for epoch-driven training runs
         if e % opt.save_interval == 0:
-            os.path.join(ckpt_dir, "outputs", "%07d" % t)
             save_network(
                 net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=e
             )
-            
+            dump_visualization()
+
         epoch_time = time.time() - epoch_time_start
         epoch_time_start = time.time()
         if e % opt.log_interval == 0:
             losses_str = str(loss)
-            log_str = f"epoch {e:d}, iter {t:d}: epoch {epoch_time:.1f} sec"
+            log_str = f"epoch {e:d}, iter {t:d}, instances: {n:d}, epoch {epoch_time:.1f} sec"
             print(log_str)
 
     save_network(net, ckpt_dir, network_label="net", epoch_label="final")

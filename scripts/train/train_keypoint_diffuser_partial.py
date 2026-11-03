@@ -1,3 +1,4 @@
+import itertools
 import os
 import time
 from glob import glob
@@ -19,7 +20,7 @@ from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.models.encoder_models.common import get_linear_scheduler
 from keypoint_diffuser.options.ae_options import AEConfig, AEOptions
 from keypoint_diffuser.utils.nn import save_network
-from keypoint_diffuser.utils.utils import reparameterize
+from keypoint_diffuser.utils.utils import reparameterize, tee_output_to_file
 from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
 from torch.nn.utils import clip_grad_norm_
@@ -186,6 +187,7 @@ def train(opt: AEConfig):
         run_name = wandb.run.name
     ckpt_dir = opt.ckpt_dir / run_name
     ckpt_dir.mkdir(parents=True, exist_ok=True)
+    # see wandb for the training log
     opt.db.parent.mkdir(parents=True, exist_ok=True)
     save_train_run(opt.db, "Ours", opt.category, ckpt_dir, opt.key_points)
 
@@ -265,7 +267,10 @@ def train(opt: AEConfig):
         print("No pretrained model provided, starting from scratch.")
     
     net.train()
+    # t is the step count for the dataloader batches
     t = 0
+    # step count for object instances seen
+    n = 0
 
     optimizer = torch.optim.Adam(
         net.parameters(), lr=opt.lr, weight_decay=opt.weight_decay
@@ -294,11 +299,50 @@ def train(opt: AEConfig):
 
     kl_warmup_steps = opt.kl_warmup_steps
 
-    for e in range(opt.epochs):
-        # plotting inits
+    # visualization function mid training
+    def dump_visualization():
+        # uses data/kp_orig/kp_transformed/kp_deformed/fps/partial_code/partial_code_/t from
+        # the enclosing scope, i.e. whatever the most recently processed batch was
+        num_instances_to_plot = min(4, opt.batch_size) # Extract a few items from the batch
         instances_points = []
         instances_names = []
-        ts = []
+
+        for b in range(num_instances_to_plot):
+            # full point cloud
+            vog = data["target_shape"].view(data["orig_offset"].shape[0], -1, 3)[b].detach().cpu().numpy()
+            # deformed point cloud
+            vdf = data["deformed_shape"].view(data["orig_offset"].shape[0], -1, 3)[b].detach().cpu().numpy()
+            # partial point cloud
+            vpp = data["target_partial_shape"].view(data["orig_offset"].shape[0], -1, 3)[b].detach().cpu().numpy()
+            # full keypoints
+            vkp = kp_orig[b].detach().cpu().numpy()
+            # partial keypoints
+            vkpp = partial_code_.reshape(partial_code.shape[0], -1, 3)[b].detach().cpu().numpy()
+            # transformed keypoints
+            vtk = kp_transformed[b].detach().cpu().numpy()
+            # keypoints from deformed inputs
+            vkd = kp_deformed[b].detach().cpu().numpy()
+            # fps keypoints
+            vkf = fps[b].detach().cpu().numpy()
+
+            points_list = [vog, vdf, vpp, vkp, vkpp, vtk, vkd, vkf]
+            name_list = ["Target Shape", "Deformed Shape", "Partial Shape", "Keypoints", "Partial Keypoints", "Transformed Keypoints", "Keypoints from Deformed Input", "FPS Keypoints"]
+
+            if len(points_list) > 0:
+                instances_points.append(points_list)
+                instances_names.append(name_list)
+
+        if len(instances_points) > 0:
+            html_path = ckpt_dir / "outputs_partial" / f"visualization_step_{t}.html"
+            plot_instances_with_dropdown(instances_points, instances_names, html_path)
+
+    # infinite epoch loop with itertools
+    for e in itertools.count():
+        # stop based on epochs e or iterations n (number of object instances seen)
+        if (opt.epochs is not None and e >= opt.epochs) or (
+            opt.iterations is not None and n >= opt.iterations
+        ):
+            break
         for _, data in enumerate(dataloader):
             target_shape_t = (
                 data["target_shape"]
@@ -315,13 +359,18 @@ def train(opt: AEConfig):
                 .cuda()
             )
 
-            # reconstruction target is the noise-free cloud: when opt.point_noise_std > 0
-            # the encoder input carries the per-point jitter but the decoder is still
-            # asked to reconstruct the clean surface. datasets that hand out no clean
-            # copy never jitter, so their target_shape is already noise free.
+            # reconstruct target is the noise free point cloud
             recon_target = data.get("target_shape_clean", data["target_shape"])
+            # noise free point cloud for extracting fps points
+            target_shape_clean_t = (
+                recon_target
+                .view(data["orig_offset"].shape[0], -1, 3)
+                .transpose(1, 2)
+                .cuda()
+            )
 
             # diffusion loss (full point cloud)
+            # keypoints are extracted from the noised point cloud, targeting clean cloud for recon
             diffusion_loss, code, mu, logvar = net.get_loss(
                 get_network_data(data, key="orig"), step=t, target=recon_target
             )
@@ -338,9 +387,9 @@ def train(opt: AEConfig):
             
             # extracted from the autoencoder get_loss method: #######
             partial_data = get_network_data(data, "orig_partial")
-            z0, partial_mu, partial_logvar = net.encode(partial_data)
-            z_aux = reparameterize(partial_mu, partial_logvar)
-            partial_code = torch.cat([z0.reshape((z0.shape[0], -1)), z_aux], dim=1)
+            zp0, mup, logvarp = net.encode(partial_data)
+            zp_aux = reparameterize(mup, logvarp)
+            partial_code = torch.cat([zp0.reshape((zp0.shape[0], -1)), zp_aux], dim=1)
             #########################################################
 
             partial_code_ = partial_code[:, : opt.key_points * 3].reshape(
@@ -350,14 +399,33 @@ def train(opt: AEConfig):
             # kl divergence (full point cloud)
             q = Normal(mu, torch.exp(0.5 * logvar))
             p = Normal(torch.zeros_like(mu), torch.ones_like(logvar))
+
             # kl divergence (partial point cloud)
-            partial_q = Normal(partial_mu, torch.exp(0.5 * logvar))
-            partial_p = Normal(torch.zeros_like(partial_mu), torch.ones_like(partial_logvar))
+            
+            # uncertainty kl
+            # set up variables for partial loss
+            # detach mu so the full latent is not changed to try to match the partial, only partial changes
+            mu_t, var_t, logvar_t = mu.detach(), logvar.detach().exp(), logvar.detach()
+            varp = logvarp.exp()
+            # partial point cloud uncertainty auxiliary loss
+            # drives mup towards mu subject to confidence represented by varp
+            # add logvarp term to add cost to highuncertainty
+            unc_loss = 0.5 * ((mu.detach() - mup)**2 / varp + logvarp).sum(-1).mean()
+            # since variance is used to represent uncertainty, we do not try to fix the distribution
+            # the idea is to prevent: var -> 0
+            # drives varp to encompass the full latent distribution
+            collapse_loss = 0.5 * (var_t / varp - logvar_t - 1).sum(-1).mean()
+            # combined together this is essentially kl(q_full || q_partial)
+            partial_kl = unc_loss + collapse_loss
+
+            # old partial kl
+            # partial_q = Normal(mup, torch.exp(0.5 * logvarp))
+            # partial_p = Normal(torch.zeros_like(mup), torch.ones_like(logvarp))
+            # partial_kl = kl_divergence(partial_q, partial_p).sum(dim=1).mean()
 
             # linear warmup until t=kl_warmup_steps
             lambda_4 = 0 if opt.lambda_4 == 0 else min(1.0, t / kl_warmup_steps)
             kl = kl_divergence(q, p).sum(dim=1).mean()
-            partial_kl = kl_divergence(partial_q, partial_p).sum(dim=1).mean()
             wandb.log({"diffusion_loss": diffusion_loss}, step=t)
             wandb.log({"kl_divergence": kl}, step=t)
             wandb.log({"partial_kl_divergence": partial_kl}, step=t)
@@ -366,7 +434,9 @@ def train(opt: AEConfig):
             # if t > opt.fps_steps and lambda_0 > 0:
             #     print("turning off FPS loss")
             #     lambda_0 = 0
-            fps = sample_farthest_points(target_shape_t, opt.key_points + 10).transpose(
+            
+            # sampled from the clean cloud
+            fps = sample_farthest_points(target_shape_clean_t, opt.key_points + 10).transpose(
                 2, 1
             )
             
@@ -385,18 +455,18 @@ def train(opt: AEConfig):
             # drives keypoints closer to surface
             max_schedule = opt.max_schedule
             chamfer_loss, _ = pytorch3d.loss.chamfer_distance(
-                code_, target_shape_t.transpose(2, 1), single_directional=True, batch_reduction=None
+                code_, target_shape_clean_t.transpose(2, 1), single_directional=True, batch_reduction=None
             )
             # chamfer loss (partial point cloud keypoints with the full point cloud as target)
             partial_chamfer_loss, _ = pytorch3d.loss.chamfer_distance(
-                partial_code_, target_shape_t.transpose(2, 1), single_directional=True, batch_reduction=None
+                partial_code_, target_shape_clean_t.transpose(2, 1), single_directional=True, batch_reduction=None
             )
             
             # keypoint coverage loss
             kp_coverage_loss, _ = pytorch3d.loss.chamfer_distance(
-                    target_shape_t.transpose(2, 1), code_, single_directional=True, batch_reduction=None)
+                    target_shape_clean_t.transpose(2, 1), code_, single_directional=True, batch_reduction=None)
             partial_kp_coverage_loss, _ = pytorch3d.loss.chamfer_distance(
-                    target_shape_t.transpose(2, 1), partial_code_, single_directional=True, batch_reduction=None)
+                    target_shape_clean_t.transpose(2, 1), partial_code_, single_directional=True, batch_reduction=None)
             
             chamfer_loss = 0.5 * chamfer_loss.mean() + 1.5 * kp_coverage_loss.mean()
             partial_chamfer_loss = 0.5 * partial_chamfer_loss.mean() + 1.5 * partial_kp_coverage_loss.mean()
@@ -457,7 +527,7 @@ def train(opt: AEConfig):
             
             # combine all losses
             total_diffusion_loss = diffusion_loss
-            total_fps_loss = fps_loss + lambda_p * partial_fps_loss
+            total_fps_loss = fps_loss #+ lambda_p * partial_fps_loss
             total_kl_loss = kl + lambda_p * partial_kl
             total_chamfer_loss = chamfer_loss + lambda_p * partial_chamfer_loss
             total_mse_loss = mse_loss_deformed + lambda_p * mse_loss_partial # + lambda_p * mse_loss_deformed_partial
@@ -486,49 +556,6 @@ def train(opt: AEConfig):
                 }, step=t)
 
             # END modified partial loss ######################################################
-
-            # save a quick html visualization of the various used pcs
-            if e % opt.log_interval == 0: # Adjust this condition as needed (e.g. t % opt.log_interval == 0)
-                num_instances_to_plot = min(4, opt.batch_size) # Extract a few items from the batch
-                
-                for b in range(num_instances_to_plot):
-                    # --- USER TODO: Define your point clouds and names for instance 'b' here ---
-                    # Ensure tensors are detached, moved to CPU, and converted to NumPy arrays.
-                    #
-                    # Example:
-                    # pc_target = target_shape_t[b].transpose(0, 1).detach().cpu().numpy()
-                    # pc_kp = kp_orig[b].detach().cpu().numpy()
-                    #
-                    # points_list = [pc_target, pc_kp]
-                    # name_list = ["Target Shape", "Keypoints"]
-                    
-                    # full point cloud
-                    vog = data["target_shape"].view(data["orig_offset"].shape[0], -1, 3)[b].detach().cpu().numpy()
-                    # deformed point cloud
-                    vdf = data["deformed_shape"].view(data["orig_offset"].shape[0], -1, 3)[b].detach().cpu().numpy()
-                    # partial point cloud
-                    vpp = data["target_partial_shape"].view(data["orig_offset"].shape[0], -1, 3)[b].detach().cpu().numpy()
-                    # full keypoints
-                    vkp = kp_orig[b].detach().cpu().numpy()
-                    # partial keypoints
-                    vkpp = partial_code_.reshape(partial_code.shape[0], -1, 3)[b].detach().cpu().numpy()
-                    # transformed keypoints
-                    vtk = kp_transformed[b].detach().cpu().numpy()
-                    # keypoints from deformed inputs
-                    vkd = kp_deformed[b].detach().cpu().numpy()
-                    # fps keypoints
-                    vkf = fps[b].detach().cpu().numpy()
-                    
-                    points_list = [vog, vdf, vpp, vkp, vkpp, vtk, vkd, vkf]
-                    name_list = ["Target Shape", "Deformed Shape", "Partial Shape", "Keypoints", "Partial Keypoints", "Transformed Keypoints", "Keypoints from Deformed Input", "FPS Keypoints"]
-                    # -------------------------------------------------------------------------
-                    
-                    if len(points_list) > 0:
-                        instances_points.append(points_list)
-                        instances_names.append(name_list)
-                        ts.append(t)
-
-                
 
             loss = max(0, max_schedule - t) / max_schedule * loss_
 
@@ -560,22 +587,28 @@ def train(opt: AEConfig):
             #     print(log_str)
 
             t += 1
-            
-        if e % opt.log_interval == 0 and len(instances_points) > 0:
-            html_path = ckpt_dir / "outputs_partial" / f"visualization_epoch_{e}_steps_{ts[0]}_to_{ts[-1]}.html"
-            plot_instances_with_dropdown(instances_points, instances_names, html_path)
-                    
+            prev_n, n = n, n + data["orig_offset"].shape[0]   # increment by the size of this batch
+            # instance-based trigger: fires once per crossing of a save_interval multiple
+            if prev_n // opt.save_interval != n // opt.save_interval:
+                save_network(
+                    net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=n
+                )
+                dump_visualization()
+            if opt.iterations is not None and n >= opt.iterations:
+                break
+
+        # epoch-based trigger: for epoch-driven training runs
         if e % opt.save_interval == 0 and e != 0:
-            os.path.join(ckpt_dir, "outputs", "%07d" % t)
             save_network(
                 net, ckpt_dir, network_label=f"{opt.key_points}kp", epoch_label=e
             )
-            
+            dump_visualization()
+
         epoch_time = time.time() - epoch_time_start
         epoch_time_start = time.time()
         if e % opt.log_interval == 0:
             losses_str = str(loss)
-            log_str = f"epoch {e:d}, iter {t:d}: epoch {epoch_time:.1f} sec"
+            log_str = f"epoch {e:d}, iter {t:d}, instances: {n:d}, epoch {epoch_time:.1f} sec"
             print(log_str)
 
     save_network(net, ckpt_dir, network_label="net", epoch_label="final")

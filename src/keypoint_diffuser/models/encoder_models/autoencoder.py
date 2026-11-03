@@ -15,7 +15,9 @@ class AutoEncoder(Module):
         super().__init__()
         self.args = args
         self.encoder = PointTransformerv2(
-            zdim=args.key_points, extra_latent=args.extra_latent
+            zdim=args.key_points,
+            extra_latent=args.extra_latent,
+            use_pos_enc=args.use_pos_enc,
         )
 
         self.fc_mu = nn.Sequential(
@@ -54,9 +56,22 @@ class AutoEncoder(Module):
     def encode(self, x):
         """
         Args:
-            x:  Point clouds to be encoded, (B, N, d).
+            x:  data dict
         """
-        z_kp, z_aux_raw = self.encoder(x)
+        # cover for no z_aux case
+        out = self.encoder(x)
+        if self.args.extra_latent > 0:
+            z_kp, z_aux_raw = out
+        else:
+            z_kp = out
+            z_aux_raw = z_kp.new_zeros(z_kp.shape[0], 0)
+        # z_kp, z_aux_raw = self.encoder(x)
+
+        # soft projection on to object surface, not available for partial at test time
+        # key = "orig" if "orig" in x else "target_shape"
+        # self.soft_project(
+        #     z_kp, torch.tensor(x[key]).view(-1, 2048, 3).cuda(), temperature=0.01
+        # )
 
         mu = self.fc_mu(z_aux_raw)
         logvar = self.fc_logvar(z_aux_raw)
@@ -74,16 +89,42 @@ class AutoEncoder(Module):
             num_points, code, flexibility=flexibility, ret_traj=ret_traj
         )
 
-    def get_loss(self, x, step):
+    # def soft_project(self, pred, surface_points, temperature=0.05, eps=1e-8):
+    #     # pred: (B,K,3), surface_points: (B,N,3)
+    #     d = torch.cdist(pred, surface_points)  # (B,K,N)
+    #     w = torch.softmax(-d / max(temperature, 1e-8), dim=-1)  # (B,K,N)
+    #     nearest_soft = w @ surface_points  # (B,K,3)
+    #     return nearest_soft
+
+    def get_loss(self, x, step, target=None):
+        """
+        gets encoder outputs and diffusion loss for the model
+        
+        x is the input data dict
+        target is a manual option for the reconstruction target, 
+        if not provided the target is taken from x["target_shape"]
+        """
+        # x is input used to get the keypoints
+        # the keypoints are used to condition the decoder to reconstruct target
         z0, mu, logvar = self.encode(x)
 
+        # soft projection is only available when the full point cloud is available
+        # z0_ = self.soft_project(
+        #     z0, x["target_shape"].view(-1, 2048, 3).cuda(), temperature=temperature
+        # )
+
         z_aux = reparameterize(mu, logvar)
+        # code = torch.cat([z0_.reshape((z0_.shape[0], -1)), z_aux], dim=1) # soft project ver.
         code = torch.cat([z0.reshape((z0.shape[0], -1)), z_aux], dim=1)
 
-        t = x["target_shape"].view(-1, 2048, 3).cuda()
+        # gets loss using the full point cloud
+        if target is not None:
+            t = target.view(-1, 2048, 3).cuda()
+        else:
+            t = x["target_shape"].view(-1, 2048, 3).cuda()
         if self.use_edm:
             loss = self.loss(
-                net=self.diffusion, data=t, code=code.detach(), step=step
+                net=self.diffusion, data=t, code=code, step=step
             ).mean()
         else:
             loss = self.diffusion.get_loss(t.transpose(1, 2), code)

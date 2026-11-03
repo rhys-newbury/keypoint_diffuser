@@ -17,15 +17,27 @@ class FourierPositionalEncoding(nn.Module):
 
 
 class PointTransformerv2(nn.Module):
-    def __init__(self, zdim, input_dim=3, extra_latent=10, embed_dim=128, num_heads=4):
+    def __init__(
+        self,
+        zdim,
+        input_dim=3,
+        extra_latent=10,
+        embed_dim=128,
+        num_heads=4,
+        use_pos_enc=True,
+    ):
         super().__init__()
         self.num_keypoints = zdim
         self.extra_latent = extra_latent
+        self.use_pos_enc = use_pos_enc
 
         self.encoder = PointTransformerV3(in_channels=3, enable_flash=False)
-        self.pos_enc = FourierPositionalEncoding(num_freqs=32, scale=10.0)
+        feat_dim = 64
+        if use_pos_enc:
+            self.pos_enc = FourierPositionalEncoding(num_freqs=32, scale=10.0)
+            feat_dim += self.pos_enc.out_dim
 
-        self.feat_proj = nn.Linear(64 + self.pos_enc.out_dim, embed_dim)
+        self.feat_proj = nn.Linear(feat_dim, embed_dim)
 
         self.queries = nn.Parameter(torch.randn(zdim, embed_dim))
         self.attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
@@ -45,9 +57,10 @@ class PointTransformerv2(nn.Module):
         B = point.offset.shape[0]
         point.feat.shape[0]
 
-        # Positional encoding
-        pos_enc = self.pos_enc(point.coord)  # [N, D]
-        feat = torch.cat([point.feat, pos_enc], dim=-1)
+        feat = point.feat
+        if self.use_pos_enc:
+            pos_enc = self.pos_enc(point.coord)  # [N, D]
+            feat = torch.cat([feat, pos_enc], dim=-1)
         feat = self.feat_proj(feat)  # [N, embed_dim]
 
         # Build batch index per point
