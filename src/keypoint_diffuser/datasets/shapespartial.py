@@ -13,6 +13,7 @@ import pandas as pd
 import torch
 import csv
 import re
+from scipy.spatial.transform import Rotation
 
 from ..utils.utils import normalize_to_box_multi, normalize_scale_min_max
 from ..utils.synset_utils import synsets_to_names
@@ -116,53 +117,51 @@ class ShapesPartial(torch.utils.data.Dataset):
         assert (
             self.opt.partial_view_mode in self.available_modes_list
         )
-        if self.opt.partial_view_mode == 'all':
-            self.mode_list = [m for m in self.available_modes_list if m != 'all']
-        else:
-            self.mode_list = [self.opt.partial_view_mode]
-        self.n_partial_samples = self.opt.n_partial_samples
 
-        # when set, an index addresses one (object, view) pair rather than one object,
-        # so a pass over the dataset covers every partial sample that exists on disk
-        self.enumerate_partial_samples = getattr(
-            self.opt, "enumerate_partial_samples", False
-        )
-        # modes to enumerate over. 'all' and 'uniform-combined' pick a mode at random
-        # per access, so they have to be expanded into the concrete modes they draw
-        # from before the samples underneath them can be listed.
+        self.n_partial_samples = self.opt.n_partial_samples
+        self.enumerate_partial_samples = self.opt.enumerate_partial_samples
+        
+        # build a list of individual view modes to draw from
+        # 'all' picks a mode at random out of all available set in the list. (no guarantees)
+        # 'uniform-combined' is meant to randomly choose between uniform partial and full
         if self.opt.partial_view_mode == 'uniform-combined':
             self.view_modes = ['uniform', 'full']
         elif self.opt.partial_view_mode == 'all':
             self.view_modes = [
-                m for m in self.mode_list
-                if m not in ('uniform-combined', 'canonical')
+                m for m in self.available_modes_list
+                if m not in ('uniform-combined', 'canonical', 'all')
             ]
         else:
-            self.view_modes = list(self.mode_list)
+            self.view_modes = [self.opt.partial_view_mode]
 
         self.mesh_dir = opt.mesh_dir
 
-        self.dataset = self.load_dataset()
+        # cache of all views that exist on disk
+        self._views_cache = {}
+
+        self.dataset = self.load_dataset()  # get dict of access info on each model
         self.transform = transform  # Store transform function
         self.dr = opt.domain_randomization
         self.max_scaling_factor = opt.max_scaling_factor
         self.max_translation_offset = opt.max_translation_offset
 
         # per-point gaussian jitter on the loaded positions (sensor-noise simulation).
-        self.point_noise_std = float(self.opt。point_noise_std)
+        self.point_noise_std = float(self.opt.point_noise_std)
+        # which point cloud(s) to apply the noise to: full, partial, or both
         self.point_noise_target = self.opt.point_noise_target
         assert self.point_noise_target in self.POINTNOISETARGETS, (
             f"point_noise_target must be one of {self.POINTNOISETARGETS}, "
             f"got {self.point_noise_target}"
         )
 
-        print("dataset size %d" % len(self))
+        print(f"dataset size {len(self)}; {len(self.dataset['name'])} unique objects")
 
     def _load_from_split_file(self, split):
         data_frame = pd.read_csv(self.opt.split_file)
 
         # Convert category name to synset ID if needed
         if self.opt.category == "all":
+            # legacy all categories training
             if split == "train":
                 # Use all categories, excluding test category
                 data_frame = data_frame.loc[
@@ -200,6 +199,7 @@ class ShapesPartial(torch.utils.data.Dataset):
             # Convert category name to synset ID
             if self.opt.category in self.CATEGORY2SYNSETOFFSET:
                 category_synset = self.CATEGORY2SYNSETOFFSET[self.opt.category]
+            # find instances with corresponding synset ids and splits
             data_frame = data_frame.loc[
                 (data_frame.synsetId == int(category_synset))
                 & (data_frame.split == split)
@@ -213,6 +213,7 @@ class ShapesPartial(torch.utils.data.Dataset):
 
 
     def _load_test_pairs(self):
+        # legacy function for another setting
         with open(self.opt.test_pairs_file) as f:
             lines = f.read().splitlines()
         names = []
@@ -226,125 +227,153 @@ class ShapesPartial(torch.utils.data.Dataset):
 
     def _filter_missing(self, names, categories):
         """
-        Drop entries whose surface cloud is not on disk.
+        Drop entries whose surface cloud or partial clouds are not on disk.
         This is used in case some paths do not contain point clouds.
 
-        Done once at load time so that every index maps to a loadable object. The
-        alternative - skipping at access time - has to slide to a neighbouring index,
-        which quietly changes which object index i returns and makes a pass over the
-        loader non-reproducible.
+        Done once at load time so that every index maps to a loadable object 
+        instead of performing checks at access time
         """
-        keep = [
-            (n, c)
-            for n, c in zip(names, categories, strict=True)
-            if self._get_pointcloud_path(n, c) is not None
-        ]
-        dropped = len(names) - len(keep)
-        if dropped:
+        keep = []
+        drops = []  # (name, reason), kept for reporting
+        for n, c in zip(names, categories, strict=True):
+            # check each name category pair for a valid full point cloud path
+            if self._get_pointcloud_path(n, c) is None:
+                drops.append((n, "no surface cloud"))
+                continue
+            # check partial point clouds
+            reason = self._missing_partial_reason(n, c)
+            if reason is not None:
+                drops.append((n, reason))
+                continue
+            keep.append((n, c))
+
+        if drops:
+            # print warning message for first three dropped entries
+            examples = "; ".join(f"{nm}: {why}" for nm, why in drops[:3])
             print(
-                f"[WARN] {dropped}/{len(names)} entries have no surface cloud under "
-                f"{self.opt.points_dir}; dropped from the dataset"
+                f"[WARN] {len(drops)}/{len(names)} entries have missing clouds under "
+                f"{self.opt.points_dir}; dropped from the dataset "
+                f"({examples}{'; ...' if len(drops) > 3 else ''})"
             )
         if not keep:
             raise RuntimeError(
                 f"no usable entries for category {self.opt.category} under "
-                f"{self.opt.points_dir} (checked {len(names)})"
+                f"{self.opt.points_dir} (checked {len(names)}): every entry is missing "
+                f"a surface or a partial cloud - check partial_view_mode "
+                f"'{self.opt.partial_view_mode}' and n_partial_samples "
+                f"{self.n_partial_samples} against the samples that were generated"
             )
+        # filter out only the kept entries
         names, categories = (list(t) for t in zip(*keep))
         return names, categories
 
+    def _missing_partial_reason(self, name, category):
+        """
+        checking function, returns None if all point clouds can be found,
+        otherwise returns a string with reasong for dropping the entry.
+        """
+        # when enumerating partial samples it will use whatever exists on disk
+        if self.enumerate_partial_samples:
+            # only need to check that the pair does have partial samples
+            if not self._list_views(name, category):
+                return f"no partial samples for modes {self.view_modes}"
+            return None
+
+        # if index is fixed only check for the specified index
+        if self.opt.fixed_partial_sample_index is not None:
+            ns = [self.opt.fixed_partial_sample_index]
+        else:
+            # other wise check all that are required
+            ns = range(self.n_partial_samples)
+        for mode in self.view_modes:
+            for n in ns:
+                if mode == 'full':
+                    pth = self._models_dir(name, category) / "surface_samples_2048.npy"
+                else:
+                    pth = self._models_dir(name, category) / f"{self._partial_sample_stem(mode)}{n}.npy"
+                if not pth.is_file():
+                    return f"no {pth.name}"
+        return None
+
     def _partial_sample_stem(self, mode):
+        """
+        shorthand for the stem of selected partial sample, excluding index
+        change according to the naming scheme used for the partial samples on disk
+        """
         # matches the filenames built in _get_partial_pointcloud_path
         if mode == 'uniform':
             return "partial_samples_uniform_dist_"
         return f"partial_samples_{mode}_"
 
-    def _list_views(self, name, category):
+    def _models_dir(self, name, category):
         """
-        Every distinct view of this object that exists on disk, as (mode, n) pairs.
-
-        Only the partial modes are expanded over n - there each sample really is a
-        different viewpoint. 'full' reads the same surface cloud whatever n is, so it
-        contributes a single view. The samples present differ per object and per mode
-        (uniform typically has 2, the others 5), which is why this globs rather than
-        trusting n_partial_samples.
+        shorthand for the /models/ directory under the object instance's path, 
+        where the point clouds live.
         """
-        root = Path(
+        return Path(
             self.opt.points_dir,
             (str(category).zfill(8) if category is not None else self.opt.category),
             name,
             "models",
         )
-        views = []
-        for mode in self.view_modes:
-            if mode == 'full':
-                if (root / "surface_samples_2048.npy").is_file():
-                    views.append((mode, 0))
-                    # or can change to still have randomness
-                continue
-            stem = self._partial_sample_stem(mode)
-            ns = sorted(
-                int(p.stem[len(stem):])
-                for p in root.glob(f"{stem}*.npy")
-                if p.stem[len(stem):].isdigit()
-            )
-            views += [(mode, n) for n in ns]
-        return views
-
-    def _build_view_index(self, names, categories):
-        """Flatten the split into one entry per (object, view)."""
-        views = []
-        for i, (name, category) in enumerate(zip(names, categories, strict=True)):
-            views += [(i, mode, n) for mode, n in self._list_views(name, category)]
-        if not views:
-            raise RuntimeError(
-                f"no partial samples found for modes {self.view_modes} under "
-                f"{self.opt.points_dir} (checked {len(names)} objects)"
-            )
-        counts = Counter(mode for _, mode, _ in views)
-        print(
-            f"[INFO] enumerating {len(views)} views over {len(names)} objects: "
-            f"{dict(counts)}"
-        )
-        return views
 
     def load_dataset(self):
+        """
+        initial dataloading function
+        returns dataset as a dict with individual keys
+        with names (model ids) and categories (synset ids), 
+        also views modes and indices if enumerating
+        """
         dataset = {}
+        # should really only be shapenet
         if self.opt.data_type == "shapenet":
+            # load from split file csv
+            # gets the names (model IDs) and categories (synset IDs)
             names, categories = self._load_from_split_file(self.opt.split)
         else:
             raise ValueError()
 
         assert len(names) > 0
 
+        # sort together and keep pairing
+        # only one category under normal settings
         paired = sorted(zip(names, categories, strict=True))
         names, categories = zip(*paired, strict=True)
         names = list(names)
         categories = list(categories)
 
-        if self.opt.load_test_pairs:
-            names, partners = self._load_test_pairs()
-            dataset["partners"] = partners
-        else:
-            # names are already name-sorted by the pairing above
-            names, categories = self._filter_missing(names, categories)
+        # a legacy setting; safe to ignore
+        # if self.opt.load_test_pairs:
+        #     names, partners = self._load_test_pairs()
+        #     dataset["partners"] = partners
+        # else:
+        #     # names are already name-sorted by the pairing above
+        #     names, categories = self._filter_missing(names, categories)
+
+        # filter out entries where the point clouds are missing on disk
+        names, categories = self._filter_missing(names, categories)
 
         dataset["name"] = names
         dataset["category"] = categories
 
+        # to enumerate over all partial samples, index (object, view) pairs rather than just object,
+        # so a pass over the dataset covers every partial sample (view) that exists on disk
         if self.enumerate_partial_samples:
+            # list of tuples (model index, mode, sample index)
             dataset["views"] = self._build_view_index(names, categories)
 
         return dataset
 
     def _get_pointcloud_path(self, name, category=None):            
+        # form path by attaching category and model id names to passed base directory
+        # full point cloud path
+        full_pc_filename = "surface_samples_2048.npy"   # <- change here for actual name of file on disk
         pth = os.path.join(
             self.opt.points_dir,
             (str(category).zfill(8) if category is not None else self.opt.category),
             name,
             "models",
-            # f"new_samples_{random.randint(0, 4)}.npy",
-            f"surface_samples_2048.npy",
+            full_pc_filename,
         )
         for _ in range(20): # small hack for issue where file system takes some time to access
         # while not Path(pth).is_file():
@@ -353,8 +382,7 @@ class ShapesPartial(torch.utils.data.Dataset):
                 (str(category).zfill(8) if category is not None else self.opt.category),
                 name,
                 "models",
-                # f"new_samples_{random.randint(0, 4)}.npy",
-                f"surface_samples_2048.npy",
+                full_pc_filename,
             )
             if Path(pth).is_file():
                 return pth
@@ -370,9 +398,9 @@ class ShapesPartial(torch.utils.data.Dataset):
             mode, n = view
         else:
             n = random.randint(0, self.n_partial_samples-1)
-            nmode = random.randint(0, len(self.mode_list)-1)
+            nmode = random.randint(0, len(self.view_modes)-1)
             if self.opt.partial_view_mode == 'all':
-                mode = self.mode_list[nmode]
+                mode = self.view_modes[nmode]
             elif self.opt.partial_view_mode == 'uniform-combined':
                 full_sample_thresh = 0.3
                 full_sample_rand = random.random()
@@ -489,6 +517,57 @@ class ShapesPartial(torch.utils.data.Dataset):
 
         return point_cloud[farthest_indices]
 
+    ############################# BEGIN partial enumeration functions ###############################
+    def _list_views(self, name, category):
+        """
+        Finds every partial view of this object specified by view_modes that exists on disk
+        returns a list of (mode, n) pairs, where n is the max index for the mode
+        used for checking through partial samples and enumerating them
+        """
+        if (name, category) in self._views_cache:
+            # load from cache if it has already been searched before
+            return self._views_cache[(name, category)]
+
+        root = self._models_dir(name, category)
+        views = []
+        # checks over each required view mode
+        for mode in self.view_modes:
+            # assumes full mode only has one sample
+            if mode == 'full':
+                if (root / "surface_samples_2048.npy").is_file():
+                    views.append((mode, 0))
+                    # or can change to still have randomness
+                continue
+            stem = self._partial_sample_stem(mode)
+            # find the number of samples per instance
+            ns = sorted(
+                int(p.stem[len(stem):])
+                for p in root.glob(f"{stem}*.npy")
+                if p.stem[len(stem):].isdigit()
+            )
+            views += [(mode, n) for n in ns]
+        # save to a cache to skip expensive glob if it is needed again
+        self._views_cache[(name, category)] = views
+        return views
+
+    def _build_view_index(self, names, categories):
+        """Flatten the split into one entry per (object, view)."""
+        views = []  # (model index, mode, sample index)
+        for i, (name, category) in enumerate(zip(names, categories, strict=True)):
+            views += [(i, mode, n) for mode, n in self._list_views(name, category)]
+        if not views:
+            raise RuntimeError(
+                f"no partial samples found for modes {self.view_modes} under "
+                f"{self.opt.points_dir} (checked {len(names)} objects)"
+            )
+        counts = Counter(mode for _, mode, _ in views)
+        print(
+            f"[INFO] enumerating {len(views)} views over {len(names)} objects: "
+            f"{dict(counts)}"
+        )
+        return views
+    ############################# END partial enumeration functions ###############################
+
     def add_position_noise(self, shape, partial_shape):
         """
         Add i.i.d. gaussian jitter to the position of every point.
@@ -597,7 +676,8 @@ class ShapesPartial(torch.utils.data.Dataset):
         norm_val_0 = float(norm_vals[0]) if len(norm_vals[0].shape) <= 1 else norm_vals[0]
         norm_val_1 = float(norm_vals[1])
         
-        if self.dr and not is_test:
+        # domain randomization options
+        if self.dr:
             # convert points to homogeneous coordinates for transformation
             device = shape.device
             homogeneous_points = torch.cat(
@@ -618,27 +698,47 @@ class ShapesPartial(torch.utils.data.Dataset):
                 self.max_scaling_factor,
             )
             ######################################################################################
+            # scaling manual disable #############################################################
+            scaling_factors = torch.ones(1, device=device)
+            ######################################################################################
+            # matrices act on column vectors (p' = M p), so the rightmost matrix is applied first:
+            # p' = R * s * (p - mean) + mean + t
+            centroid = torch.mean(shape, dim=0)
             # translate to zero mean first
             scale_matrix_1 = torch.eye(4, device=device)
-            scale_matrix_1[:-1, -1] = -torch.mean(shape, dim=0)
+            scale_matrix_1[:-1, -1] = -centroid
             # apply scaling
             scale_matrix_2 = torch.eye(4, device=device)
             scale_matrix_2[0, 0] = scaling_factors
             scale_matrix_2[1, 1] = scaling_factors
             scale_matrix_2[2, 2] = scaling_factors
+            # random rotation, uniform over SO(3)
+            rot_matrix = torch.eye(4, device=device)
+            rot_matrix[:3, :3] = torch.tensor(
+                Rotation.random().as_matrix(), device=device, dtype=torch.float32
+            )
             # translate back to original mean
             scale_matrix_3 = torch.eye(4, device=device)
-            scale_matrix_3[:-1, -1] = torch.mean(shape, dim=0)
-            
-            sm = scale_matrix_1 @ scale_matrix_2 @ scale_matrix_3
-            deformation_matrix = deformation_matrix @ sm
-            
+            scale_matrix_3[:-1, -1] = centroid
+
+            sm = scale_matrix_3 @ rot_matrix @ scale_matrix_2 @ scale_matrix_1
+
             # random translation
             translation_offsets = torch.rand(3, device=device) * (self.max_translation_offset * 2) - self.max_translation_offset
+            # translation manual disable ##########################
+            translation_offsets = torch.zeros(3, device=device)
+            #######################################################
             trans_matrix = torch.eye(4, device=device)
             trans_matrix[:-1, -1] = translation_offsets
-            deformation_matrix = deformation_matrix @ trans_matrix
-            
+            deformation_matrix = trans_matrix @ sm
+
+            # normals only follow the rotation (uniform scaling/translation leave them unchanged).
+            # point files without normals give empty (N, 0) slices, which are left as is
+            if normals.shape[-1] == 3:
+                normals = normals @ rot_matrix[:3, :3].T
+            if partial_normals.shape[-1] == 3:
+                partial_normals = partial_normals @ rot_matrix[:3, :3].T
+
             # Apply transformation
             deformed_cloud = homogeneous_points @ deformation_matrix.transpose(0, 1)
             deformed_partial = homogeneous_partial @ deformation_matrix.transpose(0, 1)
@@ -676,6 +776,7 @@ class ShapesPartial(torch.utils.data.Dataset):
             "norm_val_1": norm_val_1, 
             "scaling_factor": scaling_factors.item() if self.dr else -1,
             "translation_offset": translation_offsets.cpu() if self.dr else -1,
+            "rotation_matrix": rot_matrix[:3, :3].cpu() if self.dr else -1,
             "point_noise_std": self.point_noise_std,
         }
         # if pc_path.is_file() and is_test:
@@ -728,7 +829,7 @@ class ShapesPartial(torch.utils.data.Dataset):
         return result
 
     def __getitem__(self, index):
-        for _ in range(10):
+        for _ in range(10): # try 10 times to load a sample, in case of file access errors
             index = index % self.get_real_length()
             try:
                 sample = self.get_sample(index)
@@ -828,6 +929,7 @@ class ShapesPartial(torch.utils.data.Dataset):
         return batched
 
     def get_real_length(self):
+        # when enumerating partial samples, the dataset length is the number of views rather than the number of objects
         if self.enumerate_partial_samples:
             return len(self.dataset["views"])
         return len(self.dataset["name"])

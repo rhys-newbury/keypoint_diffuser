@@ -20,7 +20,7 @@ from keypoint_diffuser.models.encoder_models.autoencoder import AutoEncoder
 from keypoint_diffuser.models.encoder_models.common import get_linear_scheduler
 from keypoint_diffuser.options.ae_options import AEConfig, AEOptions
 from keypoint_diffuser.utils.nn import save_network
-from keypoint_diffuser.utils.utils import reparameterize, tee_output_to_file
+from keypoint_diffuser.utils.utils import reparameterize
 from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
 from torch.nn.utils import clip_grad_norm_
